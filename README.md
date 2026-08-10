@@ -82,6 +82,14 @@ Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
 Another client mod can add a suite without forking this harness by referencing
 `zdtd-playtest.dll` and implementing `ZdtdPlaytest.IScenarioProvider`. The
 provider lists its suite IDs and appends `CaseDef` entries for its own suite.
+Build cases with the public factories (do not assign `CaseDef` fields by hand):
+
+```csharp
+queue.Add(CaseDef.Live(suite, "my_case", new[] { "demo" }, ctx => { /* Act */ },
+    wait: ctx => /* ready? */, assert: ctx => /* ok? */));
+queue.Add(CaseDef.Defer(suite, "later", new[] { "todo" }, "needs admin fixture"));
+```
+
 Install that mod alongside `zdtd-playtest`, then include the provider's suite
 ID in `ZDTD_PLAYTEST_SUITE`. Providers drive and assert real client/server
 state under the same `PASS`/`FAIL`/`SKIP`, `SUMMARY`, and `DONE` log contract.

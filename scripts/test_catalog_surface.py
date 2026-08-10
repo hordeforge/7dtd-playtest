@@ -132,16 +132,31 @@ def main() -> int:
     ), "demo alias must expand to vehicle+power+finale"
 
     live = live_case_ids_from_catalog(cat)
+    deferred = defer_case_ids(cat)
     missing = [c for c in REQUIRED_LIVE if c not in live]
     assert not missing, f"Catalog.cs missing Live cases: {missing}"
 
-    still_deferred = [c for c in RESIDUAL_MUST_BE_LIVE if c in defer_case_ids(cat)]
+    still_deferred = [c for c in RESIDUAL_MUST_BE_LIVE if c in deferred]
     assert not still_deferred, f"residual ids still Defer: {still_deferred}"
 
-    for case in REQUIRED_LIVE:
-        assert re.search(rf"`{case}`\s*\|\s*live\b", doc), (
-            f"SCENARIOS.md must document {case} as live"
-        )
+    # Full catalog↔docs surface: every built-in Live id must appear as live in
+    # SCENARIOS.md (not only the historical REQUIRED_LIVE allowlist).
+    undoc_live = sorted(
+        c for c in live if not re.search(rf"`{re.escape(c)}`\s*\|\s*live\b", doc)
+    )
+    assert not undoc_live, (
+        f"SCENARIOS.md missing live rows for Catalog Live cases: {undoc_live}"
+    )
+
+    # Built-in Defer set is empty today; any new Defer must be documented.
+    undoc_defer = sorted(
+        c
+        for c in deferred
+        if not re.search(rf"`{re.escape(c)}`\s*\|\s*deferred\b", doc)
+    )
+    assert not undoc_defer, (
+        f"SCENARIOS.md missing deferred rows for Catalog Defer cases: {undoc_defer}"
+    )
 
     # No multi-peer / rejoin / soak / apm Defer leftovers among residual ids.
     for cid, reason in defer_reasons(cat):
@@ -165,7 +180,13 @@ def main() -> int:
     ):
         assert name in orch, f"orchestrator missing {name}"
 
-    print("OK catalog surface:", ", ".join(REQUIRED_LIVE[:8]), "… +" + str(len(REQUIRED_LIVE) - 8))
+    print(
+        "OK catalog surface:",
+        ", ".join(REQUIRED_LIVE[:8]),
+        "… +" + str(len(REQUIRED_LIVE) - 8),
+    )
+    print("OK all", len(live), "Live case ids documented as live in SCENARIOS.md")
+    print("OK Defer count:", len(deferred), "(undocumented:", len(undoc_defer), ")")
     print("OK demo alias includes vehicle+power+finale")
     print("OK residual 13 ids are Live:", ", ".join(RESIDUAL_MUST_BE_LIVE[:4]), "…")
     print("OK orchestrator has persist/loadgen/apm barriers")

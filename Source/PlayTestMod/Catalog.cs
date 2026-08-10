@@ -179,37 +179,18 @@ namespace ZdtdPlaytest
             }
         }
 
-        // ── helpers ──────────────────────────────────────────────────────
+        // ── helpers (thin wrappers → public CaseDef factories) ───────────
 
         static CaseDef Live(string suite, string id, string[] tags, Action<CaseCtx> act,
             Func<CaseCtx, bool> wait = null, Func<CaseCtx, bool> assert = null,
             float timeout = 8f, string fail = "timeout", float pause = 0.5f)
         {
-            return new CaseDef
-            {
-                Suite = suite,
-                Id = id,
-                Tags = tags,
-                Act = act,
-                Wait = wait,
-                Assert = assert,
-                TimeoutSec = timeout,
-                FailDetail = fail,
-                PauseAfterSec = pause,
-            };
+            return CaseDef.Live(suite, id, tags, act, wait, assert, timeout, fail, pause);
         }
 
         static CaseDef Defer(string suite, string id, string[] tags, string reason)
         {
-            return new CaseDef
-            {
-                Suite = suite,
-                Id = id,
-                Tags = tags,
-                Deferred = true,
-                DeferReason = reason,
-                PauseAfterSec = 0.02f,
-            };
+            return CaseDef.Defer(suite, id, tags, reason);
         }
 
         // ── smoke ────────────────────────────────────────────────────────

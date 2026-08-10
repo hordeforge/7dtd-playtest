@@ -67,6 +67,7 @@ make playtest SUITE=combat
 | `cgo_ready` | live | join, mesh, demo | CGO ≥ gate (or fixedSize) |
 | `ground` | live | world, demo | Block under feet solid |
 | `stats` | live | player, demo | hp/stamina sane |
+| `day_clock` | live | world, demo | Decode `worldTime` → day/hour/minute |
 
 ---
 
@@ -75,6 +76,7 @@ make playtest SUITE=combat
 | Case | Status | Tags | Assert |
 |---|---|---|---|
 | `look` | live | input, demo | Yaw set |
+| `look_pitch` | live | input, demo | Pitch down then level |
 | `look_yaw_sweep` | live | input, demo, bench | 4-cardinal camera pan |
 | `walk_motor` | live | move, demo, bench, locomotion | **Motor walk** (`isAutorun`+`MovementInput`); ≥1.5 m, multi-tick, hopMax&lt;2 m |
 | `walk_ring` | live | move, demo, bench, locomotion | **Motor ring**: four yaw legs; path ≥2 m |
@@ -88,6 +90,7 @@ make playtest SUITE=combat
 | `dig_confirm` | live | world, c2s, setblock, demo, bench | Seed solid then dig; GetBlock → air (self-contained) |
 | `place_confirm` | live | world, c2s, setblock, demo, bench | GetBlock solid after place |
 | `block_damage_melee` | live | world, c2s, demo, melee | Primary attack raises `BlockValue.damage` or clears block |
+| `held_slot_report` | live | inv, demo | Holding slot index + item type readable |
 | `buffs` | live | player, demo | Buff manager live |
 | `quests_journal` | live | quest, demo | QuestJournal non-null |
 
@@ -204,7 +207,23 @@ make playtest SUITE=combat
 
 ---
 
-## persist — host multi-phase (orchestrator)
+## persist_setup — host multi-phase setup (orchestrator phase A)
+
+Suite id `persist_setup`. Prepares world/player state, then emits the
+`persist_setup_done` barrier so the host can save and rejoin.
+
+| Case | Status | Notes |
+|---|---|---|
+| `persist_setup_dig` | live | Seed solid then dig pad cell to air |
+| `persist_setup_inv` | live | Give scrap iron into bag |
+| `persist_setup_pos` | live | Barrier teleport to fixed pad (server-authoritative) |
+| `persist_setup_te` | live | Place storage chest TE near pad |
+| `persist_setup_blockmeta` | live | Seed block and apply damage meta |
+| `persist_setup_done` | live | Emit checkpoint barrier for host |
+
+## persist — host multi-phase verify (orchestrator phase B)
+
+Suite id `persist`. Asserts setup state after save + client rejoin.
 
 | Case | Status | Notes |
 |---|---|---|
@@ -267,26 +286,33 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 - Each case reports `ms` in JSON result lines
 - Host report can rank slowest cases (orchestrator already stores `ms`)
 
-## Counts (approx)
+## Counts (from `Catalog.cs` Live / Defer)
+
+`Defer(` registrations: **0**. Every built-in case is `Live(...)`.
 
 | Suite | Live | Deferred |
 |---|---:|---:|
 | smoke | 5 | 0 |
-| core | ~16 | 0 |
-| world | 6 | 4 |
-| ui | 7 | 1 |
-| combat | 5 | 7 |
-| economy | 3 | 7 |
-| quest | 2 | 6 |
-| vehicle | live | 0 residual |
-| power | live | 0 residual |
-| persist | 5 verify (+6 setup) | **0** |
-| mp | 6 | **0** |
-| soak | 2 short + 1 long + 1 apm | **0** residual |
-| **demo total** | **83 pass / 0 fail** | residual suites separate (v0.7.1) |
+| core | 18 | 0 |
+| world | 10 | 0 |
+| ui | 8 | 0 |
+| combat | 10 | 0 |
+| economy | 12 | 0 |
+| quest | 7 | 0 |
+| vehicle | 5 | 0 |
+| power | 6 | 0 |
+| finale | 2 | 0 |
+| persist_setup | 6 | 0 |
+| persist | 5 | 0 |
+| mp | 6 | 0 |
+| soak | 2 | 0 |
+| soak_long | 1 | 0 |
+| apm | 1 | 0 |
+| **catalog total** | **104** | **0** |
 
-Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface.
-Residual promotion gate: `make playtest-residual` (persist+mp+apm+soak_long, fail=0).
+Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
+(smoke…finale attract path; residual suites separate). Residual promotion gate:
+`make playtest-residual` (persist+mp+apm+soak_long, fail=0).
 
 ## Adding a scenario
 

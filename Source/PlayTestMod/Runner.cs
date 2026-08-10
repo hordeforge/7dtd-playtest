@@ -28,7 +28,11 @@ namespace ZdtdPlaytest
         Finished,
     }
 
-    /// <summary>One step in a scripted demo / suite.</summary>
+    /// <summary>
+    /// One step in a scripted demo / suite. External <see cref="IScenarioProvider"/>
+    /// mods should build cases with <see cref="Live"/> / <see cref="Defer"/> rather
+    /// than assigning fields by hand.
+    /// </summary>
     public sealed class CaseDef
     {
         public string Suite;
@@ -44,6 +48,53 @@ namespace ZdtdPlaytest
         public string FailDetail = "timeout";
         /// <summary>Gap between this case and next (demo pacing).</summary>
         public float PauseAfterSec = 0.5f;
+
+        /// <summary>
+        /// Build a live case (Act → optional Wait → optional Assert). Used by the
+        /// built-in catalog and by external scenario providers.
+        /// </summary>
+        public static CaseDef Live(
+            string suite,
+            string id,
+            string[] tags,
+            Action<CaseCtx> act,
+            Func<CaseCtx, bool> wait = null,
+            Func<CaseCtx, bool> assert = null,
+            float timeout = 8f,
+            string fail = "timeout",
+            float pause = 0.5f)
+        {
+            return new CaseDef
+            {
+                Suite = suite,
+                Id = id,
+                Tags = tags ?? Array.Empty<string>(),
+                Deferred = false,
+                DeferReason = "",
+                Act = act,
+                Wait = wait,
+                Assert = assert,
+                TimeoutSec = timeout,
+                FailDetail = fail,
+                PauseAfterSec = pause,
+            };
+        }
+
+        /// <summary>
+        /// Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
+        /// </summary>
+        public static CaseDef Defer(string suite, string id, string[] tags, string reason)
+        {
+            return new CaseDef
+            {
+                Suite = suite,
+                Id = id,
+                Tags = tags ?? Array.Empty<string>(),
+                Deferred = true,
+                DeferReason = reason ?? "",
+                PauseAfterSec = 0.02f,
+            };
+        }
     }
 
     public sealed class CaseCtx

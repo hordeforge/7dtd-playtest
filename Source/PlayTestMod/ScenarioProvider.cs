@@ -8,6 +8,8 @@ namespace ZdtdPlaytest
     /// Adds named scenarios from another client mod to the playtest catalog.
     /// The provider must have a public parameterless constructor. Its assembly
     /// must be installed beside zdtd-playtest before the client is launched.
+    /// Append live/deferred cases via <see cref="CaseDef.Live"/> /
+    /// <see cref="CaseDef.Defer"/> (shared with the built-in catalog).
     /// </summary>
     public interface IScenarioProvider
     {
