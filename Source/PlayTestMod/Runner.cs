@@ -29,7 +29,7 @@ namespace ZdtdPlaytest
     }
 
     /// <summary>One step in a scripted demo / suite.</summary>
-    sealed class CaseDef
+    public sealed class CaseDef
     {
         public string Suite;
         public string Id;
@@ -46,7 +46,7 @@ namespace ZdtdPlaytest
         public float PauseAfterSec = 0.5f;
     }
 
-    sealed class CaseCtx
+    public sealed class CaseCtx
     {
         public GameManager Gm;
         public World World;
