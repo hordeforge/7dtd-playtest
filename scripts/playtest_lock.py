@@ -29,7 +29,6 @@ import fcntl
 import os
 import re
 import secrets
-import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -42,21 +41,11 @@ SESSION_RE = re.compile(r"^[a-z][a-z0-9]*-[0-9]{8}-[0-9]{6}-[0-9a-f]+$")
 DEFAULT_STALE_SEC = 120
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 30
 
-# Patterns aligned with playtest_run.clean_processes (client + server).
-# A second orchestrator must not start while *either* is live.
-DEFAULT_CLIENT_PATTERNS = (
-    r"[/]7DaysToDie\.exe",
-    r"wine64-preloader.*7DaysToDie",
-    r"proton.*7DaysToDie",
-    r"DaysToDie[.]exe",
-)
-DEFAULT_SERVER_PATTERNS = (
-    r"7DaysToDieServer\.x86_64",
-    r"7DaysToDieServe",  # truncated comm
-    r"zig-out/bin/zdtd",
-    r"[/]zdtd(\s|$)",
-)
-DEFAULT_RUNTIME_PATTERNS = DEFAULT_CLIENT_PATTERNS + DEFAULT_SERVER_PATTERNS
+PROC_ROOT = Path("/proc")
+STOCK_CLIENT_EXECUTABLES = ("7DaysToDie.exe", "DaysToDie.exe")
+STOCK_SERVER_EXECUTABLES = ("7DaysToDieServer.x86_64", "zdtd")
+WINE_PRELOADERS = ("wine-preloader", "wine64-preloader")
+GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.I)
 
 
 class PlaytestLockError(RuntimeError):
@@ -268,27 +257,62 @@ def is_stale(
     return (now_t - ep) > limit
 
 
-def _pgrep_any(patterns: tuple[str, ...]) -> bool:
-    for pat in patterns:
-        r = subprocess.run(
-            ["pgrep", "-f", pat],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if r.returncode == 0:
+def _runtime_pids(proc_root: Path = PROC_ROOT) -> list[Path]:
+    """Return numeric process directories without matching shell command text."""
+    try:
+        return [p for p in proc_root.iterdir() if p.name.isdigit()]
+    except OSError:
+        return []
+
+
+def _process_executable_name(pid_dir: Path) -> str | None:
+    try:
+        return Path(os.readlink(pid_dir / "exe")).name
+    except OSError:
+        return None
+
+
+def _process_cmdline(pid_dir: Path) -> str:
+    try:
+        return (pid_dir / "cmdline").read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _any_executable_running(
+    names: tuple[str, ...], *, proc_root: Path = PROC_ROOT
+) -> bool:
+    wanted = set(names)
+    return any(
+        _process_executable_name(pid_dir) in wanted
+        for pid_dir in _runtime_pids(proc_root)
+    )
+
+
+def _any_preloader_running_game(
+    *, proc_root: Path = PROC_ROOT
+) -> bool:
+    """True for a Wine game process, not a shell that merely cites its path."""
+    for pid_dir in _runtime_pids(proc_root):
+        if _process_executable_name(pid_dir) not in WINE_PRELOADERS:
+            continue
+        if GAME_CLIENT_ARG_RE.search(_process_cmdline(pid_dir)):
             return True
     return False
 
 
 def default_live_client_running() -> bool:
     """True when a stock/Proton **client** process is present."""
-    return _pgrep_any(DEFAULT_CLIENT_PATTERNS)
+    return _any_executable_running(STOCK_CLIENT_EXECUTABLES) or _any_preloader_running_game()
 
 
 def default_live_server_running() -> bool:
-    """True when stock dedicated or zdtd server process is present."""
-    return _pgrep_any(DEFAULT_SERVER_PATTERNS)
+    """True when stock dedicated or zdtd server process is present.
+
+    Inspect the executable each process is running. A shell, terminal history,
+    or agent prompt may mention these names, but cannot satisfy this check.
+    """
+    return _any_executable_running(STOCK_SERVER_EXECUTABLES)
 
 
 def default_live_runtime_running() -> bool:
@@ -297,7 +321,7 @@ def default_live_runtime_running() -> bool:
     Used as the default acquire gate: playtest_run starts both, and a second
     run must not double-bind ports or kill the first holder's processes.
     """
-    return _pgrep_any(DEFAULT_RUNTIME_PATTERNS)
+    return default_live_client_running() or default_live_server_running()
 
 
 def tcp_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
