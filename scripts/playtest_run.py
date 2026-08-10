@@ -287,6 +287,46 @@ def start_zdtd(
     return proc
 
 
+def client_mute_enabled() -> bool:
+    """Default on: mute client audio for automated runs (opt-out CLIENT_MUTE=0)."""
+    raw = (
+        os.environ.get("CLIENT_MUTE")
+        or os.environ.get("PLAYTEST_MUTE")
+        or os.environ.get("SEVEN_DAYS_TO_DIE_CLIENT_MUTE")
+        or "1"
+    )
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def mute_client_audio_async() -> None:
+    """Poll PipeWire/Pulse for 7DaysToDie sink-input and mute it (default on).
+
+    Prefer 7dtd-connect's mute_client_audio.sh (same helper launch_client uses).
+    Best-effort: missing pactl/jq only logs a warning inside the helper.
+    """
+    if not client_mute_enabled():
+        log("client mute: off (CLIENT_MUTE=0)")
+        return
+    helper = CONNECT / "scripts" / "mute_client_audio.sh"
+    wait_s = os.environ.get(
+        "CLIENT_MUTE_TIMEOUT",
+        os.environ.get("SEVEN_DAYS_TO_DIE_CLIENT_MUTE_TIMEOUT", "60"),
+    )
+    if not helper.is_file():
+        log(f"client mute: helper missing ({helper}); skip")
+        return
+    log(f"client mute: on (opt-out CLIENT_MUTE=0); polling up to {wait_s}s")
+    try:
+        subprocess.Popen(
+            ["bash", str(helper), str(wait_s)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as ex:
+        log(f"client mute: failed to start helper: {ex}")
+
+
 def start_client(
     port: int,
     suite: str,
@@ -301,6 +341,9 @@ def start_client(
     env["PLAYTEST"] = "1"
     if "PLAYTEST_LAPS" in os.environ:
         env["PLAYTEST_LAPS"] = os.environ["PLAYTEST_LAPS"]
+    # Propagate mute defaults into connect launch_client (default muted).
+    if "CLIENT_MUTE" not in env and "SEVEN_DAYS_TO_DIE_CLIENT_MUTE" not in env:
+        env["CLIENT_MUTE"] = "1" if client_mute_enabled() else "0"
     if extra_env:
         env.update(extra_env)
     client_launch_log.parent.mkdir(parents=True, exist_ok=True)
@@ -315,6 +358,8 @@ def start_client(
         cwd=str(CONNECT),
     )
     proc._log_fh = fh  # type: ignore[attr-defined]
+    # Belt-and-suspenders: connect mutes itself; also start poll from orch.
+    mute_client_audio_async()
     return proc
 
 

@@ -89,6 +89,21 @@ Orchestrator exit codes:
 
 Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
 
+### Client audio mute (default on)
+
+Automated client launches **mute the game audio stream by default** (PipeWire /
+Pulse sink-input via `7dtd-connect` `launch_client.sh` + orchestrator helper).
+Independent of master volume and in-game sliders. Requires `pactl` and `jq`.
+
+| Env | Meaning |
+|---|---|
+| `CLIENT_MUTE` / `PLAYTEST_MUTE` / `SEVEN_DAYS_TO_DIE_CLIENT_MUTE` | Default `1`. Set `0` / `false` / `no` / `off` to keep sound |
+| `CLIENT_MUTE_TIMEOUT` | Seconds to wait for the audio stream (default 60) |
+
+```bash
+CLIENT_MUTE=0 make playtest-demo   # keep speakers on
+```
+
 ### Live-client exclusivity lock
 
 Only one host playtest may drive the shared **client + dedicated/zdtd server**
