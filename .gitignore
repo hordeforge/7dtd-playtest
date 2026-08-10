@@ -3,3 +3,5 @@ __pycache__/
 dist/
 Source/PlayTestMod/bin/
 Source/PlayTestMod/obj/
+.local/
+*.flock
