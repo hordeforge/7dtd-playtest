@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xml>
+  <Name value="zdtd-playtest" />
+  <DisplayName value="zdtd Playtest" />
+  <Description value="Client: autonomous gameplay scenarios against real servers (EAC off). Drive + assert only; no invented world state." />
+  <Author value="7dtd workspace" />
+  <Version value="0.7.1" />
+  <Website value="" />
+</xml>
