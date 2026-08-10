@@ -30,7 +30,11 @@ Results always end with `SUMMARY` + `DONE exit_hint=0|1`. Deferred cases are
 | `gate` / `ci` | `smoke,core` |
 | `live` | major suites without vehicle/power/persist/mp bulk |
 | `full` / `all` | smoke…finale + soak (not persist/mp/apm/soak_long) |
+| `residual` / `residual_light` | **client only:** `mp` + short `soak` (not Make residual gate) |
 | `catalog` / `list` | dump case list to log |
+
+`make playtest-residual` is a **host** sequence: persist + mp + apm +
+soak_long. It is not `ExpandSuites("residual")`.
 
 Env:
 

@@ -6,8 +6,12 @@ using System.Text;
 
 namespace ZdtdPlaytest
 {
-    /// <summary>Structured + human log lines for the host orchestrator.</summary>
-    static class Report
+    /// <summary>
+    /// Structured + human log lines for the host orchestrator.
+    /// Public so external providers can emit <see cref="Barrier"/> and
+    /// info lines under the stable <c>[7dtd-playtest]</c> contract.
+    /// </summary>
+    public static class Report
     {
         static readonly List<string> Results = new List<string>();
         static int Pass;

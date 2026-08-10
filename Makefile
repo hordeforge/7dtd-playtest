@@ -121,7 +121,8 @@ playtest-repeat:
 playtest-apm:
 	$(MAKE) playtest SUITE=apm SERVER=zdtd PORT=27025 EXTRA_ARGS="--timeout 300"
 
-# All residual suites (mp + short soak in residual alias; persist/soak_long/apm separate).
+# Full residual promotion gate (four host targets). Not the same as client
+# suite alias residual (= mp + short soak only). See README residual split.
 playtest-residual:
 	$(MAKE) playtest-persist SERVER="$(SERVER)"
 	$(MAKE) playtest-mp SERVER="$(SERVER)"
