@@ -82,14 +82,63 @@ def test_live_client_blocks_free_lock(tmp: Path) -> None:
 
 
 def test_runtime_patterns_include_server() -> None:
-    joined = " ".join(pl.DEFAULT_RUNTIME_PATTERNS)
-    _assert("7DaysToDieServer" in joined, "stock dedicated in runtime probe")
-    _assert("zdtd" in joined, "zdtd in runtime probe")
-    _assert("7DaysToDie" in joined or "DaysToDie" in joined, "client in runtime probe")
+    _assert(
+        "7DaysToDieServer.x86_64" in pl.STOCK_SERVER_EXECUTABLES,
+        "stock dedicated in runtime probe",
+    )
+    _assert("zdtd" in pl.STOCK_SERVER_EXECUTABLES, "zdtd in runtime probe")
+    _assert(
+        "7DaysToDie.exe" in pl.STOCK_CLIENT_EXECUTABLES,
+        "client in runtime probe",
+    )
     # Structural: tcp_port_in_use is real (binds ephemeral, expects free high port free)
     _assert(
         pl.tcp_port_in_use(1) is False or isinstance(pl.tcp_port_in_use(65530), bool),
         "tcp_port_in_use returns bool",
+    )
+
+
+def _fake_process(proc_root: Path, pid: str, exe: str, cmdline: str = "") -> None:
+    process = proc_root / pid
+    process.mkdir()
+    (process / "exe").symlink_to(exe)
+    (process / "cmdline").write_bytes(cmdline.encode("utf-8"))
+
+
+def test_runtime_detection_checks_executables_not_shell_text(tmp: Path) -> None:
+    proc = tmp / "proc"
+    proc.mkdir(parents=True)
+    # An agent shell can cite both runtime paths without becoming the runtime.
+    _fake_process(
+        proc,
+        "100",
+        "/usr/bin/bash",
+        "bash\0echo 7DaysToDieServer.x86_64 zig-out/bin/zdtd 7DaysToDie.exe\0",
+    )
+    _assert(
+        not pl._any_executable_running(pl.STOCK_SERVER_EXECUTABLES, proc_root=proc),
+        "shell text must not count as a server",
+    )
+    _assert(
+        not pl._any_preloader_running_game(proc_root=proc),
+        "shell text must not count as a client",
+    )
+
+    _fake_process(proc, "101", "/games/7DaysToDieServer.x86_64")
+    _fake_process(proc, "102", "/games/zdtd")
+    _fake_process(
+        proc,
+        "103",
+        "/usr/bin/wine64-preloader",
+        "wine64-preloader\0Z:\\\\game\\\\7DaysToDie.exe\0",
+    )
+    _assert(
+        pl._any_executable_running(pl.STOCK_SERVER_EXECUTABLES, proc_root=proc),
+        "real dedicated or zdtd executable must count",
+    )
+    _assert(
+        pl._any_preloader_running_game(proc_root=proc),
+        "Wine preloader with game argument must count as client",
     )
 
 
@@ -245,6 +294,12 @@ def main() -> int:
                 lambda: test_live_client_blocks_free_lock(tmp / "live"),
             ),
             ("runtime_patterns_include_server", test_runtime_patterns_include_server),
+            (
+                "runtime_detection_checks_executables_not_shell_text",
+                lambda: test_runtime_detection_checks_executables_not_shell_text(
+                    tmp / "runtime_detection"
+                ),
+            ),
             (
                 "owner_reacquire_live",
                 lambda: test_owner_reacquire_with_live_client(tmp / "owner"),
