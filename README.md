@@ -91,9 +91,11 @@ Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
 
 ### Client audio mute (default on)
 
-Automated client launches **mute the game audio stream by default** (PipeWire /
-Pulse sink-input via `7dtd-connect` `launch_client.sh` + orchestrator helper).
-Independent of master volume and in-game sliders. Requires `pactl` and `jq`.
+Automated client launches **mute the game process at the OS audio layer by
+default** (PipeWire/Pulse sink-input via `7dtd-connect` `launch_client.sh` +
+orchestrator helper). This does **not** change game client settings (no
+GamePrefs / in-game audio sliders). Independent of master volume. Requires
+`pactl` and `jq`.
 
 | Env | Meaning |
 |---|---|
