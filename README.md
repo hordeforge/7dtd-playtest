@@ -1,8 +1,11 @@
-# zdtd-playtest
+# 7dtd-playtest
 
-Stock-client **gameplay automation** for **zdtd** (EAC off). Drives real client
-APIs, waits for server-visible state where it matters, and emits structured
-`[zdtd-playtest]` results for a host orchestrator.
+Stock-client **gameplay automation** for 7 Days to Die servers (EAC off).
+Works against the **stock dedicated server** (the default) and against
+**zdtd** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs,
+waits for server-visible state where it matters, and emits structured
+`[zdtd-playtest]` results for a host orchestrator (the mod's historical name;
+the log marker is a stable contract, so it keeps that prefix).
 
 Join/auto-connect is **not** here: install [`../7dtd-connect/`](../7dtd-connect/)
 as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).
@@ -13,7 +16,8 @@ as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTES
 - `0_TFP_Harmony`
 - `7dtd-connect` installed
 - Game: `~/.local/share/Steam/steamapps/common/7 Days To Die` (`GAME=`)
-- For orchestrated runs: built `zdtd` at `../zdtd/zig-out/bin/zdtd`
+- Only for zdtd-target runs (`playtest-zdtd`, `playtest-apm`): built `zdtd`
+  at `../zdtd/zig-out/bin/zdtd`
 - Host Python 3.11+ via **`uv`**
 
 ## Install
@@ -108,5 +112,6 @@ RPC (or timeout fail). That is the fidelity gate unit tests cannot replace.
 ## Rules
 
 - Drive + assert only. No invented chunks, signs, or swallowed NREs.
-- Server gaps are fixed in **zdtd**, not this mod.
+- Server gaps are fixed server-side (**zdtd** for zdtd targets), not papered
+  over in this mod.
 - See [AGENTS.md](AGENTS.md).

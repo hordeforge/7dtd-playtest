@@ -1,7 +1,8 @@
 # AGENTS.md - 7dtd-playtest
 
-Stock-client **gameplay automation** against real servers (primarily **zdtd**).
-Drive stock APIs and assert observable state. Prefer missing over fakes.
+Stock-client **gameplay automation** against real servers: the **stock
+dedicated** (default target) and **zdtd**. Drive stock APIs and assert
+observable state. Prefer missing over fakes.
 
 Workspace: [`../AGENTS.md`](../AGENTS.md).  
 Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).  
