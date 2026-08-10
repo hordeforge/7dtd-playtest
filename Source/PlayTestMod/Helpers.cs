@@ -6,8 +6,12 @@ using UnityEngine;
 
 namespace ZdtdPlaytest
 {
-    /// <summary>Shared client-side helpers for scenarios (no invented S2C).</summary>
-    static class Helpers
+    /// <summary>
+    /// Shared client-side helpers for scenarios (no invented S2C).
+    /// Public so external <see cref="IScenarioProvider"/> mods can reuse
+    /// give/equip/vehicle helpers without reimplementing stock API glue.
+    /// </summary>
+    public static class Helpers
     {
         public static bool TryOpenWindow(string name, out string detail, bool requireOpen = false)
         {

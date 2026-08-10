@@ -133,11 +133,29 @@ namespace ZdtdPlaytest
         /// <summary>When player is null/dead mid-suite, count unscaled time to avoid hang.</summary>
         static float _playerMissingSince = -1f;
 
+        /// <summary>
+        /// First non-empty environment variable among <paramref name="names"/>.
+        /// Supports both canonical <c>PLAYTEST_*</c> and legacy <c>ZDTD_PLAYTEST_*</c>
+        /// names used by older host runners.
+        /// </summary>
+        static string EnvFirst(params string[] names)
+        {
+            if (names == null) return null;
+            foreach (var name in names)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                string v = Environment.GetEnvironmentVariable(name);
+                if (!string.IsNullOrEmpty(v)) return v;
+            }
+            return null;
+        }
+
         public static void ArmFromEnv()
         {
-            string suiteEnv = Environment.GetEnvironmentVariable("PLAYTEST_SUITE");
-            string legacy = Environment.GetEnvironmentVariable("PLAYTEST");
-            string laps = Environment.GetEnvironmentVariable("PLAYTEST_LAPS");
+            // Canonical: PLAYTEST_SUITE. Legacy/Atomic host: ZDTD_PLAYTEST_SUITE.
+            string suiteEnv = EnvFirst("PLAYTEST_SUITE", "ZDTD_PLAYTEST_SUITE");
+            string legacy = EnvFirst("PLAYTEST", "ZDTD_PLAYTEST");
+            string laps = EnvFirst("PLAYTEST_LAPS", "ZDTD_PLAYTEST_LAPS");
             if (!string.IsNullOrEmpty(laps) && int.TryParse(laps, out int n) && n > 0)
                 _benchmarkLaps = Math.Min(n, 20);
             else

@@ -49,14 +49,22 @@ make playtest SUITE=core SERVER=stock
 
 | Var | Meaning |
 |---|---|
-| `PLAYTEST_SUITE` | `smoke`, `core`, `smoke,core`, `all` |
-| `PLAYTEST=1` | Legacy: arms `smoke,core` |
+| `PLAYTEST_SUITE` | Canonical suite list / aliases (`smoke`, `core`, `demo`, …) |
+| `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
+| `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |
+| `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
 | `ZDTD_CONNECT` | Set by orchestrator / connect |
+
+`residual` expands to `mp,soak` only. `make playtest-residual` is a **different**
+multi-target host gate (persist + mp + apm + soak_long). See README.
 
 ## Log contract
 
-Lines prefixed `[7dtd-playtest]`:
+**Stable** lines prefixed `[7dtd-playtest]` (do not rename tokens):
 
-- Human: `PASS|FAIL suite/case detail`
-- JSON: `{"v":1,"t":"result|summary|done|log",...}`
+- Human: `PASS|FAIL|SKIP suite/case detail`
+- Barrier: `barrier <name>` (host greps for telnet/admin phases)
+- JSON: `{"v":1,"t":"result|summary|done|log|barrier",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
+
+Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.

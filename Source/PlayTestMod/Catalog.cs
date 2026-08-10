@@ -60,7 +60,15 @@ namespace ZdtdPlaytest
                             "quest", "vehicle", "power", "finale", "soak");
                         break;
                     case "residual":
-                        // Multi-peer + short soak probes (not 15m; that is suite soak_long).
+                        // Lightweight in-client residual probe only (mp + short soak).
+                        // The Make target playtest-residual is different: it runs
+                        // separate host orch for persist, mp, apm, and soak_long
+                        // (multi-phase / long wall-clock). Do not expand those here —
+                        // persist needs persist_setup host barriers; soak_long is ≥15m.
+                        AddUnique(list, "mp", "soak");
+                        break;
+                    case "residual_light":
+                        // Explicit synonym for residual (mp + short soak only).
                         AddUnique(list, "mp", "soak");
                         break;
                     case "persist":
