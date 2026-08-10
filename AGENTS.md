@@ -10,7 +10,7 @@ Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
 
 ## Owns
 
-- Client mod `Mods/zdtd-playtest` (scenario runner, oracles, structured logs)
+- Client mod `Mods/7dtd-playtest` (scenario runner, oracles, structured logs)
 - Host orchestrator (`scripts/playtest_run.py`) and make targets
 - Suite definitions (smoke, core, later combat/economy)
 
@@ -49,13 +49,13 @@ make playtest SUITE=core SERVER=stock
 
 | Var | Meaning |
 |---|---|
-| `ZDTD_PLAYTEST_SUITE` | `smoke`, `core`, `smoke,core`, `all` |
-| `ZDTD_PLAYTEST=1` | Legacy: arms `smoke,core` |
+| `PLAYTEST_SUITE` | `smoke`, `core`, `smoke,core`, `all` |
+| `PLAYTEST=1` | Legacy: arms `smoke,core` |
 | `ZDTD_CONNECT` | Set by orchestrator / connect |
 
 ## Log contract
 
-Lines prefixed `[zdtd-playtest]`:
+Lines prefixed `[7dtd-playtest]`:
 
 - Human: `PASS|FAIL suite/case detail`
 - JSON: `{"v":1,"t":"result|summary|done|log",...}`

@@ -4,10 +4,10 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-    <AssemblyName>zdtd-playtest</AssemblyName>
+    <AssemblyName>7dtd-playtest</AssemblyName>
     <RootNamespace>ZdtdPlaytest</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>$(MSBuildThisFileDirectory)../../dist/zdtd-playtest/</OutputPath>
+    <OutputPath>$(MSBuildThisFileDirectory)../../dist/7dtd-playtest/</OutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
   <PropertyGroup>

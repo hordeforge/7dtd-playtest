@@ -1,6 +1,6 @@
 ROOT := $(CURDIR)
 GAME ?= $(HOME)/.local/share/Steam/steamapps/common/7 Days To Die
-MOD_NAME := zdtd-playtest
+MOD_NAME := 7dtd-playtest
 DIST := $(ROOT)/dist/$(MOD_NAME)
 INSTALL_DIR := $(GAME)/Mods/$(MOD_NAME)
 CONNECT_DIR := $(ROOT)/../7dtd-connect
@@ -42,7 +42,7 @@ build:
 
 install: build
 	mkdir -p "$(INSTALL_DIR)"
-	cp -f "$(DIST)/ModInfo.xml" "$(DIST)/zdtd-playtest.dll" "$(INSTALL_DIR)/"
+	cp -f "$(DIST)/ModInfo.xml" "$(DIST)/7dtd-playtest.dll" "$(INSTALL_DIR)/"
 	@echo "Installed → $(INSTALL_DIR)"
 
 install-pair: install
@@ -59,7 +59,7 @@ clean:
 # SERVER=stock|zdtd  WORLD_NAME=Navezgane  PORT= (empty → backend default)
 playtest: install-pair
 	@mkdir -p "$(WORLD)"
-	ZDTD_PLAYTEST_LAPS="$(LAPS)" \
+	PLAYTEST_LAPS="$(LAPS)" \
 	uv run --project "$(ROOT)" python "$(ROOT)/scripts/playtest_run.py" \
 		--server "$(SERVER)" \
 		--suite "$(SUITE)" \

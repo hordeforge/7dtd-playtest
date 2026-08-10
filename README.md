@@ -4,8 +4,7 @@ Stock-client **gameplay automation** for 7 Days to Die servers (EAC off).
 Works against the **stock dedicated server** (the default) and against
 **zdtd** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs,
 waits for server-visible state where it matters, and emits structured
-`[zdtd-playtest]` results for a host orchestrator (the mod's historical name;
-the log marker is a stable contract, so it keeps that prefix).
+`[7dtd-playtest]` results for a host orchestrator.
 
 Join/auto-connect is **not** here: install [`../7dtd-connect/`](../7dtd-connect/)
 as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).
@@ -76,18 +75,18 @@ Orchestrator exit codes:
 | 1 | One or more case failures |
 | 2 | Harness error (no DONE, server/client missing, timeout) |
 
-Reports land under `~/.cache/zdtd-playtest/report-*.json` (override `LOGDIR=`).
+Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
 
 ## Manual / pair launch
 
 ```bash
 # terminal 1: zdtd with admin if you want
 # terminal 2:
-ZDTD_CONNECT=127.0.0.1:27025 ZDTD_PLAYTEST_SUITE=smoke,core \
+ZDTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
   ../7dtd-connect/scripts/launch_client.sh
 ```
 
-Legacy: `ZDTD_PLAYTEST=1` arms `smoke,core`.
+Legacy: `PLAYTEST=1` arms `smoke,core`.
 
 ## Suites (Phase A)
 
@@ -102,11 +101,11 @@ RPC (or timeout fail). That is the fidelity gate unit tests cannot replace.
 ## Log contract
 
 ```text
-[zdtd-playtest] armed suites=smoke,core ...
-[zdtd-playtest] PASS smoke/join_ready ...
-[zdtd-playtest] {"v":1,"t":"result","suite":"smoke","case":"join_ready",...}
-[zdtd-playtest] SUMMARY pass=N fail=M skip=K total=T
-[zdtd-playtest] DONE exit_hint=0
+[7dtd-playtest] armed suites=smoke,core ...
+[7dtd-playtest] PASS smoke/join_ready ...
+[7dtd-playtest] {"v":1,"t":"result","suite":"smoke","case":"join_ready",...}
+[7dtd-playtest] SUMMARY pass=N fail=M skip=K total=T
+[7dtd-playtest] DONE exit_hint=0
 ```
 
 ## Rules

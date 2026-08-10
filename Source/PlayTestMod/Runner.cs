@@ -84,9 +84,9 @@ namespace ZdtdPlaytest
 
         public static void ArmFromEnv()
         {
-            string suiteEnv = Environment.GetEnvironmentVariable("ZDTD_PLAYTEST_SUITE");
-            string legacy = Environment.GetEnvironmentVariable("ZDTD_PLAYTEST");
-            string laps = Environment.GetEnvironmentVariable("ZDTD_PLAYTEST_LAPS");
+            string suiteEnv = Environment.GetEnvironmentVariable("PLAYTEST_SUITE");
+            string legacy = Environment.GetEnvironmentVariable("PLAYTEST");
+            string laps = Environment.GetEnvironmentVariable("PLAYTEST_LAPS");
             if (!string.IsNullOrEmpty(laps) && int.TryParse(laps, out int n) && n > 0)
                 _benchmarkLaps = Math.Min(n, 20);
             else

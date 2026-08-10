@@ -36,12 +36,12 @@ CLIENT_LOG = (
     / "users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_zdtd_connect.txt"
 )
 
-RESULT_RE = re.compile(r"\[zdtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
+RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
 SUMMARY_RE = re.compile(
-    r"\[zdtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
+    r"\[7dtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
 )
-DONE_RE = re.compile(r"\[zdtd-playtest\]\s+DONE(?:\s+exit_hint=(\d+))?")
-JSON_RE = re.compile(r"\[zdtd-playtest\]\s+(\{.*\})\s*$")
+DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?:\s+exit_hint=(\d+))?")
+JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.I)
 
 
@@ -292,10 +292,10 @@ def start_client(
     launch = CONNECT / "scripts" / "launch_client.sh"
     env = os.environ.copy()
     env["ZDTD_CONNECT"] = f"127.0.0.1:{port}"
-    env["ZDTD_PLAYTEST_SUITE"] = suite
-    env["ZDTD_PLAYTEST"] = "1"
-    if "ZDTD_PLAYTEST_LAPS" in os.environ:
-        env["ZDTD_PLAYTEST_LAPS"] = os.environ["ZDTD_PLAYTEST_LAPS"]
+    env["PLAYTEST_SUITE"] = suite
+    env["PLAYTEST"] = "1"
+    if "PLAYTEST_LAPS" in os.environ:
+        env["PLAYTEST_LAPS"] = os.environ["PLAYTEST_LAPS"]
     if extra_env:
         env.update(extra_env)
     client_launch_log.parent.mkdir(parents=True, exist_ok=True)
@@ -562,7 +562,7 @@ def write_junit(
     skipped = sum(1 for r in results if r.get("status") == "SKIP")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<testsuite name="zdtd-playtest.{suite}" tests="{tests}" '
+        f'<testsuite name="7dtd-playtest.{suite}" tests="{tests}" '
         f'failures="{failures}" skipped="{skipped}">',
     ]
     for r in results:
@@ -829,7 +829,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--server",
         choices=("stock", "zdtd"),
-        default=os.environ.get("ZDTD_PLAYTEST_SERVER", "stock"),
+        default=os.environ.get("PLAYTEST_SERVER", "stock"),
         help="server backend (default: stock dedicated)",
     )
     ap.add_argument(
@@ -872,13 +872,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--timeout",
         type=float,
-        default=float(os.environ.get("ZDTD_PLAYTEST_TIMEOUT_SEC", "900")),
+        default=float(os.environ.get("PLAYTEST_TIMEOUT_SEC", "900")),
     )
     ap.add_argument(
         "--logdir",
         type=Path,
         default=Path(
-            os.environ.get("LOGDIR", str(Path.home() / ".cache" / "zdtd-playtest"))
+            os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest"))
         ),
     )
     ap.add_argument("--skip-clean", action="store_true")
@@ -891,7 +891,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--client-log", type=Path, default=CLIENT_LOG)
     ap.add_argument(
         "--telnet-password",
-        default=os.environ.get("ZDTD_PLAYTEST_TELNET_PASSWORD", "retest"),
+        default=os.environ.get("PLAYTEST_TELNET_PASSWORD", "retest"),
         help="stock dedicated telnet password",
     )
     ap.add_argument(
@@ -1091,7 +1091,7 @@ def main(argv: list[str] | None = None) -> int:
             found: list[str] = []
             # Human line only (same double-count reason as _barrier_hits).
             for m in re.finditer(
-                rf"\[zdtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
+                rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
                 blob,
             ):
                 found.append(m.group(1))
@@ -1130,7 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
                         crumbs = [
                             ln
                             for ln in text.splitlines()
-                            if "[zdtd-playtest]" in ln or "[zdtd-connect]" in ln
+                            if "[7dtd-playtest]" in ln or "[zdtd-connect]" in ln
                         ]
                         if crumbs:
                             log(f"setup progress: {crumbs[-1][-160:]}")
@@ -1331,7 +1331,7 @@ def main(argv: list[str] | None = None) -> int:
                     crumbs = [
                         ln
                         for ln in text.splitlines()
-                        if "[zdtd-playtest]" in ln or "[zdtd-connect]" in ln
+                        if "[7dtd-playtest]" in ln or "[zdtd-connect]" in ln
                     ]
                     if crumbs:
                         log(f"progress: {crumbs[-1][-160:]}")
@@ -1527,7 +1527,7 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     barrier_counts["apm_dump"] += 1
 
-                if "DONE" in text and "[zdtd-playtest]" in text:
+                if "DONE" in text and "[7dtd-playtest]" in text:
                     parsed = parse_client_log(text)
                     if parsed.get("done") is not None:
                         log("saw DONE in client log")
@@ -1605,7 +1605,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.client_log.is_file():
                 cl = args.client_log.read_text(errors="replace")
                 for key in (
-                    "zdtd-playtest",
+                    "7dtd-playtest",
                     "zdtd-connect",
                     "InitMod",
                     "Connect",

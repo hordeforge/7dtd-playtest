@@ -12,7 +12,7 @@ Code: `Source/PlayTestMod/Catalog.cs`
 |---|---|---|
 | **smoke** | boot check | Join + mesh + ground + stats |
 | **demo** | game demo / attract mode | Fixed cinematic: look → walk → dig/place → UI tour → world probes |
-| **benchmark** | built-in bench | Same path as demo core/world, timed; repeat with `ZDTD_PLAYTEST_LAPS` |
+| **benchmark** | built-in bench | Same path as demo core/world, timed; repeat with `PLAYTEST_LAPS` |
 | **gate** | CI / PR | Live smoke+core only (no deferred skip noise) |
 | **full** | major catalog | Demo domains + soak (not persist/mp; those need host orch) |
 | **catalog** | list only | Log every case id and exit (no join required if armed at menu… still needs mod load) |
@@ -26,7 +26,7 @@ Results always end with `SUMMARY` + `DONE exit_hint=0|1`. Deferred cases are
 |---|---|
 | `demo` / `demo_mode` | `smoke…quest,vehicle,power,finale` (telnet spawn/kill/settime) |
 | `demo_min` | `smoke,core,world,ui` (no combat wait) |
-| `benchmark` / `bench` | smoke+core+world+ui; multiply by `ZDTD_PLAYTEST_LAPS` |
+| `benchmark` / `bench` | smoke+core+world+ui; multiply by `PLAYTEST_LAPS` |
 | `gate` / `ci` | `smoke,core` |
 | `live` | major suites without vehicle/power/persist/mp bulk |
 | `full` / `all` | smoke…finale + soak (not persist/mp/apm/soak_long) |
@@ -35,9 +35,9 @@ Results always end with `SUMMARY` + `DONE exit_hint=0|1`. Deferred cases are
 Env:
 
 ```bash
-ZDTD_PLAYTEST_SUITE=demo
-ZDTD_PLAYTEST_LAPS=3          # benchmark repeats
-ZDTD_PLAYTEST=1               # legacy → demo
+PLAYTEST_SUITE=demo
+PLAYTEST_LAPS=3          # benchmark repeats
+PLAYTEST=1               # legacy → demo
 ```
 
 Make:
@@ -261,7 +261,7 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 
 ## Benchmark
 
-`SUITE=benchmark` with `ZDTD_PLAYTEST_LAPS=N`:
+`SUITE=benchmark` with `PLAYTEST_LAPS=N`:
 
 - Repeats smoke+core+world **N** times (suite labels `benchmark@1` …)
 - Each case reports `ms` in JSON result lines

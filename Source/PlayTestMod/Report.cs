@@ -27,14 +27,14 @@ namespace ZdtdPlaytest
 
         public static void Info(string msg)
         {
-            Log.Out("[zdtd-playtest] " + msg);
+            Log.Out("[7dtd-playtest] " + msg);
             EmitJson("log", "\"level\":\"info\",\"msg\":" + JsonString(msg));
         }
 
         public static void Barrier(string name)
         {
             // Host orchestrator greps this and runs telnet/admin setup.
-            Log.Out("[zdtd-playtest] barrier " + name);
+            Log.Out("[7dtd-playtest] barrier " + name);
             EmitJson("barrier", "\"name\":" + JsonString(name));
         }
 
@@ -52,7 +52,7 @@ namespace ZdtdPlaytest
             string line = status.ToUpperInvariant() + " " + key
                 + (string.IsNullOrEmpty(detail) ? "" : " " + detail);
             Results.Add(line);
-            Log.Out("[zdtd-playtest] " + line);
+            Log.Out("[7dtd-playtest] " + line);
             EmitJson("result",
                 "\"suite\":" + JsonString(suite)
                 + ",\"case\":" + JsonString(caseId)
@@ -64,11 +64,11 @@ namespace ZdtdPlaytest
         public static void Summary(string[] suites)
         {
             long wallMs = Wall.ElapsedMilliseconds;
-            Log.Out("[zdtd-playtest] SUMMARY pass=" + Pass + " fail=" + Fail
+            Log.Out("[7dtd-playtest] SUMMARY pass=" + Pass + " fail=" + Fail
                 + " skip=" + Skip + " total=" + Results.Count
                 + " wall_ms=" + wallMs);
             foreach (var r in Results)
-                Log.Out("[zdtd-playtest]   " + r);
+                Log.Out("[7dtd-playtest]   " + r);
 
             // Top 5 slowest live cases (bench signal).
             if (Timings.Count > 0)
@@ -79,7 +79,7 @@ namespace ZdtdPlaytest
                 for (int i = 0; i < n; i++)
                     sbSlow.Append(' ').Append(Timings[i].id).Append('=')
                         .Append(Timings[i].ms.ToString("0", CultureInfo.InvariantCulture)).Append("ms");
-                Log.Out("[zdtd-playtest] " + sbSlow);
+                Log.Out("[7dtd-playtest] " + sbSlow);
             }
 
             var sb = new StringBuilder();
@@ -101,7 +101,7 @@ namespace ZdtdPlaytest
         public static void Done()
         {
             int exitHint = Fail > 0 ? 1 : 0;
-            Log.Out("[zdtd-playtest] DONE exit_hint=" + exitHint
+            Log.Out("[7dtd-playtest] DONE exit_hint=" + exitHint
                 + " wall_ms=" + Wall.ElapsedMilliseconds);
             EmitJson("done", "\"exit_hint\":" + exitHint + ",\"pass\":" + Pass
                 + ",\"fail\":" + Fail + ",\"skip\":" + Skip
@@ -110,7 +110,7 @@ namespace ZdtdPlaytest
 
         static void EmitJson(string type, string bodyFields)
         {
-            Log.Out("[zdtd-playtest] {\"v\":1,\"t\":\"" + type + "\"," + bodyFields + "}");
+            Log.Out("[7dtd-playtest] {\"v\":1,\"t\":\"" + type + "\"," + bodyFields + "}");
         }
 
         static string JsonString(string s)

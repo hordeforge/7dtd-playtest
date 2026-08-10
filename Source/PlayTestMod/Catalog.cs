@@ -38,7 +38,7 @@ namespace ZdtdPlaytest
                         break;
                     case "benchmark":
                     case "bench":
-                        // Timed repeat of the demo path (laps via ZDTD_PLAYTEST_LAPS)
+                        // Timed repeat of the demo path (laps via PLAYTEST_LAPS)
                         AddUnique(list, "benchmark");
                         break;
                     case "full":

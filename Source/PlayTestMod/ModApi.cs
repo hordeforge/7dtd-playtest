@@ -14,7 +14,7 @@ namespace ZdtdPlaytest
 
         public void InitMod(Mod _modInstance)
         {
-            Log.Out("[zdtd-playtest] InitMod v" + Version);
+            Log.Out("[7dtd-playtest] InitMod v" + Version);
 
             try
             {
@@ -32,14 +32,14 @@ namespace ZdtdPlaytest
                     catch (Exception ex)
                     {
                         fail++;
-                        Log.Warning("[zdtd-playtest] Harmony skip " + t.Name + ": " + ex.Message);
+                        Log.Warning("[7dtd-playtest] Harmony skip " + t.Name + ": " + ex.Message);
                     }
                 }
-                Log.Out("[zdtd-playtest] Harmony patches ok=" + ok + " fail=" + fail);
+                Log.Out("[7dtd-playtest] Harmony patches ok=" + ok + " fail=" + fail);
             }
             catch (Exception ex)
             {
-                Log.Error("[zdtd-playtest] Harmony failed: " + ex.Message);
+                Log.Error("[7dtd-playtest] Harmony failed: " + ex.Message);
             }
 
             Runner.ArmFromEnv();

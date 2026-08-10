@@ -8,15 +8,15 @@
 # Usage:
 #   ./scripts/playtest_repeat.sh [--laps N] [--suite demo] [orchestrator args...]
 #
-# Env: ZDTD_PLAYTEST_LAPS (default 3), ZDTD_PLAYTEST_SUITE (default demo),
-#      LOGDIR (default ~/.cache/zdtd-playtest).
+# Env: PLAYTEST_LAPS (default 3), PLAYTEST_SUITE (default demo),
+#      LOGDIR (default ~/.cache/7dtd-playtest).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORCH="$HERE/playtest_run.py"
-SUITE="${ZDTD_PLAYTEST_SUITE:-demo}"
-LAPS="${ZDTD_PLAYTEST_LAPS:-3}"
-REPORT_DIR="${LOGDIR:-$HOME/.cache/zdtd-playtest}"
+SUITE="${PLAYTEST_SUITE:-demo}"
+LAPS="${PLAYTEST_LAPS:-3}"
+REPORT_DIR="${LOGDIR:-$HOME/.cache/7dtd-playtest}"
 ORCH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
