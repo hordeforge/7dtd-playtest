@@ -113,6 +113,18 @@ namespace ZdtdPlaytest
                         + (c.Deferred ? " reason=" + c.DeferReason : ""));
                 }
             }
+            foreach (var name in ScenarioProviders.SuiteIds())
+            {
+                tmp.Clear();
+                ScenarioProviders.AppendSuite(tmp, name, 0);
+                foreach (var c in tmp)
+                {
+                    string st = c.Deferred ? "deferred" : "live";
+                    Report.Info("case " + c.Suite + "/" + c.Id + " status=" + st
+                        + " tags=" + string.Join("+", c.Tags ?? Array.Empty<string>())
+                        + (c.Deferred ? " reason=" + c.DeferReason : ""));
+                }
+            }
         }
 
         static readonly string[] SuiteNames =
@@ -162,6 +174,7 @@ namespace ZdtdPlaytest
                     }
                     break;
                 default:
+                    ScenarioProviders.AppendSuite(q, suite, lap);
                     break;
             }
         }

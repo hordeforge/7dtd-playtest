@@ -74,6 +74,15 @@ Orchestrator exit codes:
 
 Reports land under `~/.cache/zdtd-playtest/report-*.json` (override `LOGDIR=`).
 
+## External scenario suites
+
+Another client mod can add a suite without forking this harness by referencing
+`zdtd-playtest.dll` and implementing `ZdtdPlaytest.IScenarioProvider`. The
+provider lists its suite IDs and appends `CaseDef` entries for its own suite.
+Install that mod alongside `zdtd-playtest`, then include the provider's suite
+ID in `ZDTD_PLAYTEST_SUITE`. Providers drive and assert real client/server
+state under the same `PASS`/`FAIL`/`SKIP`, `SUMMARY`, and `DONE` log contract.
+
 ## Manual / pair launch
 
 ```bash

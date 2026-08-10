@@ -29,7 +29,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: build install uninstall clean playtest playtest-smoke playtest-core \
+.PHONY: build install uninstall clean test playtest playtest-smoke playtest-core \
 	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
 	playtest-residual install-pair
@@ -54,6 +54,10 @@ uninstall:
 
 clean:
 	rm -rf "$(ROOT)/dist" "$(ROOT)/Source/PlayTestMod/bin" "$(ROOT)/Source/PlayTestMod/obj"
+
+test:
+	python3 "$(ROOT)/scripts/test_catalog_surface.py"
+	python3 "$(ROOT)/scripts/test_scenario_provider_surface.py"
 
 # Full host orchestration: stock dedicated (default) + client, score logs.
 # SERVER=stock|zdtd  WORLD_NAME=Navezgane  PORT= (empty → backend default)
