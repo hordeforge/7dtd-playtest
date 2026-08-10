@@ -85,9 +85,32 @@ Orchestrator exit codes:
 |---|---|
 | 0 | All cases passed (`DONE exit_hint=0`) |
 | 1 | One or more case failures |
-| 2 | Harness error (no DONE, server/client missing, timeout) |
+| 2 | Harness error (no DONE, server/client missing, timeout, **or lock refused**) |
 
 Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
+
+### Live-client exclusivity lock
+
+Only one host playtest may drive the shared **client + dedicated/zdtd server**
+at a time. `scripts/playtest_run.py` starts a stock dedicated by default
+(or zdtd with `SERVER=zdtd`); that is under the same lock as the client.
+
+It acquires the lock **before** cleaning processes or launching, refreshes a
+**heartbeat** while the run is active, and releases when the run ends. Acquire
+also fails if a client **or** dedicated process is already live (unless you
+hold a fresh lock). After clean it refuses if ServerPort/telnet is still bound.
+
+| | |
+|---|---|
+| Default file | `~/.cache/7dtd-playtest/playtest_running` |
+| Override | `PLAYTEST_LOCK_FILE` (use the **same** path as Atomic/monorepo) |
+| Session | `--session` / `PLAYTEST_SESSION_ID` (auto if empty) |
+| Payload | `running`, `session`, `acquired`, `heartbeat` (UTC ISO) |
+| Stale after | `PLAYTEST_LOCK_STALE_SEC` (default 120) without heartbeat refresh |
+
+Agents: read `heartbeat=` to see if a hold is still live. A fresh heartbeat
+means wait; a stale lock with no client/server process may be reclaimed.
+Full rules: [AGENTS.md](AGENTS.md) § Playtest / live-client exclusivity.
 
 ## External scenario suites (providers)
 

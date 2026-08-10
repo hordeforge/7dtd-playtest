@@ -20,6 +20,11 @@ import sys
 import time
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+import playtest_lock
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
 CONNECT = WORKSPACE / "7dtd-connect"
@@ -910,6 +915,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="optional JUnit XML output path",
     )
+    ap.add_argument(
+        "--session",
+        default=os.environ.get("PLAYTEST_SESSION_ID", ""),
+        help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
+    )
     args = ap.parse_args(argv)
 
     if args.port is None:
@@ -932,14 +942,62 @@ def main(argv: list[str] | None = None) -> int:
 
     server_proc = None
     client_proc = None
+    loadgen_proc = None
     exit_code = 2
     parsed: dict = {}
     unity_log: Path | None = None
+    lock_session = (args.session or "").strip() or playtest_lock.new_session_id("playtest")
+    lock_path = playtest_lock.default_lock_path()
+    lock_held = False
+    lock_heartbeat: playtest_lock.HeartbeatThread | None = None
 
     try:
         t0 = time.time()
+        # Exclusive live-client lock BEFORE clean_processes / launch so a second
+        # orchestrator cannot wipe another agent's client. See AGENTS.md.
+        try:
+            playtest_lock.acquire(lock_session, path=lock_path)
+        except playtest_lock.PlaytestLockError as ex:
+            holder = ex.held_by or "unknown"
+            log(
+                f"refusing start: {ex} "
+                f"(held_by={holder} reason={ex.reason} file={lock_path})"
+            )
+            log(
+                "see AGENTS.md — Playtest / live-client exclusivity; "
+                "set PLAYTEST_LOCK_FILE / PLAYTEST_SESSION_ID to coordinate"
+            )
+            return 2
+        lock_held = True
+        log(
+            f"playtest lock acquired session={lock_session} file={lock_path} "
+            f"(exclusive client+server runtime)"
+        )
+        lock_heartbeat = playtest_lock.HeartbeatThread(
+            lock_session,
+            path=lock_path,
+            on_error=lambda ex: log(f"warn: lock heartbeat: {ex}"),
+        )
+        lock_heartbeat.start()
+
         if not args.skip_clean:
             clean_processes(kill_wine=args.kill_wine)
+
+        # After clean, refuse to double-bind if something else still owns ports
+        # (orphan outside our pkill patterns, or race with another host).
+        if not args.no_server:
+            busy = [
+                p
+                for p in (args.port, args.admin_port)
+                if playtest_lock.tcp_port_in_use(p)
+            ]
+            if busy:
+                log(
+                    f"refusing start: TCP port(s) still in use after clean: {busy} "
+                    f"(another dedicated/zdtd or leftover process). "
+                    f"Stop it or pick different --port/--admin-port."
+                )
+                return 2
 
         if args.fresh_save:
             if args.server == "stock":
@@ -1638,20 +1696,33 @@ def main(argv: list[str] | None = None) -> int:
         log(f"exit={exit_code}")
         return exit_code
     finally:
-        stop_proc(locals().get("client_proc"))
-        stop_proc(locals().get("loadgen_proc"))
-        stop_proc(locals().get("server_proc"))
-        # Soft clean after: leave Steam alone
-        pkill_patterns(
-            [
-                r"7DaysToDieServer\.x86_64",
-                r"[/]7DaysToDie\.exe",
-                r"wine64-preloader.*7DaysToDie",
-                r"zig-out/bin/zdtd",
-                r"7dtd-loadgen",
-            ],
-            sig="-9",
-        )
+        # Only stop/kill processes when we held the exclusivity lock. A refused
+        # acquire must not pkill another agent's client or dedicated server.
+        if lock_heartbeat is not None:
+            lock_heartbeat.stop()
+            lock_heartbeat = None
+        if lock_held:
+            stop_proc(locals().get("client_proc"))
+            stop_proc(locals().get("loadgen_proc"))
+            stop_proc(locals().get("server_proc"))
+            # Soft clean after: leave Steam alone
+            pkill_patterns(
+                [
+                    r"7DaysToDieServer\.x86_64",
+                    r"[/]7DaysToDie\.exe",
+                    r"wine64-preloader.*7DaysToDie",
+                    r"zig-out/bin/zdtd",
+                    r"7dtd-loadgen",
+                ],
+                sig="-9",
+            )
+            try:
+                playtest_lock.release(lock_session, path=lock_path)
+                log(f"playtest lock released session={lock_session}")
+            except playtest_lock.PlaytestLockError as ex:
+                log(f"warn: playtest lock release refused: {ex}")
+            except OSError as ex:
+                log(f"warn: playtest lock release failed: {ex}")
 
 
 if __name__ == "__main__":
