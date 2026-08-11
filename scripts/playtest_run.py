@@ -935,6 +935,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Report.Barrier name that makes an external provider setup durable",
     )
     ap.add_argument(
+        "--rejoin-teleport",
+        type=float,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        default=None,
+        help="after a provider rejoin, teleport the joined player to these world coordinates",
+    )
+    ap.add_argument(
         "--logdir",
         type=Path,
         default=Path(
@@ -985,6 +993,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.suite.strip() == "persist" and has_rejoin_setup_suite:
         ap.error("persist already has a built-in rejoin setup; omit provider rejoin options")
     provider_rejoin = has_rejoin_setup_suite
+    if args.rejoin_teleport is not None and not provider_rejoin:
+        ap.error("--rejoin-teleport requires the paired provider rejoin options")
     rejoin_flow = args.suite.strip() == "persist" or provider_rejoin
     rejoin_setup_suite = (
         args.rejoin_setup_suite.strip() if provider_rejoin else "persist_setup"
@@ -1185,6 +1195,7 @@ def main(argv: list[str] | None = None) -> int:
             "chat_echo": 0,
         }
         ready_seen = False
+        rejoin_teleport_done = args.rejoin_teleport is None
         cleaned_ai = False
         loadgen_proc: subprocess.Popen | None = None
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
@@ -1450,6 +1461,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.port, args.suite, client_launch_log, extra_env=client_extra_env
             )
             ready_seen = False
+            rejoin_teleport_done = args.rejoin_teleport is None
             deadline = time.time() + min(args.timeout, 400)
 
         # Always defined so timeout / missing client log cannot UnboundLocalError.
@@ -1488,6 +1500,19 @@ def main(argv: list[str] | None = None) -> int:
                             # a real kill, and god mode blocked telnet kill entirely.
                             tn.close()
                         cleaned_ai = True
+
+                if ready_seen and not rejoin_teleport_done:
+                    tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                    moved = 0
+                    if tn.connect():
+                        moved = tn.teleport_players_to(*args.rejoin_teleport)
+                        tn.close()
+                    if moved > 0:
+                        rejoin_teleport_done = True
+                        x, y, z = args.rejoin_teleport
+                        log(f"provider rejoin teleport complete → {x:g} {y:g} {z:g}")
+                    else:
+                        log("warn: provider rejoin teleport: no joined player yet; retry")
 
                 if want_fixtures:
                     # spawn_zombie (may fire more than once: combat + sleeper_wake)
