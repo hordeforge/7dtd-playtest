@@ -25,10 +25,21 @@ checks = [
         '"ZDTD_PLAYER_NAME": peer_client_name' in RUNNER,
     ),
     require(
+        "peer can run an explicit provider setup suite",
+        '"--peer-client-suite"' in RUNNER
+        and "run_suite=bool(peer_client_suite)" in RUNNER,
+    ),
+    require(
+        "peer ready state gates a shared fixture teleport",
+        '"--peer-client-teleport"' in RUNNER
+        and "peer_ready_seen" in RUNNER
+        and "teleport_players_to(*args.peer_client_teleport)" in RUNNER,
+    ),
+    require(
         "peer clears inherited scenario environment",
         "run_suite: bool = True" in RUNNER
         and 'env.pop(key, None)' in RUNNER
-        and "run_suite=False" in RUNNER,
+        and "run_suite=bool(peer_client_suite)" in RUNNER,
     ),
     require(
         "peer lifecycle is cleaned with the primary client",
@@ -36,7 +47,9 @@ checks = [
     ),
     require(
         "README distinguishes stock peer from loadgen",
-        "passive **stock** peer" in README and "not a loadgen bot" in README,
+        "passive **stock** peer" in README
+        and "not a loadgen bot" in README
+        and "--peer-client-suite" in README,
     ),
 ]
 
