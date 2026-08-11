@@ -333,21 +333,36 @@ def start_client(
     client_launch_log: Path,
     *,
     extra_env: dict[str, str] | None = None,
+    run_suite: bool = True,
 ) -> subprocess.Popen:
     launch = CONNECT / "scripts" / "launch_client.sh"
     env = os.environ.copy()
     env["ZDTD_CONNECT"] = f"127.0.0.1:{port}"
-    env["PLAYTEST_SUITE"] = suite
-    env["PLAYTEST"] = "1"
-    if "PLAYTEST_LAPS" in os.environ:
-        env["PLAYTEST_LAPS"] = os.environ["PLAYTEST_LAPS"]
+    if run_suite:
+        env["PLAYTEST_SUITE"] = suite
+        env["PLAYTEST"] = "1"
+        if "PLAYTEST_LAPS" in os.environ:
+            env["PLAYTEST_LAPS"] = os.environ["PLAYTEST_LAPS"]
+    else:
+        # A stock peer must join and remain in the world, not run a duplicate
+        # scenario suite or inherit a suite selection from its parent process.
+        for key in (
+            "PLAYTEST_SUITE",
+            "ZDTD_PLAYTEST_SUITE",
+            "PLAYTEST",
+            "ZDTD_PLAYTEST",
+            "PLAYTEST_LAPS",
+            "ZDTD_PLAYTEST_LAPS",
+        ):
+            env.pop(key, None)
     # Propagate mute defaults into connect launch_client (default muted).
     if "CLIENT_MUTE" not in env and "SEVEN_DAYS_TO_DIE_CLIENT_MUTE" not in env:
         env["CLIENT_MUTE"] = "1" if client_mute_enabled() else "0"
     if extra_env:
         env.update(extra_env)
     client_launch_log.parent.mkdir(parents=True, exist_ok=True)
-    log(f"start client suite={suite} connect={env['ZDTD_CONNECT']}")
+    role = "scenario" if run_suite else "stock-peer"
+    log(f"start client role={role} suite={suite or '(none)'} connect={env['ZDTD_CONNECT']}")
     fh = open(client_launch_log, "w", encoding="utf-8")
     proc = subprocess.Popen(
         ["bash", str(launch)],
@@ -958,6 +973,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--client-log", type=Path, default=CLIENT_LOG)
     ap.add_argument(
+        "--peer-client-name",
+        default=os.environ.get("PLAYTEST_PEER_CLIENT_NAME", ""),
+        help="optional distinct Local-platform name for one passive stock peer",
+    )
+    ap.add_argument(
+        "--peer-client-compat",
+        type=Path,
+        default=(
+            Path(os.environ["PLAYTEST_PEER_CLIENT_COMPAT"])
+            if os.environ.get("PLAYTEST_PEER_CLIENT_COMPAT")
+            else None
+        ),
+        help="separate initialized Proton compat profile for --peer-client-name",
+    )
+    ap.add_argument(
+        "--peer-client-log",
+        type=Path,
+        default=None,
+        help="optional launcher log for the passive stock peer",
+    )
+    ap.add_argument(
         "--telnet-password",
         default=os.environ.get("PLAYTEST_TELNET_PASSWORD", "retest"),
         help="stock dedicated telnet password",
@@ -984,6 +1020,9 @@ def main(argv: list[str] | None = None) -> int:
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
     args = ap.parse_args(argv)
+    peer_client_name = args.peer_client_name.strip()
+    if bool(peer_client_name) != bool(args.peer_client_compat):
+        ap.error("--peer-client-name and --peer-client-compat must be provided together")
     has_rejoin_setup_suite = bool(args.rejoin_setup_suite.strip())
     has_rejoin_setup_barrier = bool(args.rejoin_setup_barrier.strip())
     if has_rejoin_setup_suite != has_rejoin_setup_barrier:
@@ -1010,6 +1049,7 @@ def main(argv: list[str] | None = None) -> int:
     report_path = args.logdir / f"report-{int(time.time())}.json"
     server_log = args.logdir / "server-orch.log"
     client_launch_log = args.logdir / "client-launch.log"
+    peer_client_launch_log = args.peer_client_log or (args.logdir / "peer-client-launch.log")
 
     if args.server == "zdtd" and not args.no_server and not args.zdtd.is_file():
         log(f"missing zdtd binary: {args.zdtd}")
@@ -1021,9 +1061,13 @@ def main(argv: list[str] | None = None) -> int:
     if not (CONNECT / "scripts" / "launch_client.sh").is_file():
         log(f"missing connect launcher under {CONNECT}")
         return 2
+    if peer_client_name and not args.peer_client_compat.is_dir():
+        log(f"peer compat profile is missing or not a directory: {args.peer_client_compat}")
+        return 2
 
     server_proc = None
     client_proc = None
+    peer_client_proc = None
     loadgen_proc = None
     exit_code = 2
     parsed: dict = {}
@@ -1222,6 +1266,18 @@ def main(argv: list[str] | None = None) -> int:
                 client_launch_log,
                 extra_env=client_extra_env or None,
             )
+            if peer_client_name:
+                peer_env = {
+                    "COMPAT": str(args.peer_client_compat),
+                    "ZDTD_PLAYER_NAME": peer_client_name,
+                }
+                peer_client_proc = start_client(
+                    args.port,
+                    "",
+                    peer_client_launch_log,
+                    extra_env=peer_env,
+                    run_suite=False,
+                )
 
         def _barrier_hits(blob: str, name: str) -> int:
             # Count only the human log line. Report.Barrier also emits JSON with
@@ -1810,6 +1866,7 @@ def main(argv: list[str] | None = None) -> int:
             lock_heartbeat = None
         if lock_held:
             stop_proc(locals().get("client_proc"))
+            stop_proc(locals().get("peer_client_proc"))
             stop_proc(locals().get("loadgen_proc"))
             stop_proc(locals().get("server_proc"))
             # Soft clean after: leave Steam alone

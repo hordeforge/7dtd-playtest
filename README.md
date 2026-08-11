@@ -228,6 +228,19 @@ External suites that need the same host phases should:
   multi-client work (Human-Runtime / two clients); the harness does not fake
   other players.
 
+For one passive **stock** peer, provide both a distinct Local-platform player
+name and an already initialized, separate Proton compat profile. The runner
+starts that client without `PLAYTEST_*`, so it joins and remains in the world
+without executing a duplicate scenario suite. The connect mod reads the peer
+name from `ZDTD_PLAYER_NAME`; use a current `7dtd-connect` install that
+supports that variable. This is a genuine second client, not a loadgen bot.
+
+Run a suite with an isolated peer profile:
+
+```bash
+make playtest SUITE=mp EXTRA_ARGS="--peer-client-name atomic-peer --peer-client-compat /path/to/initialized/peer-compat"
+```
+
 ### Long-running cases (benchmarks / waves)
 
 - Per-case: `CaseDef.Live(..., timeout: 120f)` (or higher). The runner fails
