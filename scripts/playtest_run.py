@@ -1561,8 +1561,21 @@ def main(argv: list[str] | None = None) -> int:
             rejoin_teleport_done = args.rejoin_teleport is None
             deadline = time.time() + min(args.timeout, 400)
 
-        # Always defined so timeout / missing client log cannot UnboundLocalError.
+        # Always defined so timeout / missing client logs cannot UnboundLocalError.
         parsed: dict = {}
+        peer_parsed: dict = {}
+        primary_done_logged = False
+
+        def read_peer_results() -> dict:
+            if peer_client_log is None or not peer_client_log.is_file():
+                return {}
+            try:
+                return parse_client_log(peer_client_log.read_text(errors="replace"))
+            except OSError:
+                return {}
+
+        def peer_suite_done() -> bool:
+            return not peer_client_suite or peer_parsed.get("done") is not None
 
         while time.time() < deadline:
             text = ""
@@ -1792,8 +1805,13 @@ def main(argv: list[str] | None = None) -> int:
                 if "DONE" in text and "[7dtd-playtest]" in text:
                     parsed = parse_client_log(text)
                     if parsed.get("done") is not None:
-                        log("saw DONE in client log")
-                        break
+                        if not primary_done_logged:
+                            primary_done_logged = True
+                            log("saw DONE in primary client log")
+                        peer_parsed = read_peer_results()
+                        if peer_suite_done():
+                            log("saw DONE in every scenario client log")
+                            break
 
             if peer_client_log is not None and not peer_ready_seen and peer_client_log.is_file():
                 try:
@@ -1803,6 +1821,8 @@ def main(argv: list[str] | None = None) -> int:
                 if "ready player=" in peer_text:
                     peer_ready_seen = True
                     log("peer client playtest ready")
+            if peer_client_suite:
+                peer_parsed = read_peer_results()
 
             if (
                 ready_seen
@@ -1828,7 +1848,8 @@ def main(argv: list[str] | None = None) -> int:
                     parsed = parse_client_log(
                         args.client_log.read_text(errors="replace")
                     )
-                    if parsed.get("done") is not None:
+                    peer_parsed = read_peer_results()
+                    if parsed.get("done") is not None and peer_suite_done():
                         break
             time.sleep(0.5)
         else:
@@ -1838,11 +1859,18 @@ def main(argv: list[str] | None = None) -> int:
 
         if not parsed and args.client_log.is_file():
             parsed = parse_client_log(args.client_log.read_text(errors="replace"))
+        if peer_client_suite:
+            peer_parsed = read_peer_results()
 
         summary = parsed.get("summary")
         done = parsed.get("done")
         results = parsed.get("results") or []
         nre = parsed.get("nre_like") or []
+        peer_summary = peer_parsed.get("summary")
+        peer_done = peer_parsed.get("done")
+        peer_results = peer_parsed.get("results") or []
+        peer_nre = peer_parsed.get("nre_like") or []
+        combined_results = results + peer_results
         wall_s = time.time() - t0
 
         # Slowest cases from results if ms present in JSON events
@@ -1867,9 +1895,14 @@ def main(argv: list[str] | None = None) -> int:
             "summary": summary,
             "done": done,
             "results": results,
+            "peer_summary": peer_summary,
+            "peer_done": peer_done,
+            "peer_results": peer_results,
             "slowest": [{"case": c, "ms": ms} for c, ms in slowest[:8]],
             "nre_like_count": len(nre),
             "nre_like_sample": nre[:10],
+            "peer_nre_like_count": len(peer_nre),
+            "peer_nre_like_sample": peer_nre[:10],
             "client_log": str(args.client_log),
             "peer_client_log": str(peer_client_log) if peer_client_log else None,
             "peer_client_suite": peer_client_suite or None,
@@ -1886,14 +1919,17 @@ def main(argv: list[str] | None = None) -> int:
         }
         write_report(report_path, payload)
         junit_path = args.junit or (args.logdir / f"junit-{int(time.time())}.xml")
-        write_junit(junit_path, args.suite, results, summary)
+        write_junit(junit_path, args.suite, combined_results, summary)
 
-        if done is None:
-            log("FAIL harness: no DONE from playtest mod")
+        if done is None or (peer_client_suite and peer_done is None):
+            missing = "primary" if done is None else "peer"
+            log(f"FAIL harness: no DONE from {missing} playtest mod")
             if summary:
                 log(f"partial summary={summary}")
             for r in results:
                 log(f"  {r['status']} {r['case']} {r.get('detail', '')}")
+            for r in peer_results:
+                log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
             if args.client_log.is_file():
                 cl = args.client_log.read_text(errors="replace")
                 for key in (
@@ -1916,15 +1952,28 @@ def main(argv: list[str] | None = None) -> int:
                 )
             for r in results:
                 log(f"  {r['status']} {r['case']} {r.get('detail', '')}")
+            if peer_client_suite and peer_summary:
+                log(
+                    f"PEER SUMMARY pass={peer_summary['pass']} fail={peer_summary['fail']} "
+                    f"skip={peer_summary.get('skip', 0)}"
+                )
+            for r in peer_results:
+                log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
             if slowest:
                 log("slowest: " + ", ".join(f"{c}={ms:.0f}ms" for c, ms in slowest[:5]))
-            if nre:
-                log(f"warn: {len(nre)} NRE/underrun-like client lines (see report)")
+            if nre or peer_nre:
+                log(
+                    "warn: "
+                    f"primary={len(nre)} peer={len(peer_nre)} "
+                    "NRE/underrun-like client lines (see report)"
+                )
             fails = int(summary["fail"]) if summary else None
             if fails is None and done.get("exit_hint") is not None:
                 fails = int(done["exit_hint"])
             if fails is None:
                 fails = 1
+            if peer_summary:
+                fails += int(peer_summary["fail"])
             exit_code = 1 if fails > 0 else 0
 
         log(f"exit={exit_code}")
