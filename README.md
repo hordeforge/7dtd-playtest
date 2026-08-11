@@ -206,10 +206,13 @@ Built-in flow (host-driven; do not invent client-only rejoin):
 External suites that need the same host phases should:
 
 - Emit a **stable barrier name** via `Report.Barrier("…")` from a setup case.
-- Document that name for the host runner (or extend `playtest_run.py` barrier
-  table the same way stock `persist_setup_done` is handled).
-- Split setup vs verify into suite ids the host can arm across two client
-  launches (same pattern as `persist_setup` / `persist`).
+- Split setup and verify into suite ids. Run the verify suite with both
+  `--rejoin-setup-suite` and `--rejoin-setup-barrier`; the runner arms the
+  declared setup suite, saves, restarts the server, then arms the requested
+  verify suite. Both options are required together.
+- The provider's setup barrier means its fixture is durable enough to save.
+  The runner does not manufacture terrain, entities, or server state for it.
+  Built-in `persist` retains its dedicated position-pad handling.
 
 ### Multi-peer / second client
 
