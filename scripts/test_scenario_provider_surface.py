@@ -182,6 +182,8 @@ def main() -> int:
         "FRESH",
         "Report.Barrier",
         "persist_setup",
+        "--rejoin-setup-suite",
+        "--rejoin-setup-barrier",
         "timeout:",
         "Stable log contract",
         "ZDTD_PLAYTEST_SUITE",

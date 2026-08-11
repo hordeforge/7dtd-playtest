@@ -925,6 +925,16 @@ def main(argv: list[str] | None = None) -> int:
         default=float(os.environ.get("PLAYTEST_TIMEOUT_SEC", "900")),
     )
     ap.add_argument(
+        "--rejoin-setup-suite",
+        default="",
+        help="external provider setup suite before save, server restart, and rejoin",
+    )
+    ap.add_argument(
+        "--rejoin-setup-barrier",
+        default="",
+        help="Report.Barrier name that makes an external provider setup durable",
+    )
+    ap.add_argument(
         "--logdir",
         type=Path,
         default=Path(
@@ -966,6 +976,23 @@ def main(argv: list[str] | None = None) -> int:
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
     args = ap.parse_args(argv)
+    has_rejoin_setup_suite = bool(args.rejoin_setup_suite.strip())
+    has_rejoin_setup_barrier = bool(args.rejoin_setup_barrier.strip())
+    if has_rejoin_setup_suite != has_rejoin_setup_barrier:
+        ap.error(
+            "--rejoin-setup-suite and --rejoin-setup-barrier must be provided together"
+        )
+    if args.suite.strip() == "persist" and has_rejoin_setup_suite:
+        ap.error("persist already has a built-in rejoin setup; omit provider rejoin options")
+    provider_rejoin = has_rejoin_setup_suite
+    rejoin_flow = args.suite.strip() == "persist" or provider_rejoin
+    rejoin_setup_suite = (
+        args.rejoin_setup_suite.strip() if provider_rejoin else "persist_setup"
+    )
+    rejoin_setup_barrier = (
+        args.rejoin_setup_barrier.strip() if provider_rejoin else "persist_setup_done"
+    )
+    rejoin_label = "provider rejoin" if provider_rejoin else "persist multi-phase"
 
     if args.port is None:
         args.port = 27025 if args.server == "zdtd" else 26900
@@ -1152,6 +1179,7 @@ def main(argv: list[str] | None = None) -> int:
             "spawn_loadgen_peer": 0,
             "spawn_loadgen_bots": 0,
             "persist_setup_done": 0,
+            "rejoin_setup_done": 0,
             "teleport_persist_pad": 0,
             "apm_dump": 0,
             "chat_echo": 0,
@@ -1173,8 +1201,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             log(f"apm preseed placeholder → {apm_dump_path} run_id={apm_run_id}")
 
-        # persist multi-phase starts its own client; other suites start now.
-        if args.suite.strip() == "persist":
+        # Rejoin flows start their setup client below; other suites start now.
+        if rejoin_flow:
             client_proc = None
         else:
             client_proc = start_client(
@@ -1201,11 +1229,13 @@ def main(argv: list[str] | None = None) -> int:
             # Dedup while preserving order (same token can appear many times).
             return list(dict.fromkeys(found))
 
-        # Multi-phase persist: setup → saveworld → restart server → rejoin verify.
-        # Only when suite is exactly "persist" (not "persist_setup" alone).
-        if args.suite.strip() == "persist":
+        # Rejoin flow: setup → saveworld → restart server → rejoin verify.
+        # Built-in persist keeps its authoritative pad handling. Providers only
+        # need to report their declared durable setup barrier.
+        if rejoin_flow:
             log(
-                "persist multi-phase: setup → saveworld → restart server → rejoin verify"
+                f"{rejoin_label}: setup={rejoin_setup_suite} → saveworld → "
+                "restart server → rejoin verify"
             )
             stop_proc(client_proc)
             if args.client_log.is_file():
@@ -1215,7 +1245,7 @@ def main(argv: list[str] | None = None) -> int:
                     pass
             client_proc = start_client(
                 args.port,
-                "persist_setup",
+                rejoin_setup_suite,
                 client_launch_log,
                 extra_env=client_extra_env,
             )
@@ -1237,38 +1267,41 @@ def main(argv: list[str] | None = None) -> int:
                         ]
                         if crumbs:
                             log(f"setup progress: {crumbs[-1][-160:]}")
-                    # Server-authoritative pad tele so pos_survives_rejoin is real.
-                    hits = _barrier_hits(text, "teleport_persist_pad")
-                    while barrier_counts["teleport_persist_pad"] < hits:
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        n = 0
-                        if tn.connect():
-                            n = tn.teleport_players_to(520, 62, 950)
-                            if n == 0:
-                                log(
-                                    "warn: teleport_persist_pad: no player ids yet; retry next poll"
-                                )
+                    if not provider_rejoin:
+                        # Server-authoritative pad tele so pos_survives_rejoin is real.
+                        hits = _barrier_hits(text, "teleport_persist_pad")
+                        while barrier_counts["teleport_persist_pad"] < hits:
+                            tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                            n = 0
+                            if tn.connect():
+                                n = tn.teleport_players_to(520, 62, 950)
+                                if n == 0:
+                                    log(
+                                        "warn: teleport_persist_pad: no player ids yet; retry next poll"
+                                    )
+                                    tn.close()
+                                    break
+                                # Let server commit player position before later setup/save.
+                                time.sleep(2.0)
+                                tn.exec("saveworld")
                                 tn.close()
+                            else:
+                                log(
+                                    "warn: teleport_persist_pad: telnet connect fail; retry"
+                                )
                                 break
-                            # Let server commit player position before later setup/save.
-                            time.sleep(2.0)
-                            tn.exec("saveworld")
-                            tn.close()
-                        else:
-                            log(
-                                "warn: teleport_persist_pad: telnet connect fail; retry"
-                            )
-                            break
-                        barrier_counts["teleport_persist_pad"] += 1
-                    hits = _barrier_hits(text, "persist_setup_done")
-                    if hits > barrier_counts["persist_setup_done"]:
+                            barrier_counts["teleport_persist_pad"] += 1
+                    hits = _barrier_hits(text, rejoin_setup_barrier)
+                    if hits > barrier_counts["rejoin_setup_done"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
-                            # Re-tele pad once more so last write before disconnect is pad pos.
-                            n = tn.teleport_players_to(520, 62, 950)
+                            n = 1
+                            if not provider_rejoin:
+                                # Re-tele pad once more so last write before disconnect is pad pos.
+                                n = tn.teleport_players_to(520, 62, 950)
                             if n == 0:
                                 log(
-                                    "warn: persist_setup_done: no player ids; retry next poll"
+                                    f"warn: {rejoin_setup_barrier}: no player ids yet; retry next poll"
                                 )
                                 tn.close()
                             else:
@@ -1280,13 +1313,13 @@ def main(argv: list[str] | None = None) -> int:
                                 r = tn.exec("saveworld")
                                 log(f"telnet saveworld (settle) → {r[:100]!r}")
                                 tn.close()
-                                barrier_counts["persist_setup_done"] = hits
+                                barrier_counts["rejoin_setup_done"] = hits
                         else:
-                            log("warn: persist_setup_done: telnet connect fail; retry")
+                            log(f"warn: {rejoin_setup_barrier}: telnet connect fail; retry")
                     setup_parsed = parse_client_log(text)
                     if setup_parsed.get("done") is not None:
                         log(
-                            "persist setup DONE "
+                            f"{rejoin_label} setup DONE "
                             f"pass={setup_parsed.get('summary', {}).get('pass')} "
                             f"fail={setup_parsed.get('summary', {}).get('fail')}"
                         )
@@ -1300,7 +1333,7 @@ def main(argv: list[str] | None = None) -> int:
                             ).get("done")
                             is not None
                         ):
-                            log("persist setup DONE (client exited)")
+                            log(f"{rejoin_label} setup DONE (client exited)")
                             break
                 time.sleep(0.5)
             # Require setup DONE before rejoin verify; otherwise fixtures never existed.
@@ -1314,9 +1347,11 @@ def main(argv: list[str] | None = None) -> int:
             setup_done = setup_parsed.get("done") is not None
             setup_fail = int((setup_parsed.get("summary") or {}).get("fail") or 0)
             setup_pass = int((setup_parsed.get("summary") or {}).get("pass") or 0)
-            if not setup_done or setup_fail > 0:
+            setup_barrier_seen = barrier_counts["rejoin_setup_done"] > 0
+            if not setup_done or setup_fail > 0 or not setup_barrier_seen:
                 log(
-                    f"persist setup incomplete done={setup_done} pass={setup_pass} fail={setup_fail}; "
+                    f"{rejoin_label} setup incomplete done={setup_done} pass={setup_pass} "
+                    f"fail={setup_fail} barrier={setup_barrier_seen}; "
                     "aborting rejoin verify"
                 )
                 stop_proc(client_proc)
@@ -1343,20 +1378,22 @@ def main(argv: list[str] | None = None) -> int:
                 write_report(
                     report_path,
                     {
-                        "suite": "persist",
+                        "suite": args.suite,
                         "summary": summary,
                         "results": results,
-                        "error": "persist setup incomplete",
+                        "error": f"{rejoin_label} setup incomplete",
                     },
                 )
-                write_junit(junit_path, "persist", results, summary)
-                log("FAIL harness: persist setup incomplete")
+                write_junit(junit_path, args.suite, results, summary)
+                log(f"FAIL harness: {rejoin_label} setup incomplete")
                 return 2
 
             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
             if tn.connect():
-                # Final pad tele + durable save before kick/restart.
-                tn.teleport_players_to(520, 62, 950)
+                # Persist needs the pad as the last player state; providers retain
+                # the position their setup case actually established.
+                if not provider_rejoin:
+                    tn.teleport_players_to(520, 62, 950)
                 time.sleep(1.5)
                 r = tn.exec("saveworld")
                 log(f"telnet saveworld (post-setup) → {r[:100]!r}")
@@ -1410,7 +1447,7 @@ def main(argv: list[str] | None = None) -> int:
                 except OSError:
                     pass
             client_proc = start_client(
-                args.port, "persist", client_launch_log, extra_env=client_extra_env
+                args.port, args.suite, client_launch_log, extra_env=client_extra_env
             )
             ready_seen = False
             deadline = time.time() + min(args.timeout, 400)
