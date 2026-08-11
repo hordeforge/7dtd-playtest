@@ -241,6 +241,12 @@ Run a suite with an isolated peer profile:
 make playtest SUITE=mp EXTRA_ARGS="--peer-client-name atomic-peer --peer-client-compat /path/to/initialized/peer-compat"
 ```
 
+When the peer must run a provider-side setup case, add
+`--peer-client-suite <suite>` and give the runner its game log with
+`--peer-client-log <path>` when the profile uses a nonstandard log location.
+`--peer-client-teleport X Y Z` waits for both scenario clients to report ready
+before teleporting all joined players to one fixture location.
+
 ### Long-running cases (benchmarks / waves)
 
 - Per-case: `CaseDef.Live(..., timeout: 120f)` (or higher). The runner fails

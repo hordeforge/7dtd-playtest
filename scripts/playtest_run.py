@@ -41,6 +41,15 @@ CLIENT_LOG = (
     / "users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_zdtd_connect.txt"
 )
 
+
+def client_log_for_compat(compat: Path) -> Path:
+    """Stock launch_client.sh's game log location for one Proton profile."""
+    return (
+        compat
+        / "pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/logs"
+        / "output_log_client_zdtd_connect.txt"
+    )
+
 RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
 SUMMARY_RE = re.compile(
     r"\[7dtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
@@ -991,7 +1000,20 @@ def main(argv: list[str] | None = None) -> int:
         "--peer-client-log",
         type=Path,
         default=None,
-        help="optional launcher log for the passive stock peer",
+        help="optional stock game log for the peer compat profile",
+    )
+    ap.add_argument(
+        "--peer-client-suite",
+        default=os.environ.get("PLAYTEST_PEER_CLIENT_SUITE", ""),
+        help="optional suite for the stock peer; empty leaves it passive",
+    )
+    ap.add_argument(
+        "--peer-client-teleport",
+        type=float,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        default=None,
+        help="after both scenario clients are ready, teleport all players to these coordinates",
     )
     ap.add_argument(
         "--telnet-password",
@@ -1021,8 +1043,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
     peer_client_name = args.peer_client_name.strip()
+    peer_client_suite = args.peer_client_suite.strip()
     if bool(peer_client_name) != bool(args.peer_client_compat):
         ap.error("--peer-client-name and --peer-client-compat must be provided together")
+    if peer_client_suite and not peer_client_name:
+        ap.error("--peer-client-suite requires --peer-client-name and --peer-client-compat")
+    if args.peer_client_teleport is not None and not peer_client_suite:
+        ap.error("--peer-client-teleport requires --peer-client-suite")
     has_rejoin_setup_suite = bool(args.rejoin_setup_suite.strip())
     has_rejoin_setup_barrier = bool(args.rejoin_setup_barrier.strip())
     if has_rejoin_setup_suite != has_rejoin_setup_barrier:
@@ -1035,6 +1062,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.rejoin_teleport is not None and not provider_rejoin:
         ap.error("--rejoin-teleport requires the paired provider rejoin options")
     rejoin_flow = args.suite.strip() == "persist" or provider_rejoin
+    if rejoin_flow and peer_client_name:
+        ap.error("stock peer clients are not supported with a rejoin flow")
     rejoin_setup_suite = (
         args.rejoin_setup_suite.strip() if provider_rejoin else "persist_setup"
     )
@@ -1049,7 +1078,11 @@ def main(argv: list[str] | None = None) -> int:
     report_path = args.logdir / f"report-{int(time.time())}.json"
     server_log = args.logdir / "server-orch.log"
     client_launch_log = args.logdir / "client-launch.log"
-    peer_client_launch_log = args.peer_client_log or (args.logdir / "peer-client-launch.log")
+    peer_client_launch_log = args.logdir / "peer-client-launch.log"
+    peer_client_log = (
+        args.peer_client_log
+        or (client_log_for_compat(args.peer_client_compat) if peer_client_name else None)
+    )
 
     if args.server == "zdtd" and not args.no_server and not args.zdtd.is_file():
         log(f"missing zdtd binary: {args.zdtd}")
@@ -1153,6 +1186,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.client_log.write_text("", encoding="utf-8")
             except OSError as ex:
                 log(f"warn: could not truncate client log: {ex}")
+        if peer_client_log is not None:
+            try:
+                peer_client_log.parent.mkdir(parents=True, exist_ok=True)
+                peer_client_log.write_text("", encoding="utf-8")
+            except OSError as ex:
+                log(f"warn: could not truncate peer client log: {ex}")
 
         if not args.no_server:
             if args.server == "stock":
@@ -1239,6 +1278,8 @@ def main(argv: list[str] | None = None) -> int:
             "chat_echo": 0,
         }
         ready_seen = False
+        peer_ready_seen = not bool(peer_client_suite)
+        peer_teleport_done = args.peer_client_teleport is None
         rejoin_teleport_done = args.rejoin_teleport is None
         cleaned_ai = False
         loadgen_proc: subprocess.Popen | None = None
@@ -1273,10 +1314,10 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 peer_client_proc = start_client(
                     args.port,
-                    "",
+                    peer_client_suite,
                     peer_client_launch_log,
                     extra_env=peer_env,
-                    run_suite=False,
+                    run_suite=bool(peer_client_suite),
                 )
 
         def _barrier_hits(blob: str, name: str) -> int:
@@ -1753,6 +1794,34 @@ def main(argv: list[str] | None = None) -> int:
                     if parsed.get("done") is not None:
                         log("saw DONE in client log")
                         break
+
+            if peer_client_log is not None and not peer_ready_seen and peer_client_log.is_file():
+                try:
+                    peer_text = peer_client_log.read_text(errors="replace")
+                except OSError:
+                    peer_text = ""
+                if "ready player=" in peer_text:
+                    peer_ready_seen = True
+                    log("peer client playtest ready")
+
+            if (
+                ready_seen
+                and peer_ready_seen
+                and not peer_teleport_done
+                and args.peer_client_teleport is not None
+            ):
+                tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                moved = 0
+                if tn.connect():
+                    moved = tn.teleport_players_to(*args.peer_client_teleport)
+                    tn.close()
+                if moved >= 2:
+                    peer_teleport_done = True
+                    x, y, z = args.peer_client_teleport
+                    log(f"stock peer teleport complete players={moved} → {x:g} {y:g} {z:g}")
+                else:
+                    log("warn: stock peer teleport: waiting for both joined players")
+
             if client_proc is not None and client_proc.poll() is not None:
                 time.sleep(2)
                 if args.client_log.is_file():
@@ -1802,6 +1871,8 @@ def main(argv: list[str] | None = None) -> int:
             "nre_like_count": len(nre),
             "nre_like_sample": nre[:10],
             "client_log": str(args.client_log),
+            "peer_client_log": str(peer_client_log) if peer_client_log else None,
+            "peer_client_suite": peer_client_suite or None,
             "server_log": str(server_log),
             "unity_log": str(unity_log) if unity_log else None,
             "timeout_sec": args.timeout,
