@@ -210,6 +210,9 @@ External suites that need the same host phases should:
   `--rejoin-setup-suite` and `--rejoin-setup-barrier`; the runner arms the
   declared setup suite, saves, restarts the server, then arms the requested
   verify suite. Both options are required together.
+- If the verify predicate needs a previously unloaded server chunk, providers
+  may also pass `--rejoin-teleport X Y Z`. After the replacement client has
+  joined, the host uses `teleportplayer` before the verify suite continues.
 - The provider's setup barrier means its fixture is durable enough to save.
   The runner does not manufacture terrain, entities, or server state for it.
   Built-in `persist` retains its dedicated position-pad handling.

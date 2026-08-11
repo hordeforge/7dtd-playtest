@@ -184,6 +184,7 @@ def main() -> int:
         "persist_setup",
         "--rejoin-setup-suite",
         "--rejoin-setup-barrier",
+        "--rejoin-teleport",
         "timeout:",
         "Stable log contract",
         "ZDTD_PLAYTEST_SUITE",
