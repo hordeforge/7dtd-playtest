@@ -46,6 +46,18 @@ checks = [
         'stop_proc(locals().get("peer_client_proc"))' in RUNNER,
     ),
     require(
+        "a peer scenario suite must finish before the run is green",
+        "peer_suite_done()" in RUNNER
+        and "saw DONE in every scenario client log" in RUNNER
+        and '"peer_done": peer_done' in RUNNER,
+    ),
+    require(
+        "peer scenario failures affect the orchestrator exit status",
+        "peer_summary" in RUNNER
+        and "peer_results" in RUNNER
+        and 'int(peer_summary["fail"])' in RUNNER,
+    ),
+    require(
         "README distinguishes stock peer from loadgen",
         "passive **stock** peer" in README
         and "not a loadgen bot" in README
