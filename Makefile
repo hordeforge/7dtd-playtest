@@ -117,6 +117,22 @@ playtest-repeat:
 playtest-apm:
 	$(MAKE) playtest SUITE=apm SERVER=zdtd PORT=27025 EXTRA_ARGS="--timeout 300"
 
+# Same suite against stock AND zdtd, diffed per case into
+# workspace/comparison-playtest/<suite>/playtest-compare.{md,json}. A per-case
+# delta is a finding to triage (zdtd bug vs harness artifact vs known
+# divergence), never a pass to fake. SUITE?=smoke
+playtest-compare: install-pair
+	@mkdir -p "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
+		"$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd"
+	$(MAKE) playtest SUITE="$(SUITE)" SERVER=stock \
+		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/stock"
+	$(MAKE) playtest SUITE="$(SUITE)" SERVER=zdtd PORT=27025 \
+		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd"
+	uv run --project "$(ROOT)" python "$(ROOT)/scripts/playtest_compare.py" \
+		--stock-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
+		--zdtd-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd" \
+		--out "$(ROOT)/workspace/comparison-playtest/$(SUITE)"
+
 # All residual suites (mp + short soak in residual alias; persist/soak_long/apm separate).
 playtest-residual:
 	$(MAKE) playtest-persist SERVER="$(SERVER)"
