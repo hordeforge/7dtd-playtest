@@ -1,0 +1,91 @@
+{
+ "cases": [
+  {
+   "case": "persist_setup/persist_setup_blockmeta",
+   "stock": {
+    "detail": "type=20304 dmg=12",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "setup damaged block missing or undamaged after 8.0s | type=0 dmg=0",
+    "status": "FAIL"
+   }
+  },
+  {
+   "case": "persist_setup/persist_setup_dig",
+   "stock": {
+    "detail": "type=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=0",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "persist_setup/persist_setup_done",
+   "stock": {
+    "detail": "checkpoint barriers emitted",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "checkpoint barriers emitted",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "persist_setup/persist_setup_inv",
+   "stock": {
+    "detail": "item=resourceScrapIron count=7",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "item=resourceScrapIron count=7",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "persist_setup/persist_setup_pos",
+   "stock": {
+    "detail": "horiz=0.00 pos=(520.00, 61.20, 950.00)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=0.00 pos=(520.00, 61.20, 950.00)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "persist_setup/persist_setup_te",
+   "stock": {
+    "detail": "type=18683",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "setup chest missing after 8.0s | type=0 te=False",
+    "status": "FAIL"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [
+  "persist_setup/persist_setup_blockmeta: status differs (PASS vs FAIL)",
+  "persist_setup/persist_setup_te: status differs (PASS vs FAIL)"
+ ],
+ "stock": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 1,
+   "pass": 6,
+   "skip": 0
+  }
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 2,
+   "pass": 4,
+   "skip": 0
+  }
+ }
+}
