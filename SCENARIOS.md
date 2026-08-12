@@ -269,6 +269,20 @@ Make targets: `make playtest-soak-long`, `make playtest-apm`, `make playtest-res
 
 ---
 
+## bot — BotManager visibility / parity
+
+Cases that observe the loadgen/zdtd bots (BotManager auto-spawn + telnet
+spawn requests) from the playtest client's point of view.
+
+| Case | Status | Tags | Assert |
+|---|---|---|---|
+| `bot_spawn_visible` | live | bot, demo | BotManager auto-spawned TargetBotCount + explicit spawn near player; client sees a bot |
+| `bot_moves` | live | bot, locomotion | Nearest living bot within 120 m tracked across ticks (position delta) |
+| `bot_physics_parity` | live | bot, physics | Nearest living bot within 120 m has a sane physics/position state |
+| `bot_player_near` | live | bot, demo | Telnet-requested bot spawns near this player; client observes it |
+
+---
+
 ## Demo sequence (fixed order)
 
 When `SUITE=demo`, the client runs this attract-mode path:

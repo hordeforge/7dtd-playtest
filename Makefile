@@ -59,6 +59,7 @@ test:
 	python3 "$(ROOT)/scripts/test_catalog_surface.py"
 	python3 "$(ROOT)/scripts/test_scenario_provider_surface.py"
 	python3 "$(ROOT)/scripts/test_playtest_lock.py"
+	uv run --with pytest python "$(ROOT)/scripts/test_playtest_compare.py"
 
 # Full host orchestration: stock dedicated (default) + client, score logs.
 # SERVER=stock|zdtd  WORLD_NAME=Navezgane  PORT= (empty → backend default)

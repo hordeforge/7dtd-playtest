@@ -90,3 +90,9 @@ def test_report_json_wall_axis(tmp_path):
     assert payload["zdtd"]["server"] == "zdtd"
     report_md = (out / "playtest-compare.md").read_text(encoding="utf-8")
     assert "| wall time (s) | 157.1 | 128.0 |" in report_md
+
+
+if __name__ == "__main__":
+    import pytest
+    import sys
+    sys.exit(pytest.main([__file__, "-q"]))
