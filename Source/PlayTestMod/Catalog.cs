@@ -886,7 +886,8 @@ namespace ZdtdPlaytest
                     var inv = ctx.Player.inventory;
                     int slot = inv != null ? inv.holdingItemIdx : -1;
                     int type = inv != null ? inv.holdingItemItemValue.type : -1;
-                    ctx.Detail = "slot=" + slot + " type=" + type;
+                    int quality = inv != null ? inv.holdingItemItemValue.Quality : -1;
+                    ctx.Detail = "slot=" + slot + " type=" + type + " quality=" + quality;
                     ctx.PlaceBlockType = inv != null ? 1 : 0;
                 }
                 catch (Exception ex)
