@@ -1,0 +1,14 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # The offline gates need no game install: catalog<->SCENARIOS surface
+      # (live rows + counts total), scenario-provider env surface, the host
+      # lock, and the compare diff (pytest via uv). The mod build itself is
+      # not CI-able (references game DLLs), but these gates catch the doc/
+      # catalog drift that used to ship silently.
+      - run: make test
