@@ -50,6 +50,11 @@ make playtest-compare        # same suite vs stock AND zdtd, diffed per case
                              # workspace/comparison-playtest/<suite>/)
 ```
 
+`playtest-compare` diffs per case into `playtest-compare.{md,json}` and also
+reports a wall-time axis (server session seconds, from the orchestrator
+reports) - a cost observation, never a per-case finding (zdtd being faster is
+a known divergence, not a mismatch).
+
 v0.7.1 gameplay surface (stock motor / stock attack / real C2S, **not** tele-fakes):
 - locomotion + jump + stamina; entity/block melee; **ranged** (pipe pistol Meta)
 - **ItemDropServer**, **loot Collect**, **keystone place**, eat, dig/place

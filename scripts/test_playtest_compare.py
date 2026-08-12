@@ -63,3 +63,30 @@ def test_identical_sides_have_no_findings(tmp_path):
     assert r.returncode == 0, r.stderr
     payload = json.loads((tmp_path / "out" / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["findings"] == []
+
+
+def test_report_json_wall_axis(tmp_path):
+    """Report JSONs carry wall_sec; the diff surfaces it as a cost axis and
+    labels the sides, never as a per-case finding."""
+    def report(server: str, wall: float, passn: int) -> dict:
+        return {"server": server, "wall_sec": wall, "summary": {"pass": passn, "fail": 0, "skip": 0},
+                "results": [{"case": "bench/x", "status": "PASS", "detail": "ok"}]}
+
+    s = tmp_path / "stock.json"
+    z = tmp_path / "zdtd.json"
+    s.write_text(json.dumps(report("stock", 157.1, 1)), encoding="utf-8")
+    z.write_text(json.dumps(report("zdtd", 128.0, 1)), encoding="utf-8")
+    out = tmp_path / "out"
+    r = subprocess.run(
+        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
+    assert payload["findings"] == []          # wall is an axis, not a mismatch
+    assert payload["stock"]["wall"] == 157.1
+    assert payload["zdtd"]["wall"] == 128.0
+    assert payload["stock"]["server"] == "stock"
+    assert payload["zdtd"]["server"] == "zdtd"
+    report_md = (out / "playtest-compare.md").read_text(encoding="utf-8")
+    assert "| wall time (s) | 157.1 | 128.0 |" in report_md
