@@ -1048,6 +1048,8 @@ def main(argv: list[str] | None = None) -> int:
             "spawn_vehicle": 0,
             "spawn_loadgen_peer": 0,
             "spawn_loadgen_bots": 0,
+            "bot_spawn": 0,
+            "bot_player_near": 0,
             "persist_setup_done": 0,
             "teleport_persist_pad": 0,
             "apm_dump": 0,
@@ -1361,6 +1363,36 @@ def main(argv: list[str] | None = None) -> int:
                                 tn.spawn_near_players("zombieBoe", per=1)
                             tn.close()
                         barrier_counts["spawn_zombie"] += 1
+
+                    hits = _barrier_hits(text, "bot_spawn")
+                    while barrier_counts["bot_spawn"] < hits:
+                        # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if needed
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if tn.connect():
+                            out = tn.exec("bot list")
+                            # Count bots from bot list output (lines with "Bot ")
+                            import re as _re
+                            n = len(_re.findall(r"Bot ", out))
+                            if n < 4:
+                                r = tn.exec("bot count 6")
+                                log(f"telnet bot count 6 -> {r[:120]!r}")
+                            tn.close()
+                        barrier_counts["bot_spawn"] += 1
+
+                    hits = _barrier_hits(text, "bot_player_near")
+                    while barrier_counts["bot_player_near"] < hits:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if tn.connect():
+                            pids = tn.list_player_ids()
+                            if pids:
+                                ident = str(pids[0])
+                                r = tn.exec(f"bot player {ident} 1")
+                                log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
+                            else:
+                                r = tn.exec("bot spawn 1")
+                                log(f"telnet bot spawn 1 -> {r[:120]!r}")
+                            tn.close()
+                        barrier_counts["bot_player_near"] += 1
 
                     hits = _barrier_hits(text, "kill_fixture_zombie")
                     while barrier_counts["kill_fixture_zombie"] < hits:

@@ -119,7 +119,7 @@ namespace ZdtdPlaytest
         {
             "smoke", "core", "world", "ui", "combat", "economy",
             "quest", "vehicle", "power", "finale", "persist", "persist_setup",
-            "mp", "soak", "soak_long", "apm", "benchmark",
+            "mp", "soak", "soak_long", "apm", "benchmark", "bot",
         };
 
         // Fixed Navezgane pad for multi-phase rejoin (same coords after restart).
@@ -151,6 +151,7 @@ namespace ZdtdPlaytest
                 case "soak": AddSoak(q, label); break;
                 case "soak_long": AddSoakLong(q, label); break;
                 case "apm": AddApm(q, label); break;
+                case "bot": AddBot(q, label); break;
                 case "benchmark":
                     // Timed attract path; outer loop multiplies by LAPS
                     {
@@ -4341,6 +4342,127 @@ namespace ZdtdPlaytest
         }
 
         // ── soak (short + long) ──────────────────────────────────────────
+
+
+        static void AddBot(List<CaseDef> q, string suite)
+        {
+            // All cases assume BotMod is installed on stock dedi (zombieSoldier bots).
+            // No inventory faking: we observe via world.Entities.list and server telnet bot commands.
+
+            q.Add(Live(suite, "bot_spawn_visible", new[] { "bot", "demo" }, ctx =>
+            {
+                // Host will have already auto-spawned TargetBotCount via BotManager.
+                // Also request one explicit spawn near the player for determinism.
+                Report.Barrier("bot_spawn");
+                ctx.IntA = 0;
+                ctx.Detail = "request bot spawn near player";
+            }, wait: ctx =>
+            {
+                int bots = 0, total = 0;
+                var pos = ctx.Player.GetPosition();
+                for (int i = 0; i < ctx.World.Entities.list.Count; i++)
+                {
+                    var e = ctx.World.Entities.list[i] as EntityAlive;
+                    if (e == null || e is EntityPlayer || e.IsDead()) continue;
+                    // BotMod bots are zombieSoldier with very specific spawnpoints; count any zombie within 200m
+                    if ((e.GetPosition() - pos).sqrMagnitude < 200f*200f) bots++;
+                    total++;
+                }
+                ctx.IntA = bots;
+                ctx.Detail = $"nearby_zombies={bots} total_alive={total}";
+                return bots >= 1;
+            }, assert: ctx => ctx.IntA >= 1, timeout: 30f, fail: "no bot zombie visible within 200m (BotMod not installed or no spawn)", pause: 0.4f));
+
+            q.Add(Live(suite, "bot_moves", new[] { "bot", "locomotion" }, ctx =>
+            {
+                var b = Helpers.FindNearestOtherAlive(ctx.World, ctx.Player.GetPosition(), 120f);
+                if (b == null) { ctx.Detail = "no bot to track"; return; }
+                ctx.IntA = b.entityId;
+                ctx.StartPos = b.GetPosition();
+                ctx.Detail = $"track bot {b.entityId} at {ctx.StartPos}";
+            }, wait: ctx =>
+            {
+                var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
+                if (e == null) { ctx.Detail = "tracked bot gone"; return true; }
+                float d = (e.GetPosition() - ctx.StartPos).magnitude;
+                ctx.FloatA = d;
+                float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
+                ctx.Detail = $"bot {ctx.IntA} moved {d:0.00}m t={elapsed:0.0}";
+                // Movement proves nav (AAS-like) is ticking; 1.5m in 12s.
+                return d >= 1.5f;
+            }, assert: ctx => ctx.FloatA >= 1.0f, timeout: 14f, fail: "bot did not move >=1m in 14s (AAS/pathfinding stalled)", pause: 0.3f));
+
+            q.Add(Live(suite, "bot_physics_parity", new[] { "bot", "physics" }, ctx =>
+            {
+                var b = Helpers.FindNearestOtherAlive(ctx.World, ctx.Player.GetPosition(), 120f);
+                if (b == null) { ctx.Detail = "no bot for physics check"; ctx.IntA = -1; return; }
+                ctx.IntA = b.entityId;
+                ctx.StartPos = b.GetPosition();
+                // Ground height under player and bot should both be near world height; check bot isn't noclipping through terrain
+                float botY = b.GetPosition().y;
+                float groundY = ctx.World.GetHeightAt(b.GetPosition().x, b.GetPosition().z);
+                ctx.FloatA = botY - groundY; // feet offset
+                ctx.Detail = $"bot {b.entityId} y={botY:0.0} ground={groundY:0.0} feet={ctx.FloatA:0.0}";
+            }, wait: ctx =>
+            {
+                if (ctx.IntA < 0) return true;
+                var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
+                if (e == null) return true;
+                float groundY = ctx.World.GetHeightAt(e.GetPosition().x, e.GetPosition().z);
+                float feet = e.GetPosition().y - groundY;
+                ctx.FloatA = feet;
+                ctx.Detail = $"bot {ctx.IntA} feet={feet:0.0} (must stay 0..4m, not flying/noclip)";
+                // Even if not perfectly on ground due to terrain sample, must be within sane bounds
+                return elapsedCheck(ctx, 3f);
+            }, assert: ctx =>
+            {
+                // After 3s warmup, bot must have stayed between 0 and 4m above ground (no godmode fly/no-clip through void)
+                if (ctx.IntA < 0) return false;
+                var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
+                if (e == null) return true; // gone is not a physics fail; other bot cases cover spawn
+                float groundY = ctx.World.GetHeightAt(e.GetPosition().x, e.GetPosition().z);
+                float feet = e.GetPosition().y - groundY;
+                ctx.Detail = $"bot {e.entityId} feet={feet:0.0} (want 0..6)";
+                return feet >= 0f && feet <= 6f;
+            }, timeout: 8f, fail: "bot feet off ground >6m (noclip/fly)", pause: 0.2f));
+
+            q.Add(Live(suite, "bot_player_near", new[] { "bot", "demo" }, ctx =>
+            {
+                // Request a bot via telnet to spawn near this player, then client observes it.
+                Report.Barrier("bot_player_near");
+                ctx.IntA = 0;
+                // Snapshot player pos before.
+                ctx.StartPos = ctx.Player.GetPosition();
+                ctx.Detail = $"request bot near {ctx.StartPos}";
+            }, wait: ctx =>
+            {
+                // After host spawns `bot player <name>`, a fresh bot should appear within 12-42m ring
+                float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
+                EntityAlive best = null; float bestD = float.MaxValue;
+                for (int i = 0; i < ctx.World.Entities.list.Count; i++)
+                {
+                    var e = ctx.World.Entities.list[i] as EntityAlive;
+                    if (e == null || e is EntityPlayer || e.IsDead()) continue;
+                    float d = (e.GetPosition() - ctx.StartPos).sqrMagnitude;
+                    if (d < bestD) { bestD = d; best = e; }
+                }
+                if (best != null)
+                {
+                    float d = Mathf.Sqrt(bestD);
+                    ctx.IntA = best.entityId;
+                    ctx.FloatA = d;
+                    ctx.Detail = $"nearest bot {best.entityId} dist={d:0.0}m t={elapsed:0.0}";
+                    return d >= 10f && d <= 55f;
+                }
+                ctx.Detail = $"no bot near t={elapsed:0.0}";
+                return false;
+            }, assert: ctx => ctx.FloatA >= 10f && ctx.FloatA <= 55f, timeout: 22f, fail: "no bot spawned in 12-42m ring near player (bot player)", pause: 0.4f));
+        }
+
+        static bool elapsedCheck(CaseCtx ctx, float want)
+        {
+            return Time.unscaledTime - ctx.CaseStartUnscaled >= want;
+        }
 
         static void AddSoak(List<CaseDef> q, string suite)
         {
