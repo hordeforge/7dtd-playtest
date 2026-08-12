@@ -326,7 +326,8 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 | soak | 2 | 0 |
 | soak_long | 1 | 0 |
 | apm | 1 | 0 |
-| **catalog total** | **104** | **0** |
+| bot | 4 | 0 |
+| **catalog total** | **108** | **0** |
 
 Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
 (smoke…finale attract path; residual suites separate). Residual promotion gate:

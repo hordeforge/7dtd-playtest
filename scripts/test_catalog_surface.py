@@ -148,6 +148,13 @@ def main() -> int:
         f"SCENARIOS.md missing live rows for Catalog Live cases: {undoc_live}"
     )
 
+    # The Counts table total must equal the parsed Live set (drift guard).
+    total_m = re.search(r"\*\*catalog total\*\*\s*\|\s*\*\*(\d+)\*\*", doc)
+    assert total_m and int(total_m.group(1)) == len(live), (
+        f"Counts 'catalog total' {total_m.group(1) if total_m else '?'} != "
+        f"Catalog.cs Live count {len(live)} - stale suite row in SCENARIOS.md"
+    )
+
     # Built-in Defer set is empty today; any new Defer must be documented.
     undoc_defer = sorted(
         c
