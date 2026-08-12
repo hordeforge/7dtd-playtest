@@ -2,8 +2,8 @@
 
 | axis | stock | zdtd |
 |---|---|---|
-| cases PASS | 79 | 79 |
-| cases FAIL | 4 | 4 |
+| cases PASS | 80 | 79 |
+| cases FAIL | 3 | 4 |
 | cases SKIP | 0 | 0 |
 
 ## Per-case
@@ -18,7 +18,7 @@
 | `combat/ranged_shot` | PASS | PASS |
 | `combat/sleeper_wake` | FAIL | PASS |
 | `combat/zombie_death_loot` | PASS | FAIL |
-| `combat/zombie_or_npc_nearby` | FAIL | PASS |
+| `combat/zombie_or_npc_nearby` | PASS | PASS |
 | `combat/zombie_target_has_health` | FAIL | PASS |
 | `core/bag_present` | PASS | PASS |
 | `core/block_damage_melee` | PASS | PASS |
@@ -98,7 +98,6 @@
 
 - combat/sleeper_wake: status differs (FAIL vs PASS)
 - combat/zombie_death_loot: status differs (PASS vs FAIL)
-- combat/zombie_or_npc_nearby: status differs (FAIL vs PASS)
 - combat/zombie_target_has_health: status differs (FAIL vs PASS)
 - economy/item_drop_entity: status differs (PASS vs FAIL)
 - economy/loot_bag_pickup: status differs (PASS vs FAIL)

@@ -14,11 +14,11 @@
   {
    "case": "combat/blood_moon_music",
    "stock": {
-    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=7607 rawNow=8000",
+    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=7459 rawNow=8000",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=8276 rawNow=8000",
+    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=8973 rawNow=8000",
     "status": "PASS"
    }
   },
@@ -73,7 +73,7 @@
     "status": "FAIL"
    },
    "zdtd": {
-    "detail": "phase=2 sleptObs=True alive=True sleeping=False id=111",
+    "detail": "phase=2 sleptObs=True alive=True sleeping=False id=113",
     "status": "PASS"
    }
   },
@@ -84,15 +84,15 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "fixture not dead after kill barrier after 18.0s | items0=1 items=2 sample=EntityLootContainer#113 dead=False t=18.0",
+    "detail": "player dead/missing mid-case t=0.4",
     "status": "FAIL"
    }
   },
   {
    "case": "combat/zombie_or_npc_nearby",
    "stock": {
-    "detail": "no NPC/zombie in range (telnet spawn?) after 25.0s | alive_other=0 total=1 players=1",
-    "status": "FAIL"
+    "detail": "alive_other=1 total=2 players=1",
+    "status": "PASS"
    },
    "zdtd": {
     "detail": "alive_other=2 total=4 players=1",
@@ -106,7 +106,7 @@
     "status": "FAIL"
    },
    "zdtd": {
-    "detail": "entityId=111 hp=100000/100000 class=npcTraderJen",
+    "detail": "entityId=113 hp=100000/100000 class=npcTraderJen",
     "status": "PASS"
    }
   },
@@ -128,7 +128,7 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "type0=20304 now=20304 dmg0=0 dmg=4 pulses=2",
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=3 pulses=2",
     "status": "PASS"
    }
   },
@@ -150,18 +150,18 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "was=7 now=0 at -269, 62, 461",
+    "detail": "was=7 now=0 at -270, 62, 461",
     "status": "PASS"
    }
   },
   {
    "case": "core/held_slot_report",
    "stock": {
-    "detail": "slot=0 type=65537",
+    "detail": "slot=0 type=65537 quality=2",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "slot=0 type=65537",
+    "detail": "slot=0 type=65537 quality=2",
     "status": "PASS"
    }
   },
@@ -179,11 +179,11 @@
   {
    "case": "core/jump_motor",
    "stock": {
-    "detail": "y0=61.08 peak=63.09 rise=2.01",
+    "detail": "y0=61.04 peak=63.07 rise=2.03",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "y0=61.02 peak=63.04 rise=2.02",
+    "detail": "y0=61.08 peak=63.10 rise=2.02",
     "status": "PASS"
    }
   },
@@ -227,7 +227,7 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "want=7 now=7 at -269, 62, 461",
+    "detail": "want=7 now=7 at -270, 62, 461",
     "status": "PASS"
    }
   },
@@ -245,29 +245,29 @@
   {
    "case": "core/sneak_motor",
    "stock": {
-    "detail": "horiz=3.16 hopMax=0.02 motionTicks=183",
+    "detail": "horiz=3.18 hopMax=0.03 motionTicks=228",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "horiz=3.16 hopMax=0.05 motionTicks=87",
+    "detail": "horiz=3.16 hopMax=0.02 motionTicks=219",
     "status": "PASS"
    }
   },
   {
    "case": "core/sprint_motor",
    "stock": {
-    "detail": "horiz=9.10 m/s~=4.55 hopMax=0.20 motionTicks=145",
+    "detail": "horiz=8.75 m/s~=4.37 hopMax=0.42 motionTicks=105",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "horiz=9.16 m/s~=4.58 hopMax=0.13 motionTicks=333",
+    "detail": "horiz=9.18 m/s~=4.59 hopMax=0.17 motionTicks=199",
     "status": "PASS"
    }
   },
   {
    "case": "core/stamina_drains_sprint",
    "stock": {
-    "detail": "stam0=100.0 min=98.3 drain=1.7",
+    "detail": "stam0=100.0 min=98.4 drain=1.6",
     "status": "PASS"
    },
    "zdtd": {
@@ -278,33 +278,33 @@
   {
    "case": "core/walk_lateral",
    "stock": {
-    "detail": "horiz=1.52 dx=1.52 dz=0.00 hopMax=0.03 motionTicks=72",
+    "detail": "horiz=1.52 dx=1.52 dz=0.00 hopMax=0.04 motionTicks=49",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "horiz=1.51 dx=1.51 dz=0.00 hopMax=0.03 motionTicks=75",
+    "detail": "horiz=1.51 dx=1.51 dz=0.00 hopMax=0.04 motionTicks=59",
     "status": "PASS"
    }
   },
   {
    "case": "core/walk_motor",
    "stock": {
-    "detail": "horiz=1.51 hopMax=0.04 motionTicks=60",
+    "detail": "horiz=1.50 hopMax=0.05 motionTicks=46",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "horiz=1.51 hopMax=0.05 motionTicks=62",
+    "detail": "horiz=1.50 hopMax=0.04 motionTicks=51",
     "status": "PASS"
    }
   },
   {
    "case": "core/walk_ring",
    "stock": {
-    "detail": "path~=13.25 motionTicks=471 legs=3",
+    "detail": "path~=13.39 motionTicks=422 legs=3",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "path~=13.92 motionTicks=509 legs=3",
+    "detail": "path~=13.07 motionTicks=439 legs=3",
     "status": "PASS"
    }
   },
@@ -359,18 +359,18 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "count0=2 now=0 food0=50.0 food=98.7 stackDrop=True foodRise=True",
+    "detail": "count0=2 now=0 food0=50.0 food=98.6 stackDrop=True foodRise=True",
     "status": "PASS"
    }
   },
   {
    "case": "economy/item_drop_entity",
    "stock": {
-    "detail": "beforeItems=0 now=1 sample=EntityItem#187",
+    "detail": "beforeItems=0 now=1 sample=EntityItem#188",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "player dead/missing mid-case t=0.9",
+    "detail": "no EntityItem after ItemDropServer after 12.0s | beforeItems=1 now=1 sample=EntityLootContainer#119",
     "status": "FAIL"
    }
   },
@@ -388,7 +388,7 @@
   {
    "case": "economy/loot_bag_pickup",
    "stock": {
-    "detail": "items0=1 items=1 bag0=3 bag=3 eid=187 gone=True",
+    "detail": "items0=1 items=1 bag0=3 bag=3 eid=188 gone=True",
     "status": "PASS"
    },
    "zdtd": {
@@ -410,11 +410,11 @@
   {
    "case": "economy/trader_stock_ui",
    "stock": {
-    "detail": "traderId=189 data=True stock=0 ui=opened trader (verified)",
+    "detail": "traderId=191 data=True stock=0 ui=opened trader (verified)",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "traderId=111 data=True stock=50 ui=opened trader (verified)",
+    "detail": "traderId=113 data=True stock=50 ui=opened trader (verified)",
     "status": "PASS"
    }
   },
@@ -436,7 +436,7 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "targetId=121 gone",
+    "detail": "targetId=123 gone",
     "status": "PASS"
    }
   },
@@ -465,7 +465,7 @@
   {
    "case": "power/generator_fuel",
    "stock": {
-    "detail": "te=TileEntityPoweredRangedTrap at 933, 61, 895",
+    "detail": "te=TileEntityPoweredRangedTrap at 932, 61, 894",
     "status": "PASS"
    },
    "zdtd": {
@@ -509,7 +509,7 @@
   {
    "case": "power/wire_remove_parent",
    "stock": {
-    "detail": "type0=19192 now=0",
+    "detail": "type0=24684 now=0",
     "status": "PASS"
    },
    "zdtd": {
@@ -619,11 +619,11 @@
   {
    "case": "smoke/day_clock",
    "stock": {
-    "detail": "day=1 07:02 raw=7043",
+    "detail": "day=1 07:02 raw=7046",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "day=1 07:53 raw=7891",
+    "detail": "day=1 08:35 raw=8592",
     "status": "PASS"
    }
   },
@@ -641,11 +641,11 @@
   {
    "case": "smoke/join_ready",
    "stock": {
-    "detail": "pos=(919.00, 61.08, 878.00) hp=100 id=177 spawned=True",
+    "detail": "pos=(919.00, 61.08, 878.00) hp=99 id=177 spawned=True",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "pos=(-273.00, 61.08, 449.00) hp=100 id=112 spawned=True",
+    "detail": "pos=(-273.00, 61.08, 449.00) hp=100 id=114 spawned=True",
     "status": "PASS"
    }
   },
@@ -755,7 +755,7 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "vehDist=0.54",
+    "detail": "vehDist=0.50",
     "status": "PASS"
    }
   },
@@ -784,22 +784,22 @@
   {
    "case": "vehicle/vehicle_spawn_visible",
    "stock": {
-    "detail": "vehicles=1 sample=EntityBicycle#190",
+    "detail": "vehicles=1 sample=EntityBicycle#192",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "vehicles=1 sample=EntityBicycle#124",
+    "detail": "vehicles=1 sample=EntityBicycle#126",
     "status": "PASS"
    }
   },
   {
    "case": "vehicle/vehicle_terrain_clamp",
    "stock": {
-    "detail": "y0=61.08 peak=61.83 y=61.83",
+    "detail": "y0=60.98 peak=61.73 y=61.73",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "y0=60.94 peak=61.69 y=61.00",
+    "detail": "y0=60.97 peak=61.72 y=61.72",
     "status": "PASS"
    }
   },
@@ -832,14 +832,14 @@
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "chunk_has=True block=0 at -270, 61, 460",
+    "detail": "chunk_has=True block=0 at -269, 61, 460",
     "status": "PASS"
    }
   },
   {
    "case": "world/deco_trees",
    "stock": {
-    "detail": "plantish=18 solidSample=237",
+    "detail": "plantish=18 solidSample=238",
     "status": "PASS"
    },
    "zdtd": {
@@ -850,7 +850,7 @@
   {
    "case": "world/entities_in_radius",
    "stock": {
-    "detail": "total=2 players=1 alive_other=0",
+    "detail": "total=3 players=1 alive_other=1",
     "status": "PASS"
    },
    "zdtd": {
@@ -861,7 +861,7 @@
   {
    "case": "world/poi_textures_non_terrain",
    "stock": {
-    "detail": "maxBlockType=24868 solid=6 distinct=7",
+    "detail": "maxBlockType=24868 solid=7 distinct=8",
     "status": "PASS"
    },
    "zdtd": {
@@ -894,22 +894,22 @@
   {
    "case": "world/world_time",
    "stock": {
-    "detail": "worldTime=7178",
+    "detail": "worldTime=7179",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "worldTime=8046",
+    "detail": "worldTime=8746",
     "status": "PASS"
    }
   },
   {
    "case": "world/world_time_advances",
    "stock": {
-    "detail": "t0=7181 now=7182 delta=1",
+    "detail": "t0=7182 now=7183 delta=1",
     "status": "PASS"
    },
    "zdtd": {
-    "detail": "t0=8049 now=8050 delta=1",
+    "detail": "t0=8750 now=8751 delta=1",
     "status": "PASS"
    }
   }
@@ -918,7 +918,6 @@
  "findings": [
   "combat/sleeper_wake: status differs (FAIL vs PASS)",
   "combat/zombie_death_loot: status differs (PASS vs FAIL)",
-  "combat/zombie_or_npc_nearby: status differs (FAIL vs PASS)",
   "combat/zombie_target_has_health: status differs (FAIL vs PASS)",
   "economy/item_drop_entity: status differs (PASS vs FAIL)",
   "economy/loot_bag_pickup: status differs (PASS vs FAIL)"
@@ -926,8 +925,8 @@
  "stock": {
   "nreLike": 0,
   "summary": {
-   "fail": 4,
-   "pass": 79,
+   "fail": 3,
+   "pass": 80,
    "skip": 0
   }
  },
