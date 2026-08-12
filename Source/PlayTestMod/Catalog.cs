@@ -60,7 +60,15 @@ namespace ZdtdPlaytest
                             "quest", "vehicle", "power", "finale", "soak");
                         break;
                     case "residual":
-                        // Multi-peer + short soak probes (not 15m; that is suite soak_long).
+                        // Lightweight in-client residual probe only (mp + short soak).
+                        // The Make target playtest-residual is different: it runs
+                        // separate host orch for persist, mp, apm, and soak_long
+                        // (multi-phase / long wall-clock). Do not expand those here —
+                        // persist needs persist_setup host barriers; soak_long is ≥15m.
+                        AddUnique(list, "mp", "soak");
+                        break;
+                    case "residual_light":
+                        // Explicit synonym for residual (mp + short soak only).
                         AddUnique(list, "mp", "soak");
                         break;
                     case "persist":
@@ -105,6 +113,18 @@ namespace ZdtdPlaytest
             {
                 tmp.Clear();
                 AppendSuite(tmp, name, 0);
+                foreach (var c in tmp)
+                {
+                    string st = c.Deferred ? "deferred" : "live";
+                    Report.Info("case " + c.Suite + "/" + c.Id + " status=" + st
+                        + " tags=" + string.Join("+", c.Tags ?? Array.Empty<string>())
+                        + (c.Deferred ? " reason=" + c.DeferReason : ""));
+                }
+            }
+            foreach (var name in ScenarioProviders.SuiteIds())
+            {
+                tmp.Clear();
+                ScenarioProviders.AppendSuite(tmp, name, 0);
                 foreach (var c in tmp)
                 {
                     string st = c.Deferred ? "deferred" : "live";
@@ -163,41 +183,23 @@ namespace ZdtdPlaytest
                     }
                     break;
                 default:
+                    ScenarioProviders.AppendSuite(q, suite, lap);
                     break;
             }
         }
 
-        // ── helpers ──────────────────────────────────────────────────────
+        // ── helpers (thin wrappers → public CaseDef factories) ───────────
 
         static CaseDef Live(string suite, string id, string[] tags, Action<CaseCtx> act,
             Func<CaseCtx, bool> wait = null, Func<CaseCtx, bool> assert = null,
             float timeout = 8f, string fail = "timeout", float pause = 0.5f)
         {
-            return new CaseDef
-            {
-                Suite = suite,
-                Id = id,
-                Tags = tags,
-                Act = act,
-                Wait = wait,
-                Assert = assert,
-                TimeoutSec = timeout,
-                FailDetail = fail,
-                PauseAfterSec = pause,
-            };
+            return CaseDef.Live(suite, id, tags, act, wait, assert, timeout, fail, pause);
         }
 
         static CaseDef Defer(string suite, string id, string[] tags, string reason)
         {
-            return new CaseDef
-            {
-                Suite = suite,
-                Id = id,
-                Tags = tags,
-                Deferred = true,
-                DeferReason = reason,
-                PauseAfterSec = 0.02f,
-            };
+            return CaseDef.Defer(suite, id, tags, reason);
         }
 
         // ── smoke ────────────────────────────────────────────────────────

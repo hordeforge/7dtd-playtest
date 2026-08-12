@@ -28,8 +28,12 @@ namespace ZdtdPlaytest
         Finished,
     }
 
-    /// <summary>One step in a scripted demo / suite.</summary>
-    sealed class CaseDef
+    /// <summary>
+    /// One step in a scripted demo / suite. External <see cref="IScenarioProvider"/>
+    /// mods should build cases with <see cref="Live"/> / <see cref="Defer"/> rather
+    /// than assigning fields by hand.
+    /// </summary>
+    public sealed class CaseDef
     {
         public string Suite;
         public string Id;
@@ -44,9 +48,56 @@ namespace ZdtdPlaytest
         public string FailDetail = "timeout";
         /// <summary>Gap between this case and next (demo pacing).</summary>
         public float PauseAfterSec = 0.5f;
+
+        /// <summary>
+        /// Build a live case (Act → optional Wait → optional Assert). Used by the
+        /// built-in catalog and by external scenario providers.
+        /// </summary>
+        public static CaseDef Live(
+            string suite,
+            string id,
+            string[] tags,
+            Action<CaseCtx> act,
+            Func<CaseCtx, bool> wait = null,
+            Func<CaseCtx, bool> assert = null,
+            float timeout = 8f,
+            string fail = "timeout",
+            float pause = 0.5f)
+        {
+            return new CaseDef
+            {
+                Suite = suite,
+                Id = id,
+                Tags = tags ?? Array.Empty<string>(),
+                Deferred = false,
+                DeferReason = "",
+                Act = act,
+                Wait = wait,
+                Assert = assert,
+                TimeoutSec = timeout,
+                FailDetail = fail,
+                PauseAfterSec = pause,
+            };
+        }
+
+        /// <summary>
+        /// Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
+        /// </summary>
+        public static CaseDef Defer(string suite, string id, string[] tags, string reason)
+        {
+            return new CaseDef
+            {
+                Suite = suite,
+                Id = id,
+                Tags = tags ?? Array.Empty<string>(),
+                Deferred = true,
+                DeferReason = reason ?? "",
+                PauseAfterSec = 0.02f,
+            };
+        }
     }
 
-    sealed class CaseCtx
+    public sealed class CaseCtx
     {
         public GameManager Gm;
         public World World;
@@ -82,11 +133,29 @@ namespace ZdtdPlaytest
         /// <summary>When player is null/dead mid-suite, count unscaled time to avoid hang.</summary>
         static float _playerMissingSince = -1f;
 
+        /// <summary>
+        /// First non-empty environment variable among <paramref name="names"/>.
+        /// Supports both canonical <c>PLAYTEST_*</c> and legacy <c>ZDTD_PLAYTEST_*</c>
+        /// names used by older host runners.
+        /// </summary>
+        static string EnvFirst(params string[] names)
+        {
+            if (names == null) return null;
+            foreach (var name in names)
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                string v = Environment.GetEnvironmentVariable(name);
+                if (!string.IsNullOrEmpty(v)) return v;
+            }
+            return null;
+        }
+
         public static void ArmFromEnv()
         {
-            string suiteEnv = Environment.GetEnvironmentVariable("PLAYTEST_SUITE");
-            string legacy = Environment.GetEnvironmentVariable("PLAYTEST");
-            string laps = Environment.GetEnvironmentVariable("PLAYTEST_LAPS");
+            // Canonical: PLAYTEST_SUITE. Legacy/Atomic host: ZDTD_PLAYTEST_SUITE.
+            string suiteEnv = EnvFirst("PLAYTEST_SUITE", "ZDTD_PLAYTEST_SUITE");
+            string legacy = EnvFirst("PLAYTEST", "ZDTD_PLAYTEST");
+            string laps = EnvFirst("PLAYTEST_LAPS", "ZDTD_PLAYTEST_LAPS");
             if (!string.IsNullOrEmpty(laps) && int.TryParse(laps, out int n) && n > 0)
                 _benchmarkLaps = Math.Min(n, 20);
             else
