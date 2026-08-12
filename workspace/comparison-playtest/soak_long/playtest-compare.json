@@ -1,0 +1,35 @@
+{
+ "cases": [
+  {
+   "case": "soak_long/soak_15min_host",
+   "stock": {
+    "detail": "t=900.0 digs=30 alive=True hp=100",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "player dead/missing mid-case t=12.0",
+    "status": "FAIL"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [
+  "soak_long/soak_15min_host: status differs (PASS vs FAIL)"
+ ],
+ "stock": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 1,
+   "skip": 0
+  }
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 1,
+   "pass": 0,
+   "skip": 0
+  }
+ }
+}
