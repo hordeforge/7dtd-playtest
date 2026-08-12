@@ -1,0 +1,88 @@
+{
+ "cases": [
+  {
+   "case": "mp/bots_plus_playtest",
+   "stock": {
+    "detail": "peers=1 peak=1 alive=True hp=100",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "peers=1 peak=1 alive=True hp=100",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "mp/chat_roundtrip",
+   "stock": {
+    "detail": "token=ptchat34162 hit=True last=ptchat34162",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "token=ptchat61310 hit=True last=ptchat61310",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "mp/lock_contention",
+   "stock": {
+    "detail": "type=18683 locked=True peers=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=18683 locked=True peers=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "mp/second_client_visible",
+   "stock": {
+    "detail": "peers=1 peak=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "peers=1 peak=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "mp/setblock_interest",
+   "stock": {
+    "detail": "type=0 peers=1 air=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=0 peers=1 air=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "mp/shared_quest",
+   "stock": {
+    "detail": "quests=1 peers=1 seeded=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "quests=2 peers=1 seeded=True",
+    "status": "PASS"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [],
+ "stock": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 6,
+   "skip": 0
+  }
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 6,
+   "skip": 0
+  }
+ }
+}
