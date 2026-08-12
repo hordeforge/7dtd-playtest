@@ -1,0 +1,965 @@
+{
+ "cases": [
+  {
+   "case": "combat/alive_flags_self",
+   "stock": {
+    "detail": "alive=True dead=False hp=100",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "alive=True dead=False hp=100",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/blood_moon_music",
+   "stock": {
+    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=7605 rawNow=8000",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=11102 rawNow=8000",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/explosion_client",
+   "stock": {
+    "detail": "type0=20304 now=0 dmg0=0 dmg=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=13",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/held_item_type",
+   "stock": {
+    "detail": "holding_type=65537",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "holding_type=65537",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/melee_damage_out",
+   "stock": {
+    "detail": "no target for melee",
+    "status": "FAIL"
+   },
+   "zdtd": {
+    "detail": "no target for melee",
+    "status": "FAIL"
+   }
+  },
+  {
+   "case": "combat/ranged_shot",
+   "stock": {
+    "detail": "meta0=6 meta=4 hp0=-1 hp=gone pulses=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "meta0=6 meta=4 hp0=100000 hp=100000 pulses=0",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/sleeper_wake",
+   "stock": {
+    "detail": "sleeper pose/wake sequence failed after 22.0s | no AI t=22.0",
+    "status": "FAIL"
+   },
+   "zdtd": {
+    "detail": "phase=2 sleptObs=True alive=True sleeping=False id=112",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/zombie_death_loot",
+   "stock": {
+    "detail": "items0=0 items=0 sample= dead=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "player dead/missing mid-case t=0.2",
+    "status": "FAIL"
+   }
+  },
+  {
+   "case": "combat/zombie_or_npc_nearby",
+   "stock": {
+    "detail": "no NPC/zombie in range (telnet spawn?) after 25.0s | alive_other=0 total=1 players=1",
+    "status": "FAIL"
+   },
+   "zdtd": {
+    "detail": "alive_other=2 total=4 players=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/zombie_target_has_health",
+   "stock": {
+    "detail": "wait spawn t=8.0",
+    "status": "FAIL"
+   },
+   "zdtd": {
+    "detail": "entityId=112 hp=100000/100000 class=npcTraderJen",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/bag_present",
+   "stock": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/block_damage_melee",
+   "stock": {
+    "detail": "type0=20304 now=0 dmg0=0 dmg=0 pulses=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=4 pulses=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/buffs",
+   "stock": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/dig_confirm",
+   "stock": {
+    "detail": "was=17 now=0 at 923, 62, 889",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "was=7 now=0 at -269, 62, 461",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/held_slot_report",
+   "stock": {
+    "detail": "slot=0 type=65537",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "slot=0 type=65537",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/inventory",
+   "stock": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/jump_motor",
+   "stock": {
+    "detail": "y0=61.08 peak=63.09 rise=2.01",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "y0=61.08 peak=63.10 rise=2.02",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/look",
+   "stock": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/look_pitch",
+   "stock": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/look_yaw_sweep",
+   "stock": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/place_confirm",
+   "stock": {
+    "detail": "want=17 now=17 at 923, 62, 889",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "want=7 now=7 at -269, 62, 461",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/quests_journal",
+   "stock": {
+    "detail": "journal_quests=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "journal_quests=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/sneak_motor",
+   "stock": {
+    "detail": "horiz=3.16 hopMax=0.02 motionTicks=210",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=3.16 hopMax=0.02 motionTicks=46",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/sprint_motor",
+   "stock": {
+    "detail": "horiz=7.58 m/s~=3.79 hopMax=0.25 motionTicks=115",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=9.07 m/s~=4.54 hopMax=0.06 motionTicks=328",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/stamina_drains_sprint",
+   "stock": {
+    "detail": "stam0=100.0 min=98.2 drain=1.8",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "stam0=100.0 min=98.5 drain=1.5",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/walk_lateral",
+   "stock": {
+    "detail": "horiz=1.52 dx=1.52 dz=0.00 hopMax=0.04 motionTicks=56",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.51 dx=1.51 dz=0.00 hopMax=0.04 motionTicks=58",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/walk_motor",
+   "stock": {
+    "detail": "horiz=1.52 hopMax=0.04 motionTicks=59",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.51 hopMax=0.03 motionTicks=82",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/walk_ring",
+   "stock": {
+    "detail": "path~=13.45 motionTicks=424 legs=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "path~=14.10 motionTicks=544 legs=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/bag_add_item",
+   "stock": {
+    "detail": "before=2 now=3 before=2 now=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "before=5 now=6 before=5 now=6",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/chest_open_loot",
+   "stock": {
+    "detail": "type=18683 te=True class=TileEntityComposite",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=18683 te=True class=TileEntityComposite",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/craft_consume_output",
+   "stock": {
+    "detail": "wood0=21 wood=16 club0=0 club=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "wood0=20 wood=15 club0=0 club=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/craft_window_recipes",
+   "stock": {
+    "detail": "opened crafting",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened crafting",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/eat_food_consume",
+   "stock": {
+    "detail": "count0=3 now=0 food0=50.0 food=55.0 stackDrop=True foodRise=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "count0=2 now=0 food0=50.0 food=98.6 stackDrop=True foodRise=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/item_drop_entity",
+   "stock": {
+    "detail": "beforeItems=0 now=1 sample=EntityItem#187",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "no EntityItem after ItemDropServer after 12.0s | beforeItems=1 now=1 sample=EntityLootContainer#118",
+    "status": "FAIL"
+   }
+  },
+  {
+   "case": "economy/land_claim_place",
+   "stock": {
+    "detail": "type=18462 want=18462 claims0=0 claims=0 claims=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=18462 want=18462 claims0=0 claims=0 claims=0",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/loot_bag_pickup",
+   "stock": {
+    "detail": "items0=1 items=1 bag0=3 bag=3 eid=187 gone=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "player dead/missing mid-case t=0.8",
+    "status": "FAIL"
+   }
+  },
+  {
+   "case": "economy/trader_buy",
+   "stock": {
+    "detail": "coins0=50 coins1=40 bag0=6 bag1=6 stock0=1 stock1=0 spent=True goodsMoved=True stockChanged=True buyOk=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "coins0=50 coins1=40 bag0=9 bag1=10 stock0=50 stock1=49 spent=True goodsMoved=True stockChanged=True buyOk=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/trader_stock_ui",
+   "stock": {
+    "detail": "traderId=189 data=True stock=0 ui=opened trader (verified)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "traderId=112 data=True stock=50 ui=opened trader (verified)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/workstation_burn",
+   "stock": {
+    "detail": "type=20639 want=20639 te=True teClass=TileEntityWorkstation",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=20639 want=20639 te=True teClass=TileEntityWorkstation",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "economy/zombie_removed_after_kill",
+   "stock": {
+    "detail": "no target (clear)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "targetId=122 gone",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "finale/player_death_screen",
+   "stock": {
+    "detail": "dead=True hp=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "dead=True hp=0",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "finale/player_respawn",
+   "stock": {
+    "detail": "alive=True hp=50 spawned=False",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "alive=True hp=50 spawned=False",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "power/generator_fuel",
+   "stock": {
+    "detail": "te=TileEntityPoweredRangedTrap at 929, 61, 893",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "te=TileEntityPoweredRangedTrap at -253, 61, 460",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "power/place_generator",
+   "stock": {
+    "detail": "type=19186 te=True class=TileEntityPowerSource",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=19186 te=True class=TileEntityPowerSource",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "power/trigger_actuation",
+   "stock": {
+    "detail": "trigger=pressureplate type=19194 now=19194",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "trigger=pressureplate type=19194 now=19194",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "power/turret_place",
+   "stock": {
+    "detail": "type=19208",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type=19208",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "power/wire_remove_parent",
+   "stock": {
+    "detail": "type0=19192 now=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=19192 now=0",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "power/wire_set_parent",
+   "stock": {
+    "detail": "relay type=19192",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "relay type=19192",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/journal_exists",
+   "stock": {
+    "detail": "quests=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "quests=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/journal_iterate",
+   "stock": {
+    "detail": "count=0 empty",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "count=1 ids=quest_whiterivercitizen1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/quest_goto_progress",
+   "stock": {
+    "detail": "quest=quest_whiterivercitizen1 phase0=1 phase=2 moved=3.00 phaseChg=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "quest=quest_whiterivercitizen1 phase0=1 phase=2 moved=3.00 phaseChg=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/quest_kill_progress",
+   "stock": {
+    "detail": "quest=quest_whiterivercitizen1 phase0=2 phase1=3 obj0=1 obj1=0 state0=InProgress state1=InProgress",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "quest=quest_whiterivercitizen1 phase0=2 phase1=3 obj0=1 obj1=0 state0=InProgress state1=InProgress",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/quest_nav_marker",
+   "stock": {
+    "detail": "navManager=True markers~=2",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "navManager=True markers~=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/quest_turn_in",
+   "stock": {
+    "detail": "id=quest_whiterivercitizen1 state0=InProgress state1=Completed count0=1 count1=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "id=quest_whiterivercitizen1 state0=InProgress state1=Completed count0=2 count1=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "quest/starter_quest_active",
+   "stock": {
+    "detail": "seeded=quest_whiteRiverCitizen1 quests=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "seeded=quest_whiteRiverCitizen1 quests=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/cgo_ready",
+   "stock": {
+    "detail": "cgo=64 need=26 fixedSize=False",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "cgo=81 need=39 fixedSize=False",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/day_clock",
+   "stock": {
+    "detail": "day=1 07:02 raw=7040",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "day=1 10:43 raw=10721",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/ground",
+   "stock": {
+    "detail": "block=7 at 919, 60, 878",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "block=7 at -273, 60, 449",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/join_ready",
+   "stock": {
+    "detail": "pos=(919.00, 61.08, 878.00) hp=100 id=177 spawned=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pos=(-273.00, 61.08, 449.00) hp=100 id=113 spawned=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/stats",
+   "stock": {
+    "detail": "hp=99/99 stam=99",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "hp=100/100 stam=99",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "soak/soak_still_alive",
+   "stock": {
+    "detail": "alive=True hp=100 pos=(932.85, 60.97, 901.89)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "alive=True hp=100 pos=(-253.88, 61.08, 460.18)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "soak/soak_walk_look_cycle",
+   "stock": {
+    "detail": "step=8 originDist=8.98 motionTicks=103",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "step=8 originDist=2.02 motionTicks=85",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/character_open",
+   "stock": {
+    "detail": "opened character",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened character",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/craft_open",
+   "stock": {
+    "detail": "opened crafting (verified)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened crafting (verified)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/creative_menu",
+   "stock": {
+    "detail": "opened creative",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened creative",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/inventory_open",
+   "stock": {
+    "detail": "opened backpack (verified)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened backpack (verified)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/map_open",
+   "stock": {
+    "detail": "opened map",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened map",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/quest_log_open",
+   "stock": {
+    "detail": "opened quests",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened quests",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/skills_open",
+   "stock": {
+    "detail": "opened skills",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened skills",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "ui/ui_close_all",
+   "stock": {
+    "detail": "close_all requested",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "close_all requested",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "vehicle/vehicle_drive",
+   "stock": {
+    "detail": "vehicle did not move >=0.4m from drive input after 15.0s | vehDist=0.38 hasDriver=True seated=True t=15.0",
+    "status": "FAIL"
+   },
+   "zdtd": {
+    "detail": "vehDist=0.51",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "vehicle/vehicle_enter_exit",
+   "stock": {
+    "detail": "hadDriver=True stillIn=False t=0.0 phase=2",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "hadDriver=True stillIn=False t=0.0 phase=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "vehicle/vehicle_fuel_burn",
+   "stock": {
+    "detail": "fuel0=0 fuel=0 needsFuel=False",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "fuel0=0 fuel=0 needsFuel=False",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "vehicle/vehicle_spawn_visible",
+   "stock": {
+    "detail": "vehicles=1 sample=EntityBicycle#190",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "vehicles=1 sample=EntityBicycle#125",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "vehicle/vehicle_terrain_clamp",
+   "stock": {
+    "detail": "y0=61.63 peak=62.38 y=62.12",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "y0=61.00 peak=61.75 y=61.75",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/biome_id",
+   "stock": {
+    "detail": "biome=3 name=pine_forest",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "biome=3 name=pine_forest",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/block_sample_ring",
+   "stock": {
+    "detail": "solid=25 air=0 distinct=4",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "solid=25 air=0 distinct=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/chunk_under_player",
+   "stock": {
+    "detail": "chunk_has=True block=0 at 923, 61, 888",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "chunk_has=True block=0 at -270, 61, 460",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/deco_trees",
+   "stock": {
+    "detail": "plantish=27 solidSample=239",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "plantish=9 solidSample=180",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/entities_in_radius",
+   "stock": {
+    "detail": "total=3 players=1 alive_other=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "total=4 players=1 alive_other=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/poi_textures_non_terrain",
+   "stock": {
+    "detail": "maxBlockType=24868 solid=5 distinct=6",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "maxBlockType=24818 solid=0 distinct=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/water_plane",
+   "stock": {
+    "detail": "water=0 mass=True type=0 isWater=False sent=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "water=0 mass=True type=0 isWater=False sent=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/weather_array",
+   "stock": {
+    "detail": "global= biome=3 bw=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "global= biome=3 bw=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/world_time",
+   "stock": {
+    "detail": "worldTime=7175",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "worldTime=10874",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "world/world_time_advances",
+   "stock": {
+    "detail": "t0=7178 now=7179 delta=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "t0=10879 now=10880 delta=1",
+    "status": "PASS"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [
+  "combat/sleeper_wake: status differs (FAIL vs PASS)",
+  "combat/zombie_death_loot: status differs (PASS vs FAIL)",
+  "combat/zombie_or_npc_nearby: status differs (FAIL vs PASS)",
+  "combat/zombie_target_has_health: status differs (FAIL vs PASS)",
+  "economy/item_drop_entity: status differs (PASS vs FAIL)",
+  "economy/loot_bag_pickup: status differs (PASS vs FAIL)",
+  "vehicle/vehicle_drive: status differs (FAIL vs PASS)"
+ ],
+ "stock": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 5,
+   "pass": 80,
+   "skip": 0
+  }
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 4,
+   "pass": 81,
+   "skip": 0
+  }
+ }
+}
