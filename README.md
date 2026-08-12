@@ -45,6 +45,9 @@ make playtest-mp             # loadgen multi-peer
 make playtest-apm            # zdtd APM dump attach (SERVER=zdtd)
 make playtest-soak-long      # ≥15 min host soak
 make playtest-residual       # persist + mp + apm + soak_long
+make playtest-compare        # same suite vs stock AND zdtd, diffed per case
+                             # (SUITE=smoke; report in
+                             # workspace/comparison-playtest/<suite>/)
 ```
 
 v0.7.1 gameplay surface (stock motor / stock attack / real C2S, **not** tele-fakes):
