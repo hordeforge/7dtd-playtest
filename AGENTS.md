@@ -154,3 +154,11 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
 Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
+
+## Offline gates (no game install)
+
+`make test` runs the four offline gates on every push (CI:
+`.github/workflows/ci.yml`): catalog<->SCENARIOS surface (live rows + counts
+total must equal Catalog.cs), scenario-provider env surface, the host lock,
+and the compare diff (pytest via uv). A catalog addition that skips
+SCENARIOS.md fails CI. The mod build itself is not CI-able (game DLLs).
