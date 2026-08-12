@@ -26,16 +26,20 @@ from playtest_run import parse_client_log
 
 
 def load_results(path: Path) -> dict:
-    """Return {"results": [...], "summary": {...}} from a report JSON or a log."""
+    """Return {"results": [...], "summary": {...}, "wall": s|None, "server": str|None}
+    from a report JSON or a log. wall is the orchestrator's wall_sec (server
+    session wall time), reported as a cost axis, never a per-case finding."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         if isinstance(payload, dict) and "results" in payload:
-            return {"results": payload["results"], "summary": payload.get("summary")}
+            return {"results": payload["results"], "summary": payload.get("summary"),
+                    "wall": payload.get("wall_sec"),
+                    "server": payload.get("server")}
     except (ValueError, OSError):
         pass
     parsed = parse_client_log(path.read_text(encoding="utf-8", errors="replace"))
     return {"results": parsed["results"], "summary": parsed["summary"],
-            "nre_like": parsed["nre_like"]}
+            "nre_like": parsed["nre_like"], "wall": None, "server": None}
 
 
 def newest_report(d: Path) -> Path | None:
@@ -100,10 +104,13 @@ def main() -> int:
                 "skip": s.get("skip", 0)}
 
     ss, zs = summary(stock), summary(zdtd)
+    wall = {"stock": stock.get("wall"), "zdtd": zdtd.get("wall")}
     payload = {
         "compared": bool(stock["results"] and zdtd["results"]),
-        "stock": {"summary": ss, "nreLike": len(stock.get("nre_like", []))},
-        "zdtd": {"summary": zs, "nreLike": len(zdtd.get("nre_like", []))},
+        "stock": {"summary": ss, "nreLike": len(stock.get("nre_like", [])),
+                  "wall": wall["stock"], "server": stock.get("server")},
+        "zdtd": {"summary": zs, "nreLike": len(zdtd.get("nre_like", [])),
+                 "wall": wall["zdtd"], "server": zdtd.get("server")},
         "findings": findings,
         "cases": rows,
     }
@@ -114,6 +121,9 @@ def main() -> int:
     lines.append(f"| cases PASS | {ss['pass']} | {zs['pass']} |")
     lines.append(f"| cases FAIL | {ss['fail']} | {zs['fail']} |")
     lines.append(f"| cases SKIP | {ss['skip']} | {zs['skip']} |")
+    if wall["stock"] is not None or wall["zdtd"] is not None:
+        wf = lambda v: f"{v:.1f}" if v is not None else "n/a"
+        lines.append(f"| wall time (s) | {wf(wall['stock'])} | {wf(wall['zdtd'])} |")
     if stock.get("nre_like") or zdtd.get("nre_like"):
         lines.append(f"| client NRE-like hits | {len(stock.get('nre_like', []))} | "
                      f"{len(zdtd.get('nre_like', []))} |")

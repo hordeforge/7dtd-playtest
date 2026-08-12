@@ -907,18 +907,22 @@
  "findings": [],
  "stock": {
   "nreLike": 0,
+  "server": "stock",
   "summary": {
    "fail": 0,
    "pass": 82,
    "skip": 0
-  }
+  },
+  "wall": 157.1
  },
  "zdtd": {
   "nreLike": 0,
+  "server": "zdtd",
   "summary": {
    "fail": 0,
    "pass": 82,
    "skip": 0
-  }
+  },
+  "wall": 128.0
  }
 }

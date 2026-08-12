@@ -5,6 +5,7 @@
 | cases PASS | 82 | 82 |
 | cases FAIL | 0 | 0 |
 | cases SKIP | 0 | 0 |
+| wall time (s) | 157.1 | 128.0 |
 
 ## Per-case
 
