@@ -129,10 +129,12 @@ playtest-apm:
 playtest-compare: install-pair
 	@mkdir -p "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
 		"$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd"
+	# Both sides run regardless of per-side assertion failures: a diff that
+	# shows PASS/FAIL per case on each server is the point of the comparison.
 	$(MAKE) playtest SUITE="$(SUITE)" SERVER=stock \
-		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/stock"
+		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" || true
 	$(MAKE) playtest SUITE="$(SUITE)" SERVER=zdtd PORT=27025 \
-		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd"
+		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd" || true
 	uv run --project "$(ROOT)" python "$(ROOT)/scripts/playtest_compare.py" \
 		--stock-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
 		--zdtd-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd" \
