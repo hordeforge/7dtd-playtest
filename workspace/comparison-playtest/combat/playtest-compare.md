@@ -2,9 +2,11 @@
 
 | axis | stock | zdtd |
 |---|---|---|
+| ran (UTC) | 2026-08-18T05:18Z | 2026-08-18T05:20Z |
 | cases PASS | 9 | 9 |
 | cases FAIL | 1 | 1 |
 | cases SKIP | 0 | 0 |
+| wall time (s) | 208.1 | 105.3 |
 
 ## Per-case
 
