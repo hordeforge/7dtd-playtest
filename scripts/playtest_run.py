@@ -1942,6 +1942,7 @@ def main(argv: list[str] | None = None) -> int:
             "unity_log": str(unity_log) if unity_log else None,
             "timeout_sec": args.timeout,
             "wall_sec": round(wall_s, 1),
+            "ran_epoch": int(time.time()),
             "fixtures": {
                 "zombie_spawn_attempted": barrier_counts.get("spawn_zombie", 0) > 0,
                 "give_item_attempted": barrier_counts.get("kill_fixture_zombie", 0) > 0,

@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from playtest_run import parse_client_log
@@ -34,12 +37,34 @@ def load_results(path: Path) -> dict:
         if isinstance(payload, dict) and "results" in payload:
             return {"results": payload["results"], "summary": payload.get("summary"),
                     "wall": payload.get("wall_sec"),
-                    "server": payload.get("server")}
+                    "server": payload.get("server"),
+                    "ran_epoch": payload.get("ran_epoch")}
     except (ValueError, OSError):
         pass
     parsed = parse_client_log(path.read_text(encoding="utf-8", errors="replace"))
     return {"results": parsed["results"], "summary": parsed["summary"],
-            "nre_like": parsed["nre_like"], "wall": None, "server": None}
+            "nre_like": parsed["nre_like"], "wall": None, "server": None,
+            "ran_epoch": None}
+
+
+def ran_epoch_of(path: Path, res: dict) -> float | None:
+    """Best-known run epoch for a side: payload field, report-<epoch>.json
+    filename, or file mtime as a last resort. None when unknown."""
+    if res.get("ran_epoch"):
+        return float(res["ran_epoch"])
+    m = re.match(r"report-(\d+)\.json$", path.name)
+    if m:
+        return float(m.group(1))
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def fmt_utc(epoch: float | None) -> str:
+    if epoch is None:
+        return "unknown"
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
 
 def newest_report(d: Path) -> Path | None:
@@ -56,12 +81,18 @@ def main() -> int:
     ap.add_argument("--stock-dir", type=Path, default=None)
     ap.add_argument("--zdtd-dir", type=Path, default=None)
     ap.add_argument("--out", type=Path, default=Path("."))
+    ap.add_argument("--require-fresh-minutes", type=int, default=0,
+                    help="refuse to diff a side whose run is older than this "
+                         "many minutes (0 disables the check)")
     args = ap.parse_args()
 
     stock_path = args.stock or (newest_report(args.stock_dir) if args.stock_dir else None)
     zdtd_path = args.zdtd or (newest_report(args.zdtd_dir) if args.zdtd_dir else None)
-    if stock_path is None or zdtd_path is None:
-        print("ERROR: need both sides (--stock/--stock-dir and --zdtd/--zdtd-dir)",
+    missing = [s for s, p in (("stock", stock_path), ("zdtd", zdtd_path)) if p is None]
+    if missing:
+        print(f"ERROR: no report found on the {', '.join(missing)} side; the side "
+              "either failed to start or its logs were wiped before the run. "
+              "Refusing to diff missing or stale evidence.",
               file=sys.stderr)
         return 2
 
@@ -70,6 +101,21 @@ def main() -> int:
     if not stock["results"] and not zdtd["results"]:
         print("ERROR: no playtest result lines on either side", file=sys.stderr)
         return 1
+
+    if args.require_fresh_minutes:
+        now = time.time()
+        limit = args.require_fresh_minutes * 60.0
+        stale = []
+        for side, path, res in (("stock", stock_path, stock), ("zdtd", zdtd_path, zdtd)):
+            epoch = ran_epoch_of(path, res)
+            if epoch is None or now - epoch > limit:
+                age = "unknown" if epoch is None else f"{int(now - epoch)}s"
+                stale.append(f"{side} ({path.name}, age {age})")
+        if stale:
+            print(f"ERROR: comparison inputs are stale (--require-fresh-minutes "
+                  f"{args.require_fresh_minutes}): " + "; ".join(stale),
+                  file=sys.stderr)
+            return 3
 
     def by_case(res):
         out = {}
@@ -105,12 +151,16 @@ def main() -> int:
 
     ss, zs = summary(stock), summary(zdtd)
     wall = {"stock": stock.get("wall"), "zdtd": zdtd.get("wall")}
+    ran_at = {"stock": ran_epoch_of(stock_path, stock),
+              "zdtd": ran_epoch_of(zdtd_path, zdtd)}
     payload = {
         "compared": bool(stock["results"] and zdtd["results"]),
         "stock": {"summary": ss, "nreLike": len(stock.get("nre_like", [])),
-                  "wall": wall["stock"], "server": stock.get("server")},
+                  "wall": wall["stock"], "server": stock.get("server"),
+                  "ranAtUtc": fmt_utc(ran_at["stock"])},
         "zdtd": {"summary": zs, "nreLike": len(zdtd.get("nre_like", [])),
-                 "wall": wall["zdtd"], "server": zdtd.get("server")},
+                 "wall": wall["zdtd"], "server": zdtd.get("server"),
+                 "ranAtUtc": fmt_utc(ran_at["zdtd"])},
         "findings": findings,
         "cases": rows,
     }
@@ -118,6 +168,7 @@ def main() -> int:
     lines = ["# Stock-vs-zdtd playtest comparison\n"]
     lines.append("| axis | stock | zdtd |")
     lines.append("|---|---|---|")
+    lines.append(f"| ran (UTC) | {fmt_utc(ran_at['stock'])} | {fmt_utc(ran_at['zdtd'])} |")
     lines.append(f"| cases PASS | {ss['pass']} | {zs['pass']} |")
     lines.append(f"| cases FAIL | {ss['fail']} | {zs['fail']} |")
     lines.append(f"| cases SKIP | {ss['skip']} | {zs['skip']} |")

@@ -127,11 +127,17 @@ playtest-apm:
 # workspace/comparison-playtest/<suite>/playtest-compare.{md,json}. A per-case
 # delta is a finding to triage (zdtd bug vs harness artifact vs known
 # divergence), never a pass to fake. SUITE?=smoke
+#
+# Integrity rule: the side dirs are wiped before each side runs, so a side
+# that fails to start (port collision, missing binary, refused lock) leaves NO
+# report; playtest_compare.py then refuses to diff (exit 2) instead of
+# re-diffing stale logs from a previous session. The stale evidence is removed
+# on failure so a phantom "compared" result cannot survive. The per-side `||
+# true` only tolerates suites whose cases FAIL, not sides that never ran.
 playtest-compare: install-pair
+	@rm -rf "$(ROOT)/workspace/comparison-playtest/$(SUITE)"
 	@mkdir -p "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
 		"$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd"
-	# Both sides run regardless of per-side assertion failures: a diff that
-	# shows PASS/FAIL per case on each server is the point of the comparison.
 	$(MAKE) playtest SUITE="$(SUITE)" SERVER=stock \
 		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" || true
 	$(MAKE) playtest SUITE="$(SUITE)" SERVER=zdtd PORT=27025 \
@@ -139,7 +145,10 @@ playtest-compare: install-pair
 	uv run --project "$(ROOT)" python "$(ROOT)/scripts/playtest_compare.py" \
 		--stock-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
 		--zdtd-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd" \
-		--out "$(ROOT)/workspace/comparison-playtest/$(SUITE)"
+		--out "$(ROOT)/workspace/comparison-playtest/$(SUITE)" \
+		--require-fresh-minutes 180 \
+		|| { rm -f "$(ROOT)/workspace/comparison-playtest/$(SUITE)/playtest-compare.md" \
+			"$(ROOT)/workspace/comparison-playtest/$(SUITE)/playtest-compare.json"; exit 1; }
 
 # All residual suites (mp + short soak in residual alias; persist/soak_long/apm separate).
 # Full residual promotion gate (four host targets). Not the same as client

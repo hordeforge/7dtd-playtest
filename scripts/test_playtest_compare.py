@@ -92,6 +92,80 @@ def test_report_json_wall_axis(tmp_path):
     assert "| wall time (s) | 157.1 | 128.0 |" in report_md
 
 
+def test_missing_side_refuses_diff(tmp_path):
+    """A side dir without any report must fail loudly, naming the side, and
+    must NOT write comparison outputs (no phantom 'compared' result)."""
+    import time
+    now = int(time.time())
+    s = tmp_path / "stock" / f"report-{now}.json"
+    s.parent.mkdir(parents=True)
+    s.write_text(json.dumps({"server": "stock", "ran_epoch": now,
+                             "summary": {"pass": 1, "fail": 0, "skip": 0},
+                             "results": [{"case": "smoke/join", "status": "PASS"}]}),
+                 encoding="utf-8")
+    z = tmp_path / "zdtd"   # empty dir: side never ran
+    z.mkdir()
+    out = tmp_path / "out"
+    r = subprocess.run(
+        [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z),
+         "--out", str(out)],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert r.returncode == 2, r.stderr
+    assert "no report found on the zdtd side" in r.stderr
+    assert not (out / "playtest-compare.json").exists()
+
+
+def test_stale_report_refuses_diff(tmp_path):
+    """Old reports (e.g. a previous session) must fail the freshness guard
+    instead of being diffed as if fresh, and must not write outputs."""
+    import time
+    old = int(time.time()) - 6 * 86400
+    def report(server: str) -> dict:
+        return {"server": server, "ran_epoch": old,
+                "summary": {"pass": 1, "fail": 0, "skip": 0},
+                "results": [{"case": "smoke/join", "status": "PASS"}]}
+    s = tmp_path / "stock" / f"report-{old}.json"
+    z = tmp_path / "zdtd" / f"report-{old}.json"
+    s.parent.mkdir(); z.parent.mkdir()
+    s.write_text(json.dumps(report("stock")), encoding="utf-8")
+    z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
+    out = tmp_path / "out"
+    r = subprocess.run(
+        [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
+         "--out", str(out), "--require-fresh-minutes", "60"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert r.returncode == 3, r.stderr
+    assert "comparison inputs are stale" in r.stderr
+    assert not (out / "playtest-compare.json").exists()
+
+
+def test_ran_at_surfaces_in_report(tmp_path):
+    """Fresh report JSONs carry ranAtUtc; the md shows a ran (UTC) row so a
+    reader can tell when each side actually ran."""
+    import time
+    now = int(time.time())
+    def report(server: str) -> dict:
+        return {"server": server, "ran_epoch": now,
+                "summary": {"pass": 1, "fail": 0, "skip": 0},
+                "results": [{"case": "smoke/join", "status": "PASS"}]}
+    s = tmp_path / "stock.json"
+    z = tmp_path / "zdtd.json"
+    s.write_text(json.dumps(report("stock")), encoding="utf-8")
+    z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
+    out = tmp_path / "out"
+    r = subprocess.run(
+        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
+    assert payload["stock"]["ranAtUtc"] and payload["zdtd"]["ranAtUtc"]
+    report_md = (out / "playtest-compare.md").read_text(encoding="utf-8")
+    assert "| ran (UTC) | " in report_md
+
+
 if __name__ == "__main__":
     import pytest
     import sys
