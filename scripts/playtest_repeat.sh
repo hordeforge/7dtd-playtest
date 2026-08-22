@@ -54,8 +54,9 @@ latest_report() {
 }
 
 # "pass fail skip" from one report, read via argv (no path interpolation into code).
+# Through uv like every host script: one interpreter, honoring uv.lock.
 summary_counts() {
-  python3 -c '
+  uv run --locked --project "$ROOT" python -c '
 import json, sys
 s = json.load(open(sys.argv[1], encoding="utf-8"))["summary"]
 print(int(s.get("pass", 0)), int(s.get("fail", 0)), int(s.get("skip", 0)))
@@ -64,7 +65,7 @@ print(int(s.get("pass", 0)), int(s.get("fail", 0)), int(s.get("skip", 0)))
 
 for lap in $(seq 1 "$LAPS"); do
   echo "=== lap $lap/$LAPS ==="
-  if ! uv run --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
+  if ! uv run --locked --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
     echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)"
     continue
   fi

@@ -47,6 +47,20 @@ unchanged.
 ### Changed
 
 - Host Python runs through `uv` only (requires Python >= 3.11).
+- Host Python invocations now pass `--locked` to uv (`make test`, repeat
+  wrapper, README): a pyproject/uv.lock mismatch fails the run instead of
+  silently re-resolving away from the committed lock.
+- Mod builds are byte-reproducible across checkouts: the csproj pins
+  `Deterministic`, maps the checkout path out of the dll/pdb (`PathMap`),
+  disables the SDK's implicit git query that baked the absolute source
+  path and remote URL into the pdb, and pins the net48 reference
+  assemblies package explicitly. Verified: two builds from different
+  checkout directories hash identically.
+- `global.json` pins the dotnet SDK to the 8.0 feature band
+  (`rollForward: latestFeature`), so compiler version no longer depends on
+  whatever the host has installed.
+- CI runner image pinned (`ubuntu-24.04`) instead of the floating
+  `ubuntu-latest`.
 - Entity probes, fixture equips, and barrier bookkeeping share one
   implementation; repeated parameterized barriers
   (`barrier spawn_vehicle:<class>`) each reach the host as separate fixture

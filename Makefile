@@ -58,7 +58,9 @@ clean:
 
 # All host Python goes through uv so every machine uses one interpreter
 # honoring requires-python >=3.11 (bare python3 may be older on some distros).
-UV := uv run --project "$(ROOT)" python
+# --locked fails instead of silently re-resolving when pyproject.toml and
+# uv.lock disagree, so a build can never drift from the committed lock.
+UV := uv run --locked --project "$(ROOT)" python
 
 test:
 	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"

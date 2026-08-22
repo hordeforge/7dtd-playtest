@@ -23,6 +23,8 @@ as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTES
 - Only for the `bot` suite: server-side `BotMod` in the dedicated's `Mods/`
   (provides the `bot` telnet commands the orchestrator drives)
 - Host Python 3.11+ via **`uv`**
+- dotnet SDK 8.0.x for the mod build (pinned by `global.json`; found on
+  `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`)
 
 ## Install
 
@@ -206,7 +208,7 @@ Wipe the orchestrator save before launch so dig pads and fixtures start clean:
 ```bash
 make playtest SUITE=your_suite FRESH=1          # default FRESH=1
 # or
-uv run --project . python scripts/playtest_run.py --suite your_suite --fresh-save ...
+uv run --locked --project . python scripts/playtest_run.py --suite your_suite --fresh-save ...
 ```
 
 `FRESH=0` keeps the existing save when you deliberately inspect one. Providers

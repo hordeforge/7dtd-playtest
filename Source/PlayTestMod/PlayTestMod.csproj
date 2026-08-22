@@ -9,7 +9,22 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>$(MSBuildThisFileDirectory)../../dist/7dtd-playtest/</OutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Reproducible artifact: identical bytes regardless of checkout path.
+         Without PathMap the compiler bakes absolute source paths into the
+         dll/pdb (verified: two checkouts hash differently). -->
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildThisFileDirectory)=/src/7dtd-playtest/</PathMap>
+    <!-- The SDK otherwise queries git while building and bakes the absolute
+         checkout path and remote URL into the pdb, so a tarball export and a
+         git clone of the same tree do not build identically. -->
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Pin the net48 reference assemblies explicitly instead of letting each
+         SDK inject its own version at restore time (network on first build).
+         Build-only, never shipped. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
   <PropertyGroup>
     <GameRoot Condition="'$(GameRoot)' == ''">$(HOME)/.local/share/Steam/steamapps/common/7 Days To Die</GameRoot>
     <GameManagedDir Condition="'$(GameManagedDir)' == ''">$(GameRoot)/7DaysToDie_Data/Managed</GameManagedDir>

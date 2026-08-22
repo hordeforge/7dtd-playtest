@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   offline-tests:
-    runs-on: ubuntu-latest
+    # Pinned image: ubuntu-latest floats (currently 24.04, was 22.04) and a
+    # runner bump changes the toolchain under the gates without any commit.
+    runs-on: ubuntu-24.04
     steps:
       # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
