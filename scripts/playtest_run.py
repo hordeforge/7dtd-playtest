@@ -63,6 +63,22 @@ def log(msg: str) -> None:
     print(f"[playtest-orch] {msg}", flush=True)
 
 
+def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
+    """Return every full barrier name that starts with ``prefix``.
+
+    Repeated lines are significant: providers may request several fixtures of
+    the same class during one composed run. Consumers keep their own fired
+    counts or token sets, so collapsing identical names here loses events.
+    """
+    return [
+        match.group(1)
+        for match in re.finditer(
+            rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
+            blob,
+        )
+    ]
+
+
 def pkill_patterns(patterns: list[str], sig: str = "-9") -> None:
     for pat in patterns:
         subprocess.run(
@@ -1347,18 +1363,6 @@ def main(argv: list[str] | None = None) -> int:
             # parameterised "spawn_vehicle:<class>" lines handled below.
             return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
 
-        def _barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
-            """Return full barrier names that start with prefix (e.g. chat_echo:token)."""
-            found: list[str] = []
-            # Human line only (same double-count reason as _barrier_hits).
-            for m in re.finditer(
-                rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
-                blob,
-            ):
-                found.append(m.group(1))
-            # Dedup while preserving order (same token can appear many times).
-            return list(dict.fromkeys(found))
-
         # Rejoin flow: setup → saveworld → restart server → rejoin verify.
         # Built-in persist keeps its authoritative pad handling. Providers only
         # need to report their declared durable setup barrier.
@@ -1803,7 +1807,7 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     barrier_counts["spawn_loadgen_bots"] += 1
 
-                for full in _barrier_hits_prefix(text, "chat_echo:"):
+                for full in barrier_hits_prefix(text, "chat_echo:"):
                     # Fire once per unique token name (only after successful telnet say).
                     token = full.split(":", 1)[-1].strip()
                     if not token:
@@ -1831,7 +1835,7 @@ def main(argv: list[str] | None = None) -> int:
                 # invalid entityId and it cannot fly, so providers must ask the
                 # host for one the same way the stock vehicle cases do.
                 vehicle_hits: dict[str, int] = {}
-                for full in _barrier_hits_prefix(text, "spawn_vehicle:"):
+                for full in barrier_hits_prefix(text, "spawn_vehicle:"):
                     cls = full.split(":", 1)[-1].strip()
                     if cls:
                         vehicle_hits[cls] = vehicle_hits.get(cls, 0) + 1
