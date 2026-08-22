@@ -1330,7 +1330,7 @@ def main(argv: list[str] | None = None) -> int:
             if peer_client_name:
                 peer_env = {
                     "COMPAT": str(args.peer_client_compat),
-                    "ZDTD_PLAYER_NAME": peer_client_name,
+                    "7DTD_PLAYER_NAME": peer_client_name,
                 }
                 peer_client_proc = start_client(
                     args.port,
