@@ -162,6 +162,10 @@ queue.Add(CaseDef.Defer(suite, "later", new[] { "todo" }, "needs admin fixture")
 
 // Host orchestration barriers (grep'd by scripts/playtest_run.py).
 Report.Barrier("my_provider_ready");
+// Host-owned vehicle of a given class (bare "spawn_vehicle" = bicycle). A
+// vehicle the client creates itself is unknown to the dedicated server and
+// never moves there, so ask the host and then find the replicated entity.
+Report.Barrier("spawn_vehicle:vehicleGyrocopter");
 
 // Stock-API glue shared with the built-in catalog (no invented S2C).
 Helpers.TryGiveItem(ctx.Player, stack);
