@@ -752,6 +752,7 @@ class HeartbeatThread:
         self.interval_sec = self.loop.interval_sec
         self.on_error = on_error
         self._stop = threading.Event()
+        self._started = False
         self._thread = threading.Thread(
             target=self._run,
             name="playtest-lock-heartbeat",
@@ -760,9 +761,15 @@ class HeartbeatThread:
 
     def start(self) -> None:
         self._thread.start()
+        self._started = True
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
+        # Cleanup paths call stop() unconditionally; if start() itself failed
+        # (thread resource exhaustion) join would raise and abort whatever
+        # cleanup follows, e.g. the lock release in playtest_run's finally.
+        if not self._started:
+            return
         self._thread.join(timeout=timeout)
 
     def _run(self) -> None:

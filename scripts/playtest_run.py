@@ -906,6 +906,40 @@ class TelnetAdmin:
             self._sock = None
 
 
+def install_signal_handlers() -> None:
+    """Convert SIGTERM/SIGHUP into SystemExit so the finally-based cleanup runs.
+
+    Default signal action kills the process without unwinding: the detached
+    client/server survive (start_new_session) and the lock file goes stale
+    while a live runtime blocks takeover (stale_but_live wedge). Raising
+    SystemExit routes termination through main()'s finally, which stops the
+    runtime processes and releases the exclusivity lock.
+    """
+    sig_names = ("SIGTERM", "SIGHUP")
+
+    def _exit_fast(signum, _frame):
+        # A second hit during cleanup must not raise inside the finally block
+        # and skip stop_proc/release, so ignore repeats while we unwind.
+        for name in sig_names:
+            s = getattr(signal, name, None)
+            if s is not None:
+                try:
+                    signal.signal(s, signal.SIG_IGN)
+                except (ValueError, OSError):
+                    pass
+        raise SystemExit(128 + signum)
+
+    for name in sig_names:
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _exit_fast)
+        except (ValueError, OSError) as ex:
+            # ValueError: main() driven from a non-main thread; keep running.
+            log(f"warn: cannot install {name} handler: {ex}")
+
+
 def fresh_save(userdata: Path, game_name: str) -> None:
     """Remove stock save folder for a clean, reproducible world state."""
     # Typical layout: UserData/Saves/<World>/<GameName>
@@ -1157,6 +1191,8 @@ def main(argv: list[str] | None = None) -> int:
     lock_path = playtest_lock.default_lock_path()
     lock_held = False
     lock_heartbeat: playtest_lock.HeartbeatThread | None = None
+
+    install_signal_handlers()
 
     try:
         t0 = time.time()

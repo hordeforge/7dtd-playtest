@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -283,6 +285,55 @@ def test_playtest_run_wiring() -> None:
     )
 
 
+def test_heartbeat_thread_stop_before_start(tmp: Path) -> None:
+    """stop() must be safe when start() never ran (or failed).
+
+    Cleanup paths stop the heartbeat unconditionally; a RuntimeError from
+    join-on-unstarted would abort the rest of the cleanup, including the
+    lock release in playtest_run's finally.
+    """
+    lock = tmp / "playtest_running"
+    th = pl.HeartbeatThread(
+        "owner-20260810-000000-aaaaaaaaaaaa", path=lock, interval_sec=3600
+    )
+    th.stop()
+    th.stop()  # idempotent
+    _assert(not lock.is_file(), "no tick ran, so no lock file")
+
+
+def test_sigterm_becomes_graceful_exit() -> None:
+    """SIGTERM must convert to SystemExit so orchestrator cleanup unwinds.
+
+    Default SIGTERM action kills without running finally: the detached
+    runtime survives and a stale-but-live lock wedges exclusivity. The
+    handler turns it into SystemExit(128+sig) instead.
+    """
+    code = (
+        "import sys, time;"
+        f"sys.path.insert(0, {str(SCRIPTS)!r});"
+        "import playtest_run;"
+        "playtest_run.install_signal_handlers();"
+        "print('armed', flush=True);"
+        "time.sleep(30)"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        line = proc.stdout.readline().strip()
+        _assert(line == "armed", f"child did not arm handlers: {line!r}")
+        proc.send_signal(signal.SIGTERM)
+        rc = proc.wait(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    _assert(rc == 128 + signal.SIGTERM, f"exit {rc}, expected {128 + signal.SIGTERM}")
+
+
 def main() -> int:
     fails = 0
     with tempfile.TemporaryDirectory(prefix="playtest-lock-") as td:
@@ -310,7 +361,12 @@ def main() -> int:
                 "heartbeat_and_stale_takeover",
                 lambda: test_heartbeat_and_stale_takeover(tmp / "hb"),
             ),
+            (
+                "heartbeat_thread_stop_before_start",
+                lambda: test_heartbeat_thread_stop_before_start(tmp / "hbstopped"),
+            ),
             ("playtest_run_wiring", test_playtest_run_wiring),
+            ("sigterm_becomes_graceful_exit", test_sigterm_becomes_graceful_exit),
         ]
         for name, fn in cases:
             try:
