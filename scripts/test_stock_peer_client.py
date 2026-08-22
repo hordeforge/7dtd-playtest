@@ -22,7 +22,7 @@ checks = [
     ),
     require(
         "peer gets a distinct stock Local identity", 
-        '"ZDTD_PLAYER_NAME": peer_client_name' in RUNNER,
+        '"7DTD_PLAYER_NAME": peer_client_name' in RUNNER,
     ),
     require(
         "same-IP stock clients are spaced past the engine rate limit",

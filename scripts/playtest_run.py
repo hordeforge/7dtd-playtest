@@ -128,6 +128,17 @@ def write_stock_config(
 ) -> None:
     text = src_cfg.read_text(encoding="utf-8")
     ud = str(userdata.resolve())
+    # The stock serverconfig.xml ships UserDataFolder commented out
+    # (`<!-- <property name="UserDataFolder" .../> -->`). Rewriting the value
+    # inside that comment leaves the server saving under its default
+    # ~/.local/share/7DaysToDie, so --fresh-save wiped an empty tree while
+    # player inventory and world state carried over between runs. Drop the
+    # commented form first so an active property is always written.
+    text = re.sub(
+        r'<!--\s*<property\s+name="UserDataFolder"[^>]*/>\s*-->',
+        "",
+        text,
+    )
     if 'name="UserDataFolder"' not in text:
         text = text.replace(
             "<ServerSettings>",
@@ -779,6 +790,13 @@ class TelnetAdmin:
         out = self.exec("listplayers")
         if not out or "unknown" in out.lower():
             out = self.exec("list") or out
+        if "id=" not in out:
+            # The reply can lag the 1.2 s settle right after login; one more
+            # read before giving up, and say what came back so a later run
+            # is not left with "empty/unparsed".
+            out += self._recv(1.5)
+            if "id=" not in out:
+                log(f"telnet listplayers reply unparsed: {out[-160:]!r}")
         ids = [
             int(x) for x in re.findall(r"(?:id|entity)\s*=\s*(\d+)", out, flags=re.I)
         ]
@@ -1318,7 +1336,7 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(1.0)
                 peer_env = {
                     "COMPAT": str(args.peer_client_compat),
-                    "ZDTD_PLAYER_NAME": peer_client_name,
+                    "7DTD_PLAYER_NAME": peer_client_name,
                 }
                 peer_client_proc = start_client(
                     args.port,
@@ -1331,7 +1349,9 @@ def main(argv: list[str] | None = None) -> int:
         def _barrier_hits(blob: str, name: str) -> int:
             # Count only the human log line. Report.Barrier also emits JSON with
             # the same name; summing both double-fires handlers (e.g. kills bots).
-            return blob.count(f"barrier {name}")
+            # Whole-name match: "spawn_vehicle" must not also count the
+            # parameterised "spawn_vehicle:<class>" lines handled below.
+            return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
 
         def _barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
             """Return full barrier names that start with prefix (e.g. chat_echo:token)."""
@@ -1808,6 +1828,36 @@ def main(argv: list[str] | None = None) -> int:
                     fired.add(token)
                     main._chat_tokens_fired = fired  # type: ignore[attr-defined]
                     barrier_counts["chat_echo"] += 1
+
+                # spawn_vehicle:<entityClass> — one host-owned vehicle of that
+                # class per barrier line (a provider case that needs, say, a
+                # gyrocopter rather than the bare barrier's bicycle). A vehicle
+                # the client creates itself is never known to the dedicated
+                # server: every position update for it is rejected as an
+                # invalid entityId and it cannot fly, so providers must ask the
+                # host for one the same way the stock vehicle cases do.
+                vehicle_hits: dict[str, int] = {}
+                for full in _barrier_hits_prefix(text, "spawn_vehicle:"):
+                    cls = full.split(":", 1)[-1].strip()
+                    if cls:
+                        vehicle_hits[cls] = vehicle_hits.get(cls, 0) + 1
+                for cls, hits in vehicle_hits.items():
+                    fired_vehicles = getattr(main, "_vehicle_spawns_fired", {})
+                    while fired_vehicles.get(cls, 0) < hits:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if tn.connect():
+                            n = tn.spawn_near_players(cls, per=1)
+                            if n == 0:
+                                r = tn.exec(f"spawnentityat {cls} 520 62 950")
+                                log(f"telnet vehicle spawnentityat {cls} → {r[:80]!r}")
+                            else:
+                                log(f"telnet spawn vehicle {cls} near players units~={n}")
+                            tn.close()
+                        else:
+                            log(f"warn: spawn_vehicle:{cls} telnet connect fail; retry")
+                            break
+                        fired_vehicles[cls] = fired_vehicles.get(cls, 0) + 1
+                        main._vehicle_spawns_fired = fired_vehicles  # type: ignore[attr-defined]
 
                 hits = _barrier_hits(text, "teleport_persist_pad")
                 while barrier_counts["teleport_persist_pad"] < hits:

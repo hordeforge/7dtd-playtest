@@ -135,7 +135,7 @@ make playtest SUITE=core SERVER=stock
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
 | `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
-| `7DTD_CONNECT` | Set by orchestrator / connect (legacy `ZDTD_CONNECT` still honored) |
+| `7DTD_CONNECT` | Set by orchestrator / connect |
 | `PLAYTEST_LOCK_FILE` | Override exclusivity lock path (default under `~/.cache/7dtd-playtest/`) |
 | `PLAYTEST_SESSION_ID` | Lock holder session id (or `--session`; auto-generated if empty) |
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
@@ -149,7 +149,10 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 **Stable** lines prefixed `[7dtd-playtest]` (do not rename tokens):
 
 - Human: `PASS|FAIL|SKIP suite/case detail`
-- Barrier: `barrier <name>` (host greps for telnet/admin phases)
+- Barrier: `barrier <name>` (host greps for telnet/admin phases).
+  `spawn_vehicle:<entityClass>` asks the host for one vehicle of that class
+  (the bare `spawn_vehicle` spawns a bicycle); client-created vehicles are
+  unknown to a dedicated server and cannot be driven there.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
