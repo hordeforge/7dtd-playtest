@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import signal
@@ -584,6 +585,10 @@ def parse_client_log(text: str) -> dict:
         if m:
             try:
                 ev = json.loads(m.group(1))
+                # The client log carries arbitrary game/chat lines; a line that
+                # merely looks like an event must not crash the parser.
+                if not isinstance(ev, dict):
+                    raise ValueError("event is not a JSON object")
                 json_events.append(ev)
                 if ev.get("t") == "result":
                     json_results.append(
@@ -601,7 +606,9 @@ def parse_client_log(text: str) -> dict:
                     }
                 elif ev.get("t") == "done":
                     json_done = {"exit_hint": int(ev.get("exit_hint", 1))}
-            except json.JSONDecodeError:
+            except ValueError:
+                # JSONDecodeError subclasses ValueError; a non-numeric count
+                # or exit_hint raises it too. Skip the bad event, keep the rest.
                 pass
             continue
 
@@ -1973,14 +1980,22 @@ def main(argv: list[str] | None = None) -> int:
         combined_results = results + peer_results
         wall_s = time.time() - t0
 
-        # Slowest cases from results if ms present in JSON events
+        # Slowest cases from results if ms present in JSON events. Event lines
+        # come from the client log, so ms can be garbage or non-finite; either
+        # would raise here (losing the whole report) or poison sort/JSON.
         slowest = []
         for ev in parsed.get("json_events") or []:
             if ev.get("t") == "result" and ev.get("status") in ("pass", "fail"):
+                try:
+                    ms = float(ev.get("ms") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(ms):
+                    continue
                 slowest.append(
                     (
                         f"{ev.get('suite')}/{ev.get('case')}",
-                        float(ev.get("ms") or 0),
+                        ms,
                     )
                 )
         slowest.sort(key=lambda x: -x[1])
