@@ -755,11 +755,9 @@ class TelnetAdmin:
         self._sock: socket.socket | None = None
 
     def connect(self, timeout: float = 5.0) -> bool:
-        import socket as _socket
-
         try:
             self.close()
-            s = _socket.create_connection((self.host, self.port), timeout=timeout)
+            s = socket.create_connection((self.host, self.port), timeout=timeout)
             s.settimeout(2.0)
             self._sock = s
             banner = self._recv(0.8)
@@ -1709,7 +1707,6 @@ def main(argv: list[str] | None = None) -> int:
             deadline = time.time() + min(args.timeout, 400)
 
         # Always defined so timeout / missing client logs cannot UnboundLocalError.
-        parsed: dict = {}
         peer_parsed: dict = {}
         primary_done_logged = False
 
@@ -2196,10 +2193,12 @@ def main(argv: list[str] | None = None) -> int:
             lock_heartbeat.stop()
             lock_heartbeat = None
         if lock_held:
-            stop_proc(locals().get("client_proc"))
-            stop_proc(locals().get("peer_client_proc"))
-            stop_proc(locals().get("loadgen_proc"))
-            stop_proc(locals().get("server_proc"))
+            # client/server/peer/loadgen are pre-initialized to None before the
+            # try block, so the finally can always reference them directly.
+            stop_proc(client_proc)
+            stop_proc(peer_client_proc)
+            stop_proc(loadgen_proc)
+            stop_proc(server_proc)
             # Soft clean after: leave Steam alone
             pkill_patterns(
                 [

@@ -50,7 +50,7 @@ checks = [
     ),
     require(
         "peer lifecycle is cleaned with the primary client",
-        'stop_proc(locals().get("peer_client_proc"))' in RUNNER,
+        "stop_proc(peer_client_proc)" in RUNNER,
     ),
     require(
         "a peer scenario suite must finish before the run is green",
