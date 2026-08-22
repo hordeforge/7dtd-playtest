@@ -19,9 +19,10 @@ jobs:
       # runners (enable-cache defaults to auto), keyed off the uv.lock file.
       # The offline gates need no game install: catalog<->SCENARIOS surface
       # (live rows + counts total), scenario-provider env surface, the host
-      # lock, the deterministic simulation, and the compare diff (pytest via
-      # uv). The mod build itself is not CI-able (references game DLLs), but
-      # these gates catch the doc/catalog drift that used to ship silently.
+      # lock, the deterministic simulation, the orchestrator local-init order
+      # gate, and the compare diff (pytest via uv). The mod build itself is not
+      # CI-able (references game DLLs), but these gates catch the doc/catalog
+      # drift that used to ship silently.
       - run: make test
       # Wider seed sweep than the gate inside `make test`. Cheap: the whole
       # thing is virtual time, so 200 seeds is ~200 simulated hours in

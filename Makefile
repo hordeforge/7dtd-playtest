@@ -61,6 +61,7 @@ test:
 	python3 "$(ROOT)/scripts/test_scenario_provider_surface.py"
 	python3 "$(ROOT)/scripts/test_playtest_lock.py"
 	python3 "$(ROOT)/scripts/test_dst.py"
+	python3 "$(ROOT)/scripts/test_no_unbound_locals.py"
 	uv run --with pytest python "$(ROOT)/scripts/test_playtest_compare.py"
 
 # Deterministic simulation of the exclusivity lock. No game, no server, no

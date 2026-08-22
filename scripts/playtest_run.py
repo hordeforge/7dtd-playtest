@@ -1233,6 +1233,12 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as ex:
                 log(f"warn: could not truncate peer client log: {ex}")
 
+        # Telnet/admin surface, needed by start_stock_dedicated (config password)
+        # and every barrier handler below. Assigned once, before first use.
+        telnet_host = "127.0.0.1"
+        telnet_port = args.admin_port
+        telnet_password = args.telnet_password
+
         if not args.no_server:
             if args.server == "stock":
                 server_proc, unity_log = start_stock_dedicated(
@@ -1290,9 +1296,6 @@ def main(argv: list[str] | None = None) -> int:
             and not args.no_fixtures
             and suite_wants_zombie_fixture(args.suite)
         )
-        telnet_host = "127.0.0.1"
-        telnet_port = args.admin_port
-        telnet_password = args.telnet_password
 
         deadline = time.time() + args.timeout
         # soak_long needs ≥15 min wall + setup; bump default timeout.

@@ -341,8 +341,8 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 
 `.github/workflows/ci.yml` runs `make test` (the offline gates: catalog<->SCENARIOS
 surface incl. live rows + counts total, scenario-provider env surface, host
-lock, deterministic simulation, compare diff) plus a wider `make dst DST_SEEDS=200`
-sweep on every push. No game install needed - these are pure Python. The mod
+lock, deterministic simulation, orchestrator local-init order, compare diff)
+plus a wider `make dst DST_SEEDS=200` sweep on every push. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are
 the push-time guard for catalog/doc drift.
 
