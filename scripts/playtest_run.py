@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
@@ -147,6 +148,11 @@ def write_stock_config(
 ) -> None:
     text = src_cfg.read_text(encoding="utf-8")
     ud = str(userdata.resolve())
+    # Values land inside double-quoted XML attributes; a quote or ampersand in
+    # any of them would corrupt the property or smuggle extra ones into the
+    # generated serverconfig. Lambda replacements keep re.sub from
+    # interpreting backslashes in the value.
+    ud_attr = xml_attr(ud)
     # The stock serverconfig.xml ships UserDataFolder commented out
     # (`<!-- <property name="UserDataFolder" .../> -->`). Rewriting the value
     # inside that comment leaves the server saving under its default
@@ -161,12 +167,12 @@ def write_stock_config(
     if 'name="UserDataFolder"' not in text:
         text = text.replace(
             "<ServerSettings>",
-            f'<ServerSettings>\n\t<property name="UserDataFolder" value="{ud}"/>',
+            f'<ServerSettings>\n\t<property name="UserDataFolder" value="{ud_attr}"/>',
         )
     else:
         text = re.sub(
             r'name="UserDataFolder"\s*value="[^"]*"',
-            f'name="UserDataFolder" value="{ud}"',
+            lambda _m: f'name="UserDataFolder" value="{ud_attr}"',
             text,
         )
     repls = {
@@ -197,9 +203,10 @@ def write_stock_config(
         "PlayerKillingMode": "0",
     }
     for k, v in repls.items():
+        v_attr = xml_attr(v)
         text = re.sub(
             rf'name="{k}"\s*value="[^"]*"',
-            f'name="{k}" value="{v}"',
+            lambda _m: f'name="{k}" value="{v_attr}"',
             text,
         )
     out_cfg.parent.mkdir(parents=True, exist_ok=True)
@@ -607,9 +614,11 @@ def parse_client_log(text: str) -> dict:
                     }
                 elif ev.get("t") == "done":
                     json_done = {"exit_hint": int(ev.get("exit_hint", 1))}
-            except ValueError:
+            except (TypeError, ValueError):
                 # JSONDecodeError subclasses ValueError; a non-numeric count
-                # or exit_hint raises it too. Skip the bad event, keep the rest.
+                # or exit_hint raises it too. A JSON null (or list) where a
+                # number belongs raises TypeError. Skip the bad event, keep
+                # the rest.
                 pass
             continue
 
@@ -668,6 +677,16 @@ def write_report(path: Path, payload: dict) -> None:
     log(f"report → {path}")
 
 
+def xml_attr(value: str) -> str:
+    """Escape a value for safe inclusion inside a double-quoted XML attribute.
+
+    Case ids and detail text come from client log lines (game output, mod
+    detail strings), so every XML special must be escaped or a crafted line
+    breaks out of the attribute into arbitrary report markup.
+    """
+    return xml_escape(str(value), {'"': "&quot;", "'": "&apos;"})
+
+
 def write_junit(
     path: Path, suite: str, results: list[dict], summary: dict | None
 ) -> None:
@@ -677,13 +696,13 @@ def write_junit(
     skipped = sum(1 for r in results if r.get("status") == "SKIP")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<testsuite name="7dtd-playtest.{suite}" tests="{tests}" '
+        f'<testsuite name="7dtd-playtest.{xml_attr(suite)}" tests="{tests}" '
         f'failures="{failures}" skipped="{skipped}">',
     ]
     for r in results:
-        case = r.get("case", "unknown").replace('"', "'")
+        case = xml_attr(r.get("case", "unknown"))
         status = r.get("status", "FAIL")
-        detail = (r.get("detail") or "").replace("&", "&amp;").replace("<", "&lt;")
+        detail = xml_attr(r.get("detail") or "")
         lines.append(f'  <testcase classname="playtest" name="{case}">')
         if status == "FAIL":
             lines.append(f'    <failure message="{detail}"/>')

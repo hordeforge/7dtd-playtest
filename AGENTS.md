@@ -166,7 +166,7 @@ Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
 
 ## Offline gates (no game install)
 
-`make test` runs the seven offline gates on every push (CI:
+`make test` runs the eight offline gates on every push (CI:
 `.github/workflows/ci.yml`): catalog<->SCENARIOS surface (live rows + counts
 total must equal Catalog.cs), mod version surface (`scripts/test_version_surface.py`;
 ModInfo.xml == ModApi.Version == dist manifest, and CHANGELOG.md must carry an
@@ -175,6 +175,8 @@ the host lock,
 the deterministic simulation (`scripts/test_dst.py`), the orchestrator
 local-init order gate (`scripts/test_no_unbound_locals.py`; catches the
 read-before-assignment crash class that once shipped in `playtest_run.py`
-main() and only fires with real game binaries present), and the compare diff
+main() and only fires with real game binaries present), the orchestrator
+report/log surface (`scripts/test_report_surface.py`; JUnit and serverconfig
+XML attribute escaping plus parser survival on malformed JSON events), and the compare diff
 (pytest via uv). CI also runs a wider seed sweep with `make dst`. A catalog addition that skips
 SCENARIOS.md fails CI. The mod build itself is not CI-able (game DLLs).
