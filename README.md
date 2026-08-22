@@ -6,6 +6,9 @@ Works against the **stock dedicated server** (the default) and against
 waits for server-visible state where it matters, and emits structured
 `[7dtd-playtest]` results for a host orchestrator.
 
+Host-side concurrency (the exclusivity lock) is covered by deterministic
+simulation: `make dst`, documented in **[DST.md](DST.md)**.
+
 Join/auto-connect is **not** here: install [`../7dtd-connect/`](../7dtd-connect/)
 as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).
 
