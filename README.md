@@ -20,6 +20,8 @@ as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTES
 - Game: `~/.local/share/Steam/steamapps/common/7 Days To Die` (`GAME=`)
 - Only for zdtd-target runs (`playtest-zdtd`, `playtest-apm`): built `zdtd`
   at `../zdtd/zig-out/bin/zdtd`
+- Only for the `bot` suite: server-side `BotMod` in the dedicated's `Mods/`
+  (provides the `bot` telnet commands the orchestrator drives)
 - Host Python 3.11+ via **`uv`**
 
 ## Install
@@ -39,7 +41,7 @@ make playtest-demo           # attract-mode + combat wait (telnet spawn)
 make playtest-demo-fresh     # wipe save first (clean dig pad)
 make playtest-gate           # PR gate: live smoke+core only
 make playtest-bench LAPS=3   # timed repeats of bench path
-make playtest-full           # entire catalog (many intentional SKIPs)
+make playtest-full           # demo domains + soak (no persist/mp/apm/bot)
 make playtest-smoke          # boot only
 make playtest SUITE=combat
 make playtest-zdtd           # demo against zdtd on 27025
@@ -51,6 +53,7 @@ make playtest-residual       # persist + mp + apm + soak_long
 make playtest-compare        # same suite vs stock AND zdtd, diffed per case
                              # (SUITE=smoke; report in
                              # workspace/comparison-playtest/<suite>/)
+make playtest-repeat LAPS=3  # flake detection: N fresh-server laps, all must pass
 ```
 
 `playtest-compare` diffs per case into `playtest-compare.{md,json}` and also
@@ -308,12 +311,12 @@ Legacy: `PLAYTEST=1` or `ZDTD_PLAYTEST=1` arms `demo`.
 
 ## Suites (catalog summary)
 
-Full tables: **[SCENARIOS.md](SCENARIOS.md)** (every Live case id). Approximate
-built-in counts from `Catalog.cs` (104 Live, 0 Defer):
+Full tables: **[SCENARIOS.md](SCENARIOS.md)** (every Live case id). Built-in
+counts from `Catalog.cs` (108 Live, 0 Defer):
 
-| Suite | Live cases (approx) |
+| Suite | Live cases |
 |---|---:|
-| `smoke` | 5 (`join_ready`, `cgo_ready`, `ground`, `stats`, `day_clock`, …) |
+| `smoke` | 5 (`join_ready`, `cgo_ready`, `ground`, `stats`, `day_clock`) |
 | `core` | 18 (look / motors / dig / place / inventory / …) |
 | `world` / `ui` / `combat` / … | see SCENARIOS |
 | `persist_setup` / `persist` | 6 setup + 5 verify |

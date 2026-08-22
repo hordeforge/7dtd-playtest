@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 
@@ -43,6 +44,7 @@ namespace ZdtdPlaytest
                         break;
                     case "full":
                     case "all":
+                    case "live":
                         // persist needs multi-phase orch (SUITE=persist only); mp needs loadgen
                         // barriers (use SUITE=mp or residual). Do not expand them into full.
                         AddUnique(list,
@@ -54,21 +56,13 @@ namespace ZdtdPlaytest
                         // Fast PR gate: live-only smoke+core (no deferred floods)
                         AddUnique(list, "smoke", "core");
                         break;
-                    case "live":
-                        AddUnique(list,
-                            "smoke", "core", "world", "ui", "combat", "economy",
-                            "quest", "vehicle", "power", "finale", "soak");
-                        break;
                     case "residual":
+                    case "residual_light": // explicit synonym
                         // Lightweight in-client residual probe only (mp + short soak).
                         // The Make target playtest-residual is different: it runs
                         // separate host orch for persist, mp, apm, and soak_long
                         // (multi-phase / long wall-clock). Do not expand those here —
                         // persist needs persist_setup host barriers; soak_long is ≥15m.
-                        AddUnique(list, "mp", "soak");
-                        break;
-                    case "residual_light":
-                        // Explicit synonym for residual (mp + short soak only).
                         AddUnique(list, "mp", "soak");
                         break;
                     case "persist":
@@ -107,24 +101,12 @@ namespace ZdtdPlaytest
             foreach (var name in SuiteNames)
                 sb.Append(name).Append(',');
             Report.Info(sb.ToString().TrimEnd(','));
-            // One line per case for host scrapers
+            // One line per case for host scrapers (built-in suites + external providers).
             var tmp = new List<CaseDef>();
-            foreach (var name in SuiteNames)
+            foreach (var name in SuiteNames.Concat(ScenarioProviders.SuiteIds()))
             {
                 tmp.Clear();
                 AppendSuite(tmp, name, 0);
-                foreach (var c in tmp)
-                {
-                    string st = c.Deferred ? "deferred" : "live";
-                    Report.Info("case " + c.Suite + "/" + c.Id + " status=" + st
-                        + " tags=" + string.Join("+", c.Tags ?? Array.Empty<string>())
-                        + (c.Deferred ? " reason=" + c.DeferReason : ""));
-                }
-            }
-            foreach (var name in ScenarioProviders.SuiteIds())
-            {
-                tmp.Clear();
-                ScenarioProviders.AppendSuite(tmp, name, 0);
                 foreach (var c in tmp)
                 {
                     string st = c.Deferred ? "deferred" : "live";
@@ -174,13 +156,10 @@ namespace ZdtdPlaytest
                 case "bot": AddBot(q, label); break;
                 case "benchmark":
                     // Timed attract path; outer loop multiplies by LAPS
-                    {
-                        string bl = "benchmark" + (lap > 0 ? "@" + lap : "");
-                        AddSmoke(q, bl);
-                        AddCore(q, bl);
-                        AddWorld(q, bl);
-                        AddUi(q, bl);
-                    }
+                    AddSmoke(q, label);
+                    AddCore(q, label);
+                    AddWorld(q, label);
+                    AddUi(q, label);
                     break;
                 default:
                     ScenarioProviders.AppendSuite(q, suite, lap);
@@ -200,6 +179,48 @@ namespace ZdtdPlaytest
         static CaseDef Defer(string suite, string id, string[] tags, string reason)
         {
             return CaseDef.Defer(suite, id, tags, reason);
+        }
+
+        // ── shared melee-fixture seeds / tool equips ─────────────────────
+
+        static readonly string[] SoftSeedBlocks =
+        {
+            "hayBaleSquare", "hayBaleRound", "cntTrashPile01", "cntTrashPile02",
+            "frameShapes", "woodShapes",
+        };
+
+        static readonly string[] BlockDamageTools =
+        {
+            "meleeToolRepairT0StoneAxe", "meleeToolShovelT0StoneShovel",
+            "meleeWpnBladeT0BoneKnife", "meleeToolRepairT1ClawHammer",
+        };
+
+        /// <summary>Soft vanilla block for damage fixtures; under-feet clone as fallback.</summary>
+        static BlockValue ResolveSoftSeed(EntityPlayerLocal p, World world, out string usedName)
+        {
+            foreach (var name in SoftSeedBlocks)
+            {
+                try
+                {
+                    var bv = Block.GetBlockValue(name, true);
+                    if (!bv.isair && bv.type != 0) { usedName = name; return bv; }
+                }
+                catch { /* */ }
+            }
+            usedName = "underFeet";
+            return Helpers.BlockUnderFeet(p, world);
+        }
+
+        /// <summary>Give + equip the first resolvable item name. Equipped name or "".</summary>
+        static string EquipFirstMatching(EntityPlayerLocal p, string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!Helpers.TryGetItem(name, out var iv)) continue;
+                if (!Helpers.TryGiveItem(p, new ItemStack(iv, 1))) continue;
+                if (Helpers.TryEquipItemType(p, iv.type) >= 0) return name;
+            }
+            return "";
         }
 
         // ── smoke ────────────────────────────────────────────────────────
@@ -392,8 +413,7 @@ namespace ZdtdPlaytest
                 var pos = ctx.Player.GetPosition();
                 float d = LocomotionDrive.HorizDist(pos, ctx.StartPos);
                 // Path length from successive samples (never reset baseline on leg change).
-                int nowMm = (int)(pos.x * 100f) * 100000 + (int)(pos.z * 100f); // crude
-                // Better: store last pos components in unused fields.
+                // Last pos components live in WasBlockType / PlaceBlockType (cm).
                 float lastX = ctx.WasBlockType / 100f;
                 float lastZ = ctx.PlaceBlockType / 100f;
                 if (ctx.WasBlockType != 0 || ctx.PlaceBlockType != 0)
@@ -744,51 +764,11 @@ namespace ZdtdPlaytest
                 var origin = Helpers.FixtureSeedOrigin(ctx.Player, ctx.World);
                 // Eye-level-ish neighbor (not under feet).
                 ctx.TargetBlock = origin + new Vector3i(0, 1, 1);
-                // Prefer soft vanilla blocks.
-                BlockValue seed = BlockValue.Air;
-                string[] soft =
-                {
-                    "hayBaleSquare", "hayBaleRound", "cntTrashPile01", "cntTrashPile02",
-                    "frameShapes", "woodShapes",
-                };
-                string used = "";
-                foreach (var name in soft)
-                {
-                    try
-                    {
-                        var bv = Block.GetBlockValue(name, true);
-                        if (bv.isair || bv.type == 0) continue;
-                        seed = bv;
-                        used = name;
-                        break;
-                    }
-                    catch { /* */ }
-                }
-                if (seed.type == 0)
-                {
-                    // Fallback: clone non-air under feet (may be hard terrain).
-                    seed = Helpers.BlockUnderFeet(ctx.Player, ctx.World);
-                    used = "underFeet";
-                }
+                BlockValue seed = ResolveSoftSeed(ctx.Player, ctx.World, out string used);
                 ctx.PlaceBlockType = seed.type;
                 Helpers.SetBlockRpc(ctx.World, ctx.TargetBlock, seed);
                 // Equip stone axe / claw hammer / bone knife for block damage.
-                string[] tools =
-                {
-                    "meleeToolRepairT0StoneAxe", "meleeToolShovelT0StoneShovel",
-                    "meleeWpnBladeT0BoneKnife", "meleeToolRepairT1ClawHammer",
-                };
-                string tool = "";
-                foreach (var tname in tools)
-                {
-                    if (!Helpers.TryGetItem(tname, out var iv)) continue;
-                    if (!Helpers.TryGiveItem(ctx.Player, new ItemStack(iv, 1))) continue;
-                    if (Helpers.TryEquipItemType(ctx.Player, iv.type) >= 0)
-                    {
-                        tool = tname;
-                        break;
-                    }
-                }
+                string tool = EquipFirstMatching(ctx.Player, BlockDamageTools);
                 ctx.Detail = "seed=" + used + " type=" + ctx.PlaceBlockType
                     + " at " + ctx.TargetBlock + " tool=" + tool;
             }, wait: ctx =>
@@ -1349,17 +1329,11 @@ namespace ZdtdPlaytest
                 ctx.FloatA = 0f; // lowest HP seen
                 ctx.PlaceBlockType = 0; // swing pulses
                 // Prefer a weapon over bare hands; keep standoff so zombie does not melt us.
-                string[] tools =
+                EquipFirstMatching(ctx.Player, new[]
                 {
                     "meleeToolRepairT0StoneAxe", "meleeWpnBladeT0BoneKnife",
                     "meleeToolShovelT0StoneShovel",
-                };
-                foreach (var tname in tools)
-                {
-                    if (!Helpers.TryGetItem(tname, out var iv)) continue;
-                    if (!Helpers.TryGiveItem(ctx.Player, new ItemStack(iv, 1))) continue;
-                    if (Helpers.TryEquipItemType(ctx.Player, iv.type) >= 0) break;
-                }
+                });
                 Helpers.FaceAndStandNear(ctx.Player, z, standoff: 1.15f);
                 Helpers.PulsePrimaryAttack(ctx.Player);
                 ctx.Detail = "targetId=" + ctx.IntA + " hp0=" + ctx.IntB
@@ -1633,49 +1607,11 @@ namespace ZdtdPlaytest
                 ctx.WasBlockType = 0; // 0=seeding, 1=hitting
                 ctx.IntA = 0; // dmg0
                 ctx.IntB = 0; // pulses
-                BlockValue seed = BlockValue.Air;
-                string used = "";
-                string[] soft =
-                {
-                    "hayBaleSquare", "hayBaleRound", "cntTrashPile01", "cntTrashPile02",
-                    "frameShapes", "woodShapes",
-                };
-                foreach (var name in soft)
-                {
-                    try
-                    {
-                        var bv = Block.GetBlockValue(name, true);
-                        if (bv.isair || bv.type == 0) continue;
-                        seed = bv;
-                        used = name;
-                        break;
-                    }
-                    catch { /* */ }
-                }
-                if (seed.type == 0)
-                {
-                    seed = Helpers.BlockUnderFeet(ctx.Player, ctx.World);
-                    used = "underFeet";
-                }
+                BlockValue seed = ResolveSoftSeed(ctx.Player, ctx.World, out string used);
                 ctx.PlaceBlockType = seed.type;
                 Helpers.SetBlockLocal(ctx.World, ctx.TargetBlock, seed);
                 Helpers.SetBlockRpc(ctx.World, ctx.TargetBlock, seed);
-                string[] tools =
-                {
-                    "meleeToolRepairT0StoneAxe", "meleeToolShovelT0StoneShovel",
-                    "meleeWpnBladeT0BoneKnife", "meleeToolRepairT1ClawHammer",
-                };
-                string tool = "";
-                foreach (var tname in tools)
-                {
-                    if (!Helpers.TryGetItem(tname, out var iv)) continue;
-                    if (!Helpers.TryGiveItem(ctx.Player, new ItemStack(iv, 1))) continue;
-                    if (Helpers.TryEquipItemType(ctx.Player, iv.type) >= 0)
-                    {
-                        tool = tname;
-                        break;
-                    }
-                }
+                string tool = EquipFirstMatching(ctx.Player, BlockDamageTools);
                 Helpers.LookAt(ctx.Player, ctx.TargetBlock.ToVector3Center());
                 ctx.Detail = "seed=" + used + " type=" + ctx.PlaceBlockType
                     + " at " + ctx.TargetBlock + " tool=" + tool;

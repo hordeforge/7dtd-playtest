@@ -28,7 +28,7 @@ Results always end with `SUMMARY` + `DONE exit_hint=0|1`. Deferred cases are
 | `demo_min` | `smoke,core,world,ui` (no combat wait) |
 | `benchmark` / `bench` | smoke+core+world+ui; multiply by `PLAYTEST_LAPS` |
 | `gate` / `ci` | `smoke,core` |
-| `live` | major suites without vehicle/power/persist/mp bulk |
+| `live` | same as `full` / `all` |
 | `full` / `all` | smoke…finale + soak (not persist/mp/apm/soak_long) |
 | `residual` / `residual_light` | **client only:** `mp` + short `soak` (not Make residual gate) |
 | `catalog` / `list` | dump case list to log |
@@ -50,7 +50,7 @@ Make:
 make playtest-demo
 make playtest-bench LAPS=3
 make playtest-gate
-make playtest-full            # long; many SKIPs expected
+make playtest-full            # long (95 cases); no persist/mp/apm/bot
 make playtest SUITE=combat
 ```
 
@@ -271,8 +271,9 @@ Make targets: `make playtest-soak-long`, `make playtest-apm`, `make playtest-res
 
 ## bot — BotManager visibility / parity
 
-Cases that observe the loadgen/zdtd bots (BotManager auto-spawn + telnet
-spawn requests) from the playtest client's point of view.
+Cases that observe the dedicated server's `BotMod` bots (BotManager auto-spawn
+plus orchestrator telnet spawn requests) from the playtest client's point of
+view. Requires `BotMod` in the dedicated server's `Mods/`.
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|

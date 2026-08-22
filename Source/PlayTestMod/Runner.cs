@@ -203,12 +203,7 @@ namespace ZdtdPlaytest
         static void BuildQueue()
         {
             _queue.Clear();
-            int laps = 1;
-            foreach (var s in _suites)
-            {
-                if (s == "benchmark")
-                    laps = _benchmarkLaps;
-            }
+            int laps = Array.IndexOf(_suites, "benchmark") >= 0 ? _benchmarkLaps : 1;
 
             for (int lap = 0; lap < laps; lap++)
             {
@@ -393,17 +388,7 @@ namespace ZdtdPlaytest
                     return;
                 }
 
-                bool ok = true;
-                string detail = _ctx.Detail ?? "";
-                if (def.Assert != null)
-                {
-                    try { ok = def.Assert(_ctx); detail = _ctx.Detail ?? detail; }
-                    catch (Exception ex)
-                    {
-                        ok = false;
-                        detail = "assert exception " + ex.Message;
-                    }
-                }
+                bool ok = RunCaseAssert(def, out string detail);
                 FinishCase(def, ok ? "pass" : "fail", 0f, detail);
                 return;
             }
@@ -422,17 +407,7 @@ namespace ZdtdPlaytest
 
                 if (done)
                 {
-                    bool ok = true;
-                    string detail = _ctx.Detail ?? "";
-                    if (def.Assert != null)
-                    {
-                        try { ok = def.Assert(_ctx); detail = _ctx.Detail ?? detail; }
-                        catch (Exception ex)
-                        {
-                            ok = false;
-                            detail = "assert exception " + ex.Message;
-                        }
-                    }
+                    bool ok = RunCaseAssert(def, out string detail);
                     FinishCase(def, ok ? "pass" : "fail", elapsed, detail);
                     return;
                 }
@@ -445,6 +420,25 @@ namespace ZdtdPlaytest
                     FinishCase(def, "fail", elapsed, d);
                 }
             }
+        }
+
+        /// <summary>Invoke the case assert against the live ctx; exceptions fail the case.</summary>
+        static bool RunCaseAssert(CaseDef def, out string detail)
+        {
+            bool ok = true;
+            detail = _ctx.Detail ?? "";
+            if (def.Assert == null) return ok;
+            try
+            {
+                ok = def.Assert(_ctx);
+                detail = _ctx.Detail ?? detail;
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                detail = "assert exception " + ex.Message;
+            }
+            return ok;
         }
 
         static void EnsurePlayerHealthy(EntityPlayerLocal p)
@@ -560,14 +554,10 @@ namespace ZdtdPlaytest
             }
 
             player = ResolveLocalPlayer(world) ?? player;
-            EnsurePlayerHealthy(player);
-            // Skip death case's auto-heal until after respawn case? Heal always except death screen act.
+            // Heal between cases, except the death-screen act: leave HP as-is so
+            // the host kill barrier drops a mortal player.
             var def = _queue[_caseIndex];
-            if (def.Id == "player_death_screen")
-            {
-                // Leave HP as-is; kill barrier will drop us.
-            }
-            else
+            if (def.Id != "player_death_screen")
                 EnsurePlayerHealthy(player);
 
             _ctx = new CaseCtx

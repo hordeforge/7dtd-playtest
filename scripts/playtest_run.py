@@ -1318,7 +1318,9 @@ def main(argv: list[str] | None = None) -> int:
         peer_teleport_done = args.peer_client_teleport is None
         rejoin_teleport_done = args.rejoin_teleport is None
         cleaned_ai = False
-        loadgen_proc: subprocess.Popen | None = None
+        # One-shot barrier state for parameterized barriers (per run, not per call).
+        chat_tokens_fired: set[str] = set()
+        vehicle_spawns_fired: dict[str, int] = {}
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
         apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
         client_extra_env: dict[str, str] = {}
@@ -1676,8 +1678,7 @@ def main(argv: list[str] | None = None) -> int:
                         if tn.connect():
                             out = tn.exec("bot list")
                             # Count bots from bot list output (lines with "Bot ")
-                            import re as _re
-                            n = len(_re.findall(r"Bot ", out))
+                            n = len(re.findall(r"Bot ", out))
                             if n < 4:
                                 r = tn.exec("bot count 6")
                                 log(f"telnet bot count 6 -> {r[:120]!r}")
@@ -1818,8 +1819,7 @@ def main(argv: list[str] | None = None) -> int:
                     token = full.split(":", 1)[-1].strip()
                     if not token:
                         continue
-                    fired = getattr(main, "_chat_tokens_fired", set())
-                    if token in fired:
+                    if token in chat_tokens_fired:
                         continue
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     if not tn.connect():
@@ -1829,8 +1829,7 @@ def main(argv: list[str] | None = None) -> int:
                         r = tn.exec(cmd)
                         log(f"telnet {cmd} → {r[:100]!r}")
                     tn.close()
-                    fired.add(token)
-                    main._chat_tokens_fired = fired  # type: ignore[attr-defined]
+                    chat_tokens_fired.add(token)
                     barrier_counts["chat_echo"] += 1
 
                 # spawn_vehicle:<entityClass> — one host-owned vehicle of that
@@ -1846,8 +1845,7 @@ def main(argv: list[str] | None = None) -> int:
                     if cls:
                         vehicle_hits[cls] = vehicle_hits.get(cls, 0) + 1
                 for cls, hits in vehicle_hits.items():
-                    fired_vehicles = getattr(main, "_vehicle_spawns_fired", {})
-                    while fired_vehicles.get(cls, 0) < hits:
+                    while vehicle_spawns_fired.get(cls, 0) < hits:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             n = tn.spawn_near_players(cls, per=1)
@@ -1860,8 +1858,7 @@ def main(argv: list[str] | None = None) -> int:
                         else:
                             log(f"warn: spawn_vehicle:{cls} telnet connect fail; retry")
                             break
-                        fired_vehicles[cls] = fired_vehicles.get(cls, 0) + 1
-                        main._vehicle_spawns_fired = fired_vehicles  # type: ignore[attr-defined]
+                        vehicle_spawns_fired[cls] = vehicle_spawns_fired.get(cls, 0) + 1
 
                 hits = _barrier_hits(text, "teleport_persist_pad")
                 while barrier_counts["teleport_persist_pad"] < hits:
@@ -2005,7 +2002,7 @@ def main(argv: list[str] | None = None) -> int:
             "ran_epoch": int(time.time()),
             "fixtures": {
                 "zombie_spawn_attempted": barrier_counts.get("spawn_zombie", 0) > 0,
-                "give_item_attempted": barrier_counts.get("kill_fixture_zombie", 0) > 0,
+                "kill_fixture_attempted": barrier_counts.get("kill_fixture_zombie", 0) > 0,
                 "barrier_counts": dict(barrier_counts),
                 "fresh_save": bool(args.fresh_save),
             },

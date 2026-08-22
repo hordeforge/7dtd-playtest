@@ -213,29 +213,77 @@ namespace ZdtdPlaytest
             return false;
         }
 
+        /// <summary>
+        /// Snapshot of world entities within radius of pos. One walk of the
+        /// entity list shared by every count / find-nearest probe; empty on
+        /// API drift so callers keep their fallback behavior.
+        /// </summary>
+        static List<Entity> EntitiesInRadius(World world, Vector3 pos, float radius)
+        {
+            var found = new List<Entity>();
+            try
+            {
+                var list = world.Entities.list;
+                if (list == null) return found;
+                float r2 = radius * radius;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var e = list[i];
+                    if (e == null) continue;
+                    if ((e.GetPosition() - pos).sqrMagnitude > r2) continue;
+                    found.Add(e);
+                }
+            }
+            catch { /* API drift */ }
+            return found;
+        }
+
+        /// <summary>Nearest entity of type T within radius, or null.</summary>
+        static T FindNearest<T>(World world, Vector3 pos, float radius) where T : Entity
+        {
+            T best = null;
+            float bestD = radius * radius;
+            foreach (var e in EntitiesInRadius(world, pos, radius))
+            {
+                if (!(e is T t)) continue;
+                float d = (t.GetPosition() - pos).sqrMagnitude;
+                if (d <= bestD)
+                {
+                    bestD = d;
+                    best = t;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>Count entities of type T within radius; sample names the first hit.</summary>
+        static int CountNearbyType<T>(World world, Vector3 pos, float radius, out string sample)
+            where T : Entity
+        {
+            sample = "";
+            int n = 0;
+            foreach (var e in EntitiesInRadius(world, pos, radius))
+            {
+                if (!(e is T)) continue;
+                n++;
+                if (sample.Length == 0)
+                    sample = e.GetType().Name + "#" + e.entityId;
+            }
+            return n;
+        }
+
         public static int CountNearby(World world, Vector3 pos, float radius,
             out int players, out int otherAlive, out int total)
         {
             players = 0;
             otherAlive = 0;
             total = 0;
-            try
+            foreach (var e in EntitiesInRadius(world, pos, radius))
             {
-                var list = world.Entities.list;
-                if (list == null) return 0;
-                float r2 = radius * radius;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i];
-                    if (e == null) continue;
-                    var d = e.GetPosition() - pos;
-                    if (d.sqrMagnitude > r2) continue;
-                    total++;
-                    if (e is EntityPlayer) players++;
-                    else if (e is EntityAlive) otherAlive++;
-                }
+                total++;
+                if (e is EntityPlayer) players++;
+                else if (e is EntityAlive) otherAlive++;
             }
-            catch { /* API drift */ }
             return total;
         }
 
@@ -354,29 +402,23 @@ namespace ZdtdPlaytest
             // cases must hit a killable zombie, not an unkillable NPC.
             EntityAlive best = null, bestEnemy = null;
             float bestD = radius * radius, bestEnemyD = radius * radius;
-            try
+            foreach (var e in EntitiesInRadius(world, pos, radius))
             {
-                var list = world.Entities.list;
-                if (list == null) return null;
-                for (int i = 0; i < list.Count; i++)
+                var alive = e as EntityAlive;
+                if (alive == null || alive is EntityPlayer) continue;
+                if (alive.IsDead() || alive.Health <= 0) continue;
+                float d = (alive.GetPosition() - pos).sqrMagnitude;
+                if (d <= bestD)
                 {
-                    var e = list[i] as EntityAlive;
-                    if (e == null || e is EntityPlayer) continue;
-                    if (e.IsDead() || e.Health <= 0) continue;
-                    float d = (e.GetPosition() - pos).sqrMagnitude;
-                    if (d <= bestD)
-                    {
-                        bestD = d;
-                        best = e;
-                    }
-                    if (e is EntityZombie && d <= bestEnemyD)
-                    {
-                        bestEnemyD = d;
-                        bestEnemy = e;
-                    }
+                    bestD = d;
+                    best = alive;
+                }
+                if (alive is EntityZombie && d <= bestEnemyD)
+                {
+                    bestEnemyD = d;
+                    bestEnemy = alive;
                 }
             }
-            catch { /* API drift */ }
             return bestEnemy ?? best;
         }
 
@@ -387,24 +429,17 @@ namespace ZdtdPlaytest
         {
             EntityAlive best = null;
             float bestD = radius * radius;
-            try
+            foreach (var e in EntitiesInRadius(world, pos, radius))
             {
-                var list = world.Entities.list;
-                if (list == null) return null;
-                for (int i = 0; i < list.Count; i++)
+                if (!(e is EntityZombie z)) continue;
+                if (z.IsDead() || z.Health <= 0) continue;
+                float d = (z.GetPosition() - pos).sqrMagnitude;
+                if (d <= bestD)
                 {
-                    var e = list[i] as EntityZombie;
-                    if (e == null) continue;
-                    if (e.IsDead() || e.Health <= 0) continue;
-                    float d = (e.GetPosition() - pos).sqrMagnitude;
-                    if (d <= bestD)
-                    {
-                        bestD = d;
-                        best = e;
-                    }
+                    bestD = d;
+                    best = z;
                 }
             }
-            catch { /* API drift */ }
             return best;
         }
 
@@ -417,7 +452,8 @@ namespace ZdtdPlaytest
                 var list = world.Entities.list;
                 for (int i = 0; i < list.Count; i++)
                 {
-                    var e = list[i] as EntityAlive;                    if (e != null && e.entityId == entityId) return e;
+                    var e = list[i] as EntityAlive;
+                    if (e != null && e.entityId == entityId) return e;
                 }
             }
             catch { /* API drift */ }
@@ -512,28 +548,8 @@ namespace ZdtdPlaytest
         /// <summary>Count world-dropped items (EntityItem / backpack / loot container) near pos.</summary>
         public static int CountNearbyEntityItems(World world, Vector3 pos, float radius, out string sample)
         {
-            sample = "";
-            int n = 0;
-            try
-            {
-                var list = world.Entities.list;
-                if (list == null) return 0;
-                float r2 = radius * radius;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i];
-                    if (e == null) continue;
-                    // EntityBackpack / EntityLootContainer subclass EntityItem.
-                    if (!(e is EntityItem)) continue;
-                    var d = e.GetPosition() - pos;
-                    if (d.sqrMagnitude > r2) continue;
-                    n++;
-                    if (sample.Length == 0)
-                        sample = e.GetType().Name + "#" + e.entityId;
-                }
-            }
-            catch { /* API drift */ }
-            return n;
+            // EntityBackpack / EntityLootContainer subclass EntityItem.
+            return CountNearbyType<EntityItem>(world, pos, radius, out sample);
         }
 
         /// <summary>Resolve a vanilla item by name; empty if missing.</summary>
@@ -778,26 +794,7 @@ namespace ZdtdPlaytest
         /// <summary>Nearest EntityItem in radius, or null.</summary>
         public static EntityItem FindNearestEntityItem(World world, Vector3 pos, float radius)
         {
-            EntityItem best = null;
-            float bestD = radius * radius;
-            try
-            {
-                var list = world.Entities.list;
-                if (list == null) return null;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i] as EntityItem;
-                    if (e == null) continue;
-                    float d = (e.GetPosition() - pos).sqrMagnitude;
-                    if (d <= bestD)
-                    {
-                        bestD = d;
-                        best = e;
-                    }
-                }
-            }
-            catch { /* */ }
-            return best;
+            return FindNearest<EntityItem>(world, pos, radius);
         }
 
         /// <summary>C2S collect: Entity.Collect(playerId) → NetPackageEntityCollect.</summary>
@@ -816,7 +813,6 @@ namespace ZdtdPlaytest
             }
         }
 
-        /// <summary>Magazine rounds on held item (ItemValue.Meta for guns).</summary>
         /// <summary>
         /// Remove one unit of itemType from bag or toolbelt (local). Used when
         /// ItemActionEat InstantAction does not run under automation; C2S
@@ -1095,65 +1091,17 @@ namespace ZdtdPlaytest
 
         public static int CountNearbyVehicles(World world, Vector3 pos, float radius, out string sample)
         {
-            sample = "";
-            int n = 0;
-            try
-            {
-                var list = world.Entities.list;
-                if (list == null) return 0;
-                float r2 = radius * radius;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i] as EntityVehicle;
-                    if (e == null) continue;
-                    if ((e.GetPosition() - pos).sqrMagnitude > r2) continue;
-                    n++;
-                    if (sample.Length == 0)
-                        sample = e.GetType().Name + "#" + e.entityId;
-                }
-            }
-            catch { /* */ }
-            return n;
+            return CountNearbyType<EntityVehicle>(world, pos, radius, out sample);
         }
 
         public static EntityVehicle FindNearestVehicle(World world, Vector3 pos, float radius)
         {
-            EntityVehicle best = null;
-            float bestD = radius * radius;
-            try
-            {
-                var list = world.Entities.list;
-                if (list == null) return null;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i] as EntityVehicle;
-                    if (e == null) continue;
-                    float d = (e.GetPosition() - pos).sqrMagnitude;
-                    if (d <= bestD) { bestD = d; best = e; }
-                }
-            }
-            catch { /* */ }
-            return best;
+            return FindNearest<EntityVehicle>(world, pos, radius);
         }
 
         public static EntityTrader FindNearestTrader(World world, Vector3 pos, float radius)
         {
-            EntityTrader best = null;
-            float bestD = radius * radius;
-            try
-            {
-                var list = world.Entities.list;
-                if (list == null) return null;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i] as EntityTrader;
-                    if (e == null) continue;
-                    float d = (e.GetPosition() - pos).sqrMagnitude;
-                    if (d <= bestD) { bestD = d; best = e; }
-                }
-            }
-            catch { /* */ }
-            return best;
+            return FindNearest<EntityTrader>(world, pos, radius);
         }
 
         /// <summary>True when player is attached to the given vehicle (driver seat).</summary>

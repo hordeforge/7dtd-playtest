@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using HarmonyLib;
 
@@ -38,12 +39,11 @@ namespace ZdtdPlaytest
             if (string.IsNullOrEmpty(token)) return false;
             lock (Gate)
             {
-                if (Last != null && Last.IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0)
-                    return true;
+                // Note() mirrors Last into Recent, so one scan covers both.
                 for (int i = 0; i < Recent.Count; i++)
                 {
                     if (Recent[i] != null
-                        && Recent[i].IndexOf(token, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                        && Recent[i].IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
                         return true;
                 }
             }
