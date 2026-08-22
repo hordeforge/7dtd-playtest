@@ -149,7 +149,10 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 **Stable** lines prefixed `[7dtd-playtest]` (do not rename tokens):
 
 - Human: `PASS|FAIL|SKIP suite/case detail`
-- Barrier: `barrier <name>` (host greps for telnet/admin phases)
+- Barrier: `barrier <name>` (host greps for telnet/admin phases).
+  `spawn_vehicle:<entityClass>` asks the host for one vehicle of that class
+  (the bare `spawn_vehicle` spawns a bicycle); client-created vehicles are
+  unknown to a dedicated server and cannot be driven there.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
