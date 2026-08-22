@@ -608,11 +608,20 @@ def parse_client_log(text: str) -> dict:
                     raise ValueError("event is not a JSON object")
                 json_events.append(ev)
                 if ev.get("t") == "result":
+                    # Crafted lines may put any JSON value where a scalar
+                    # belongs. Coerce status/detail to str so .upper() and
+                    # downstream string consumers cannot raise.
+                    status = ev.get("status", "")
+                    detail = ev.get("detail", "")
                     json_results.append(
                         {
-                            "status": ev.get("status", "").upper(),
+                            "status": str(status).upper(),
                             "case": f"{ev.get('suite', '')}/{ev.get('case', '')}",
-                            "detail": ev.get("detail", ""),
+                            "detail": (
+                                detail
+                                if isinstance(detail, str)
+                                else "" if detail is None else str(detail)
+                            ),
                         }
                     )
                 elif ev.get("t") == "summary":
@@ -623,11 +632,12 @@ def parse_client_log(text: str) -> dict:
                     }
                 elif ev.get("t") == "done":
                     json_done = {"exit_hint": int(ev.get("exit_hint", 1))}
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 # JSONDecodeError subclasses ValueError; a non-numeric count
                 # or exit_hint raises it too. A JSON null (or list) where a
-                # number belongs raises TypeError. Skip the bad event, keep
-                # the rest.
+                # number belongs raises TypeError, and int(inf) from a 1e999
+                # or bare Infinity token raises OverflowError. Skip the bad
+                # event, keep the rest.
                 pass
             continue
 
@@ -686,14 +696,25 @@ def write_report(path: Path, payload: dict) -> None:
     log(f"report → {path}")
 
 
+# Characters that are illegal anywhere in an XML 1.0 document: C0 controls
+# except tab/LF/CR, DEL plus C1 controls, surrogates, and the noncharacters
+# U+FFFE/U+FFFF. They cannot be escaped (no numeric reference exists for
+# them), so a single NUL surviving from a binary log line would make the
+# whole generated document unparseable; they are dropped before escaping.
+_XML_ILLEGAL_RE = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]"
+)
+
+
 def xml_attr(value: str) -> str:
     """Escape a value for safe inclusion inside a double-quoted XML attribute.
 
     Case ids and detail text come from client log lines (game output, mod
     detail strings), so every XML special must be escaped or a crafted line
-    breaks out of the attribute into arbitrary report markup.
+    breaks out of the attribute into arbitrary report markup. Characters
+    illegal in XML 1.0 are dropped first: escaping cannot represent them.
     """
-    return xml_escape(str(value), {'"': "&quot;", "'": "&apos;"})
+    return xml_escape(_XML_ILLEGAL_RE.sub("", str(value)), {'"': "&quot;", "'": "&apos;"})
 
 
 def write_junit(

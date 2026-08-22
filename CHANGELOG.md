@@ -38,6 +38,11 @@ unchanged.
 - Stock-peer orchestration surface gate (`scripts/test_stock_peer_client.py`)
   now runs as part of `make test`; it existed but nothing invoked it, so the
   peer-rename commit silently broke it.
+- Seeded grammar fuzzers for the log-derived report surface in
+  `scripts/test_report_surface.py`: hostile client-log blobs against
+  `parse_client_log` (shape, determinism, doubling invariants) and hostile
+  strings through `write_junit` (well-formedness, round-trip), both offline
+  and deterministic under `make test`.
 
 ### Changed
 
@@ -49,6 +54,14 @@ unchanged.
 
 ### Fixed
 
+- `parse_client_log` no longer aborts the run on a crafted log line: an
+  infinite summary count or exit hint (`1e999`, bare `Infinity`) raised
+  OverflowError past the bad-event handler, and non-string JSON status or
+  detail values crashed `.upper()` and downstream string consumers. Bad
+  events are skipped, garbage-typed fields coerced.
+- `write_junit` drops characters illegal in XML 1.0 (NUL and other control
+  bytes survive UTF-8 replace-decoding but cannot be escaped), so one binary
+  log line can no longer make the whole JUnit report unparseable.
 - SIGTERM/SIGHUP now shut down cleanly: detached client/server are stopped
   and the exclusivity lock is released instead of left stale-but-live with
   orphaned runtimes.
