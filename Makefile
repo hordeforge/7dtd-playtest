@@ -29,7 +29,8 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: build install uninstall clean test playtest playtest-smoke playtest-core \
+.PHONY: build install uninstall clean test dst dst-soak playtest playtest-smoke \
+	playtest-core \
 	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
 	playtest-residual install-pair
@@ -59,7 +60,25 @@ test:
 	python3 "$(ROOT)/scripts/test_catalog_surface.py"
 	python3 "$(ROOT)/scripts/test_scenario_provider_surface.py"
 	python3 "$(ROOT)/scripts/test_playtest_lock.py"
+	python3 "$(ROOT)/scripts/test_dst.py"
 	uv run --with pytest python "$(ROOT)/scripts/test_playtest_compare.py"
+
+# Deterministic simulation of the exclusivity lock. No game, no server, no
+# wall-clock waiting: DST_SEEDS runs of simulated multi-agent contention with
+# crash / torn-write / corruption / clock-skew faults, all driven by one seed
+# each. A failure prints the seed and the command to replay it exactly.
+DST_SEEDS ?= 200
+DST_AGENTS ?= 3
+dst:
+	python3 "$(ROOT)/scripts/dst_run.py" --regressions
+	python3 "$(ROOT)/scripts/dst_run.py" --iterations "$(DST_SEEDS)" --agents "$(DST_AGENTS)"
+
+# Tail-bug hunt: keep drawing fresh seeds for DST_SOAK_SEC wall seconds and
+# record any failing seed in scripts/dst_seeds.txt.
+DST_SOAK_SEC ?= 300
+dst-soak:
+	python3 "$(ROOT)/scripts/dst_run.py" --soak "$(DST_SOAK_SEC)" \
+		--agents "$(DST_AGENTS)" --record --quiet
 
 # Full host orchestration: stock dedicated (default) + client, score logs.
 # SERVER=stock|zdtd  WORLD_NAME=Navezgane  PORT= (empty → backend default)

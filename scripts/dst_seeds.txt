@@ -1,0 +1,10 @@
+# Regression seeds for the deterministic simulation (scripts/dst_sim.py).
+#
+# Every line is a seed that once failed an invariant. `make dst` and the
+# offline gate replay all of them on every run, so a defect that was found
+# once cannot come back quietly. Do not delete a line without explaining why
+# the scenario can no longer occur.
+#
+18   # I7: release wiped a live holder's claim off a mangled record
+40   # I7: same defect, reached through a heartbeat write error first
+50   # I7: same defect, holder was agent2 with a stray process in play

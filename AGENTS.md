@@ -114,7 +114,12 @@ heartbeat (or release promptly). This is **client exclusivity only**, not task
 ownership in a project TODO.
 
 Shipped module: `scripts/playtest_lock.py` (unit-tested; flock-serialized
-acquire + heartbeat).
+acquire + heartbeat). Its concurrency, crash, and corruption behaviour is
+covered by deterministic simulation - see [DST.md](DST.md) and `make dst`.
+Everything the lock cannot reproduce (clock, entropy, pid, disk, the
+cross-process mutex) is injected through `playtest_lock.LockEnv`; do not
+reintroduce a direct `time.time()`, `secrets`, or `Path.write_text` call in
+that module, or the simulation stops covering it.
 
 ## Commands
 
@@ -160,8 +165,9 @@ Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
 
 ## Offline gates (no game install)
 
-`make test` runs the four offline gates on every push (CI:
+`make test` runs the five offline gates on every push (CI:
 `.github/workflows/ci.yml`): catalog<->SCENARIOS surface (live rows + counts
 total must equal Catalog.cs), scenario-provider env surface, the host lock,
-and the compare diff (pytest via uv). A catalog addition that skips
+the deterministic simulation (`scripts/test_dst.py`), and the compare diff
+(pytest via uv). CI also runs a wider seed sweep with `make dst`. A catalog addition that skips
 SCENARIOS.md fails CI. The mod build itself is not CI-able (game DLLs).
