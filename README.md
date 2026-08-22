@@ -244,7 +244,11 @@ For one passive **stock** peer, provide both a distinct Local-platform player
 name and an already initialized, separate Proton compat profile. The runner
 starts that client without `PLAYTEST_*`, so it joins and remains in the world
 without executing a duplicate scenario suite. The connect mod reads the peer
-name from `7DTD_PLAYER_NAME`. This is a genuine second client, not a loadgen bot.
+name from `ZDTD_PLAYER_NAME`; use a current `7dtd-connect` install that
+supports that variable. This is a genuine second client, not a loadgen bot.
+The runner leaves one second between the two launches because the stock V3.1
+server has a 500 ms same-IP connection limiter; without that spacing the
+second localhost client is rejected before authentication.
 
 Run a suite with an isolated peer profile:
 
