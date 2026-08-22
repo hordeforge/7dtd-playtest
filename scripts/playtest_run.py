@@ -1310,6 +1310,12 @@ def main(argv: list[str] | None = None) -> int:
                 extra_env=client_extra_env or None,
             )
             if peer_client_name:
+                # V3.1 LiteNetLibAuthWrapperServer rejects same-IP connection
+                # attempts less than 500 ms apart. Both local stock clients
+                # use 127.0.0.1, so launching them back-to-back deterministically
+                # strands the peer at ConnectionRejected/RateLimit. Keep a
+                # full-second margin over the installed engine's limit.
+                time.sleep(1.0)
                 peer_env = {
                     "COMPAT": str(args.peer_client_compat),
                     "ZDTD_PLAYER_NAME": peer_client_name,
