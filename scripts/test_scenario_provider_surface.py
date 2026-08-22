@@ -6,6 +6,8 @@ import re
 import sys
 from pathlib import Path
 
+from playtest_run import barrier_hits_prefix
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
@@ -44,6 +46,20 @@ def main() -> int:
     catalog = CATALOG.read_text(encoding="utf-8")
     provider = PROVIDER.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
+
+    parameterized_log = "\n".join(
+        (
+            "[7dtd-playtest] barrier spawn_vehicle:vehicleGyrocopter",
+            '[7dtd-playtest] {"v":1,"t":"barrier","name":"spawn_vehicle:vehicleGyrocopter"}',
+            "[7dtd-playtest] barrier spawn_vehicle:vehicleGyrocopter",
+            "[7dtd-playtest] barrier spawn_vehicle:vehicleBicycle",
+        )
+    )
+    assert barrier_hits_prefix(parameterized_log, "spawn_vehicle:") == [
+        "spawn_vehicle:vehicleGyrocopter",
+        "spawn_vehicle:vehicleGyrocopter",
+        "spawn_vehicle:vehicleBicycle",
+    ], "repeated parameterized barriers must remain separate fixture requests"
 
     assert "public sealed class CaseDef" in runner
     assert "public sealed class CaseCtx" in runner
