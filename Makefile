@@ -33,7 +33,7 @@ endif
 	playtest-core \
 	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
-	playtest-residual install-pair
+	playtest-residual install-pair playtest-compare playtest-repeat
 
 build:
 	dotnet build "$(ROOT)/Source/PlayTestMod/PlayTestMod.csproj" -c Release -v q \

@@ -140,6 +140,7 @@ def write_stock_config(
     game_name: str,
     port: int,
     telnet_port: int,
+    telnet_password: str,
     max_players: int = 8,
 ) -> None:
     text = src_cfg.read_text(encoding="utf-8")
@@ -185,7 +186,10 @@ def write_stock_config(
         "MaxSpawnedAnimals": "0",
         "TelnetEnabled": "true",
         "TelnetPort": str(telnet_port),
-        "TelnetPassword": "retest",
+        # Same password TelnetAdmin authenticates with (--telnet-password /
+        # PLAYTEST_TELNET_PASSWORD). Writing a different literal here would
+        # make the orchestrator's telnet login fail on non-local auth.
+        "TelnetPassword": telnet_password,
         "BuildCreate": "true",
         "ServerPassword": "",
         "PlayerKillingMode": "0",
@@ -209,6 +213,7 @@ def start_stock_dedicated(
     game_name: str,
     port: int,
     telnet_port: int,
+    telnet_password: str,
 ) -> tuple[subprocess.Popen, Path]:
     """Start stock 7DaysToDieServer. Returns (proc, logfile path)."""
     if not (game_srv / "7DaysToDieServer.x86_64").is_file():
@@ -252,6 +257,7 @@ def start_stock_dedicated(
         game_name=game_name,
         port=port,
         telnet_port=telnet_port,
+        telnet_password=telnet_password,
     )
     log(f"stock config → {cfg_out} world={world_name} port={port}")
 
@@ -1237,6 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
                     game_name=args.game_name,
                     port=args.port,
                     telnet_port=args.admin_port,
+                    telnet_password=telnet_password,
                 )
                 ready_log = unity_log
                 # Navezgane load: up to ~10 min cold
@@ -1577,6 +1584,7 @@ def main(argv: list[str] | None = None) -> int:
                     game_name=args.game_name,
                     port=args.port,
                     telnet_port=args.admin_port,
+                    telnet_password=telnet_password,
                 )
                 ready_log = unity_log
                 if wait_file_contains(ready_log, "StartGame done", timeout=600):

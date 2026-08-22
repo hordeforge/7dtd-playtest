@@ -341,6 +341,16 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 
 `.github/workflows/ci.yml` runs `make test` (the offline gates: catalog<->SCENARIOS
 surface incl. live rows + counts total, scenario-provider env surface, host
-lock, compare diff) on every push. No game install needed - these are pure
-Python. The mod build itself is not CI-able (references game DLLs), so the
-offline gates are the push-time guard for catalog/doc drift.
+lock, deterministic simulation, compare diff) plus a wider `make dst DST_SEEDS=200`
+sweep on every push. No game install needed - these are pure Python. The mod
+build itself is not CI-able (references game DLLs), so the offline gates are
+the push-time guard for catalog/doc drift.
+
+### Host orchestrator secrets
+
+The stock dedicated telnet password is local-only and defaults to `retest`;
+override with `PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`). The same
+value is written into the generated server config and used by the
+orchestrator's telnet client, so the two can never diverge. It is not a
+production secret: the server binds localhost in playtest runs
+(`ServerVisibility=0`, Steam+LAN only).

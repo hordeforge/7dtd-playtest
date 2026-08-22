@@ -1,11 +1,22 @@
 name: ci
+
 on: [push, pull_request]
+
+# One run per ref: a force-push on a PR cancels the superseded run instead of
+# racing it for the same cache.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   offline-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      # setup-uv caches uv's wheel/install store automatically on GitHub-hosted
+      # runners (enable-cache defaults to auto), keyed off the uv.lock file.
       # The offline gates need no game install: catalog<->SCENARIOS surface
       # (live rows + counts total), scenario-provider env surface, the host
       # lock, the deterministic simulation, and the compare diff (pytest via
