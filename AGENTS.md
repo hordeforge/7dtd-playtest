@@ -166,11 +166,12 @@ Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
 
 ## Offline gates (no game install)
 
-`make test` runs the eight offline gates on every push (CI:
+`make test` runs the nine offline gates on every push (CI:
 `.github/workflows/ci.yml`): catalog<->SCENARIOS surface (live rows + counts
 total must equal Catalog.cs), mod version surface (`scripts/test_version_surface.py`;
 ModInfo.xml == ModApi.Version == dist manifest, and CHANGELOG.md must carry an
 [Unreleased] section plus the current release entry), scenario-provider env surface,
+the stock-peer orchestration surface (`scripts/test_stock_peer_client.py`),
 the host lock,
 the deterministic simulation (`scripts/test_dst.py`), the orchestrator
 local-init order gate (`scripts/test_no_unbound_locals.py`; catches the

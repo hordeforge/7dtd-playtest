@@ -29,7 +29,7 @@ checks = [
         "LiteNetLibAuthWrapperServer" in RUNNER
         and "time.sleep(1.0)" in RUNNER
         and RUNNER.index("time.sleep(1.0)")
-        < RUNNER.index('"ZDTD_PLAYER_NAME": peer_client_name'),
+        < RUNNER.index('"7DTD_PLAYER_NAME": peer_client_name'),
     ),
     require(
         "peer can run an explicit provider setup suite",

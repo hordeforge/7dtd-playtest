@@ -19,7 +19,8 @@ jobs:
       # runners (enable-cache defaults to auto), keyed off the uv.lock file.
       # The offline gates need no game install: catalog<->SCENARIOS surface
       # (live rows + counts total), mod version/changelog sync, the
-      # scenario-provider env surface, the host lock, the deterministic
+      # scenario-provider env surface, the stock-peer orchestration surface,
+      # the host lock, the deterministic
       # simulation, the orchestrator local-init order gate, and the compare
       # diff (pytest via uv). The mod build itself is not
       # CI-able (references game DLLs), but these gates catch the doc/catalog

@@ -35,6 +35,9 @@ unchanged.
   clock-skew faults replay from recorded seeds.
 - Offline local-init order gate for the orchestrator
   (`scripts/test_no_unbound_locals.py`).
+- Stock-peer orchestration surface gate (`scripts/test_stock_peer_client.py`)
+  now runs as part of `make test`; it existed but nothing invoked it, so the
+  peer-rename commit silently broke it.
 
 ### Changed
 
@@ -54,6 +57,14 @@ unchanged.
   rejects the second localhost client before authentication.
 - Sprint stamina drain guard added to the motor cases; malformed log events
   are tolerated instead of aborting the run.
+- Telnet AI cleanup no longer falls back to `killall` (`clear_ai`,
+  `kill_non_player_ai`): stock `killall` also kills the player entity (the
+  exact failure the helpers document against) and left the demo on a death
+  screen when `listents` output did not parse; an unmatched cleanup now
+  fails only its own case instead of cascading.
+- Provider rejoin with `SERVER=zdtd` now restarts the zdtd server between
+  setup save and verify instead of leaving the verify client facing a dead
+  server.
 
 ## [0.7.1] - 2026-08-22
 

@@ -789,8 +789,6 @@ class TelnetAdmin:
             eid = m.group(1)
             self.exec(f"kill {eid}")
             killed += 1
-        if killed == 0:
-            self.exec("killall")
         log(f"telnet clear_ai killed~={killed} (listents sample {out[:100]!r})")
 
     def kill_non_player_ai(self) -> int:
@@ -836,10 +834,8 @@ class TelnetAdmin:
                 killed += 1
                 if killed >= 16:
                     break
-        if killed == 0:
-            r = self.exec("killall")
-            log(f"telnet killall → {r[:80]!r}")
-            killed = 1 if r else 0
+        # No killall here either: stock killall also kills the player entity,
+        # and this helper is named for leaving players alive.
         log(f"telnet kill_non_player_ai killed~={killed}")
         return killed
 
@@ -1666,6 +1662,19 @@ def main(argv: list[str] | None = None) -> int:
                     log("stock dedicated ready after rejoin restart")
                 else:
                     log("warn: no StartGame done after rejoin restart; proceeding")
+            elif args.server == "zdtd" and not args.no_server:
+                server_proc = start_zdtd(
+                    args.zdtd,
+                    args.world,
+                    args.port,
+                    args.admin_port,
+                    args.game_srv,
+                    server_log,
+                )
+                if wait_file_contains(server_log, "tick=20Hz", timeout=60):
+                    log("zdtd ready after rejoin restart (tick=20Hz)")
+                else:
+                    log("warn: no tick=20Hz after rejoin restart; proceeding")
             if args.client_log.is_file():
                 try:
                     args.client_log.write_text("", encoding="utf-8")

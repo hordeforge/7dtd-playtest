@@ -64,6 +64,7 @@ test:
 	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"
 	$(UV) "$(ROOT)/scripts/test_version_surface.py"
 	$(UV) "$(ROOT)/scripts/test_scenario_provider_surface.py"
+	$(UV) "$(ROOT)/scripts/test_stock_peer_client.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_lock.py"
 	$(UV) "$(ROOT)/scripts/test_dst.py"
 	$(UV) "$(ROOT)/scripts/test_no_unbound_locals.py"
