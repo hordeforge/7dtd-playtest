@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import sys
+import textwrap
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -162,7 +163,49 @@ def find_violations(tree: ast.Module) -> list[str]:
     return problems
 
 
+def _violations(src: str) -> list[str]:
+    return find_violations(ast.parse(textwrap.dedent(src)))
+
+
+def test_find_violations_flags_read_before_store() -> None:
+    """The gate must fire on the crash class it exists for: a lexically
+    earlier read of a name whose only store comes later (the shipped
+    telnet_password shape)."""
+    probs = _violations(
+        """
+        def f():
+            print(a)
+            a = 1
+        """
+    )
+    assert any("'a'" in p for p in probs), f"plain load-before-store missed: {probs}"
+    print("PASS unbound_locals_detects flags lexical read-before-store")
+
+
+def test_find_violations_accepts_safe_scopes() -> None:
+    """Under-approximation contract (zero false positives by design):
+    parameters, global/nonlocal declarations, comprehension targets, walrus
+    stores, nested-scope reads of enclosing names, and a store on a branch
+    that lexically precedes the load are never flagged."""
+    safe = [
+        "def f(p):\n    return p\n",
+        "g_val = 0\ndef f():\n    global g_val\n    print(g_val)\n",
+        "def f(xs):\n    ys = [x for x in xs]\n    return x if False else len(ys)\n",
+        "def f():\n    print((w := 5))\n    return w\n",
+        "def outer():\n    a = 1\n    def inner():\n        return a\n    return inner\n",
+        # Runtime-unsafe when c is falsy, but the store is lexically first;
+        # path-sensitive detection is explicitly out of scope.
+        "def g(c):\n    if c:\n        x = 1\n    return x\n",
+    ]
+    for src in safe:
+        probs = _violations(src)
+        assert probs == [], f"false positive on documented-safe shape:\n{src}{probs}"
+    print("PASS unbound_locals_safe accepts params/global/comprehension/walrus/nested")
+
+
 def main() -> int:
+    test_find_violations_flags_read_before_store()
+    test_find_violations_accepts_safe_scopes()
     failures = 0
     for fname in GATED_FILES:
         path = SCRIPTS / fname

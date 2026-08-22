@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -93,11 +94,15 @@ def test_runtime_patterns_include_server() -> None:
         "7DaysToDie.exe" in pl.STOCK_CLIENT_EXECUTABLES,
         "client in runtime probe",
     )
-    # Structural: tcp_port_in_use is real (binds ephemeral, expects free high port free)
-    _assert(
-        pl.tcp_port_in_use(1) is False or isinstance(pl.tcp_port_in_use(65530), bool),
-        "tcp_port_in_use returns bool",
-    )
+    # Behavioral: the probe must see a real listener and then see it gone
+    # (a connect-based probe that always returned False would pass here).
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    bound = srv.getsockname()[1]
+    _assert(pl.tcp_port_in_use(bound), f"listening port {bound} reported in use")
+    srv.close()
+    _assert(not pl.tcp_port_in_use(bound), f"closed port {bound} reported free")
 
 
 def _fake_process(proc_root: Path, pid: str, exe: str, cmdline: str = "") -> None:

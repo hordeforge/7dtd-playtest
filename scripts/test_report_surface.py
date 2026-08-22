@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Offline gate: orchestrator report surface stays injection- and crash-safe.
+"""Offline gate: orchestrator report/log surface stays injection- and crash-safe.
 
 write_junit renders client-log-derived case ids and details into JUnit XML
 consumed by CI UIs, write_stock_config renders operator values into the
-generated serverconfig.xml, and parse_client_log eats arbitrary game log
-lines. A hostile or corrupt log line must not break out of an XML attribute
-or crash the parser.
+generated serverconfig.xml, parse_client_log eats arbitrary game log lines,
+and barrier_hits_prefix greps fixture barriers out of those logs (repeats are
+events, never duplicates to collapse). A hostile or corrupt log line must not
+break out of an XML attribute or crash either parser.
 """
 from __future__ import annotations
 
@@ -53,13 +54,38 @@ def test_parse_client_log_survives_null_numbers() -> None:
         '[7dtd-playtest] PASS s/c2 ok\n'
     )
     parsed = playtest_run.parse_client_log(text)
-    # The malformed summary/done events are skipped; the rest still parse.
-    assert parsed["done"] is None or isinstance(parsed["done"], dict), (
-        f"done event must not crash the parser: {parsed['done']}"
+    # The malformed summary/done events are skipped, the valid result event
+    # survives, and summary falls back to recounting the surviving results.
+    assert parsed["done"] is None, f"bad done event must be dropped: {parsed['done']}"
+    assert parsed["summary"] == {"pass": 1, "fail": 0, "skip": 0}, (
+        f"summary must be recounted from surviving results: {parsed['summary']}"
     )
-    statuses = [r["status"] for r in parsed["results"]]
-    assert "PASS" in statuses, f"valid events lost when a sibling was bad: {parsed}"
+    assert parsed["results"] == [
+        {"status": "PASS", "case": "s/c", "detail": "ok"}
+    ], f"valid sibling event lost or mangled: {parsed['results']}"
     print("PASS log_parse_bad_json no TypeError on null/array counts")
+
+
+def test_barrier_hits_prefix_keeps_repeats_and_scope() -> None:
+    """barrier_hits_prefix feeds spawn_vehicle:/chat_echo: consumers that keep
+    their own fired counts, so repeated barrier lines are events and must not
+    collapse; non-barrier lines and other prefixes must not match."""
+    blob = (
+        "[7dtd-playtest] barrier spawn_vehicle:bicycle\n"
+        "[7dtd-playtest] PASS smoke/ok detail=ok\n"
+        "[7dtd-playtest] barrier spawn_vehicle:jeep\n"
+        "[7dtd-playtest] barrier spawn_vehicle:bicycle\n"
+        "[game] barrier spawn_vehicle:not_ours\n"
+        "[7dtd-playtest] barrier chat_echo:hello\n"
+    )
+    hits = playtest_run.barrier_hits_prefix(blob, "spawn_vehicle:")
+    assert hits == [
+        "spawn_vehicle:bicycle",
+        "spawn_vehicle:jeep",
+        "spawn_vehicle:bicycle",
+    ], f"repeated barriers collapsed or misparsed: {hits}"
+    assert playtest_run.barrier_hits_prefix(blob, "chat_echo:") == ["chat_echo:hello"]
+    print("PASS barrier_prefix repeats preserved, foreign lines excluded")
 
 
 def test_write_stock_config_escapes_values() -> None:
@@ -99,6 +125,7 @@ def test_write_stock_config_escapes_values() -> None:
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
+    test_barrier_hits_prefix_keeps_repeats_and_scope()
     test_write_stock_config_escapes_values()
     print("RESULT PASS")
     return 0

@@ -69,6 +69,7 @@ test:
 	$(UV) "$(ROOT)/scripts/test_dst.py"
 	$(UV) "$(ROOT)/scripts/test_no_unbound_locals.py"
 	$(UV) "$(ROOT)/scripts/test_report_surface.py"
+	$(UV) "$(ROOT)/scripts/test_playtest_run_units.py"
 	uv run --project "$(ROOT)" --with pytest python "$(ROOT)/scripts/test_playtest_compare.py"
 
 # Deterministic simulation of the exclusivity lock. No game, no server, no
