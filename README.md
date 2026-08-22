@@ -288,7 +288,7 @@ reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 ```bash
 # terminal 1: stock dedicated or zdtd
 # terminal 2 (connect preserves env into the game process):
-ZDTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
+7DTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
   ../7dtd-connect/scripts/launch_client.sh
 # also accepted:
 # ZDTD_PLAYTEST_SUITE=smoke,core ...

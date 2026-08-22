@@ -38,7 +38,7 @@ STEAM_APPID = "251570"
 CLIENT_LOG = (
     Path.home()
     / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}/pfx/drive_c"
-    / "users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_zdtd_connect.txt"
+    / "users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_7dtd_connect.txt"
 )
 
 
@@ -47,7 +47,7 @@ def client_log_for_compat(compat: Path) -> Path:
     return (
         compat
         / "pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/logs"
-        / "output_log_client_zdtd_connect.txt"
+        / "output_log_client_7dtd_connect.txt"
     )
 
 RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
@@ -346,7 +346,7 @@ def start_client(
 ) -> subprocess.Popen:
     launch = CONNECT / "scripts" / "launch_client.sh"
     env = os.environ.copy()
-    env["ZDTD_CONNECT"] = f"127.0.0.1:{port}"
+    env["7DTD_CONNECT"] = f"127.0.0.1:{port}"
     if run_suite:
         env["PLAYTEST_SUITE"] = suite
         env["PLAYTEST"] = "1"
@@ -371,7 +371,7 @@ def start_client(
         env.update(extra_env)
     client_launch_log.parent.mkdir(parents=True, exist_ok=True)
     role = "scenario" if run_suite else "stock-peer"
-    log(f"start client role={role} suite={suite or '(none)'} connect={env['ZDTD_CONNECT']}")
+    log(f"start client role={role} suite={suite or '(none)'} connect={env['7DTD_CONNECT']}")
     fh = open(client_launch_log, "w", encoding="utf-8")
     proc = subprocess.Popen(
         ["bash", str(launch)],
@@ -1373,7 +1373,7 @@ def main(argv: list[str] | None = None) -> int:
                         crumbs = [
                             ln
                             for ln in text.splitlines()
-                            if "[7dtd-playtest]" in ln or "[zdtd-connect]" in ln
+                            if "[7dtd-playtest]" in ln or "[7dtd-connect]" in ln
                         ]
                         if crumbs:
                             log(f"setup progress: {crumbs[-1][-160:]}")
@@ -1595,7 +1595,7 @@ def main(argv: list[str] | None = None) -> int:
                     crumbs = [
                         ln
                         for ln in text.splitlines()
-                        if "[7dtd-playtest]" in ln or "[zdtd-connect]" in ln
+                        if "[7dtd-playtest]" in ln or "[7dtd-connect]" in ln
                     ]
                     if crumbs:
                         log(f"progress: {crumbs[-1][-160:]}")
@@ -1967,7 +1967,7 @@ def main(argv: list[str] | None = None) -> int:
                 cl = args.client_log.read_text(errors="replace")
                 for key in (
                     "7dtd-playtest",
-                    "zdtd-connect",
+                    "7dtd-connect",
                     "InitMod",
                     "Connect",
                     "ERROR",

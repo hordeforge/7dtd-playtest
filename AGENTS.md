@@ -135,7 +135,7 @@ make playtest SUITE=core SERVER=stock
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
 | `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
-| `ZDTD_CONNECT` | Set by orchestrator / connect |
+| `7DTD_CONNECT` | Set by orchestrator / connect (legacy `ZDTD_CONNECT` still honored) |
 | `PLAYTEST_LOCK_FILE` | Override exclusivity lock path (default under `~/.cache/7dtd-playtest/`) |
 | `PLAYTEST_SESSION_ID` | Lock holder session id (or `--session`; auto-generated if empty) |
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
