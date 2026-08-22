@@ -38,7 +38,7 @@ def _run(tmp_path: Path, stock: str, zdtd: str) -> subprocess.CompletedProcess[s
     out = tmp_path / "out"
     return subprocess.run(
         [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
 
 
@@ -79,7 +79,7 @@ def test_report_json_wall_axis(tmp_path):
     out = tmp_path / "out"
     r = subprocess.run(
         [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
@@ -109,7 +109,7 @@ def test_missing_side_refuses_diff(tmp_path):
     r = subprocess.run(
         [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z),
          "--out", str(out)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     assert r.returncode == 2, r.stderr
     assert "no report found on the zdtd side" in r.stderr
@@ -134,7 +134,7 @@ def test_stale_report_refuses_diff(tmp_path):
     r = subprocess.run(
         [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
          "--out", str(out), "--require-fresh-minutes", "60"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     assert r.returncode == 3, r.stderr
     assert "comparison inputs are stale" in r.stderr
@@ -157,7 +157,7 @@ def test_ran_at_surfaces_in_report(tmp_path):
     out = tmp_path / "out"
     r = subprocess.run(
         [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))

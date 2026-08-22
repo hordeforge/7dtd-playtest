@@ -56,6 +56,8 @@ def test_replay_survives_a_fresh_process() -> None:
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=True,
             env={"PATH": "/usr/bin:/bin", "PYTHONHASHSEED": hash_seed},
         )

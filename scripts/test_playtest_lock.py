@@ -321,6 +321,8 @@ def test_sigterm_becomes_graceful_exit() -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     try:
         line = proc.stdout.readline().strip()

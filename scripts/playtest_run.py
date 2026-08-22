@@ -125,7 +125,7 @@ def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
     while time.time() < deadline:
         if path.is_file():
             try:
-                text = path.read_text(errors="replace")
+                text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 text = ""
             if needle in text:
@@ -443,6 +443,8 @@ def ensure_loadgen_built() -> Path | None:
         cwd=str(LOADGEN),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if r.returncode != 0:
         log(f"loadgen build failed: {r.stderr[-400:]}")
@@ -521,7 +523,14 @@ def write_zdtd_apm_dump(
     ]
     log(f"apm dump: {' '.join(cmd)}")
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
     except (OSError, subprocess.TimeoutExpired) as ex:
         log(f"apm dump fail: {ex}")
         return False
@@ -1325,7 +1334,7 @@ def main(argv: list[str] | None = None) -> int:
                             log(
                                 "tail server log:\n"
                                 + "\n".join(
-                                    ready_log.read_text(errors="replace").splitlines()[
+                                    ready_log.read_text(encoding="utf-8", errors="replace").splitlines()[
                                         -40:
                                     ]
                                 )
@@ -1469,7 +1478,7 @@ def main(argv: list[str] | None = None) -> int:
             while time.time() < setup_deadline:
                 if args.client_log.is_file():
                     try:
-                        text = args.client_log.read_text(errors="replace")
+                        text = args.client_log.read_text(encoding="utf-8", errors="replace")
                     except OSError:
                         text = ""
                     now = time.time()
@@ -1544,7 +1553,7 @@ def main(argv: list[str] | None = None) -> int:
                     if args.client_log.is_file():
                         if (
                             parse_client_log(
-                                args.client_log.read_text(errors="replace")
+                                args.client_log.read_text(encoding="utf-8", errors="replace")
                             ).get("done")
                             is not None
                         ):
@@ -1555,7 +1564,7 @@ def main(argv: list[str] | None = None) -> int:
             setup_text = ""
             if args.client_log.is_file():
                 try:
-                    setup_text = args.client_log.read_text(errors="replace")
+                    setup_text = args.client_log.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     setup_text = ""
             setup_parsed = parse_client_log(setup_text) if setup_text else {}
@@ -1678,7 +1687,7 @@ def main(argv: list[str] | None = None) -> int:
             if peer_client_log is None or not peer_client_log.is_file():
                 return {}
             try:
-                return parse_client_log(peer_client_log.read_text(errors="replace"))
+                return parse_client_log(peer_client_log.read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 return {}
 
@@ -1689,7 +1698,7 @@ def main(argv: list[str] | None = None) -> int:
             text = ""
             if args.client_log.is_file():
                 try:
-                    text = args.client_log.read_text(errors="replace")
+                    text = args.client_log.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     text = ""
             if text and len(text) != last_size:
@@ -1978,7 +1987,7 @@ def main(argv: list[str] | None = None) -> int:
 
             if peer_client_log is not None and not peer_ready_seen and peer_client_log.is_file():
                 try:
-                    peer_text = peer_client_log.read_text(errors="replace")
+                    peer_text = peer_client_log.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     peer_text = ""
                 if "ready player=" in peer_text:
@@ -2009,7 +2018,7 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(2)
                 if args.client_log.is_file():
                     parsed = parse_client_log(
-                        args.client_log.read_text(errors="replace")
+                        args.client_log.read_text(encoding="utf-8", errors="replace")
                     )
                     peer_parsed = read_peer_results()
                     if parsed.get("done") is not None and peer_suite_done():
@@ -2018,10 +2027,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             log(f"timeout after {args.timeout}s waiting for DONE")
             if args.client_log.is_file():
-                parsed = parse_client_log(args.client_log.read_text(errors="replace"))
+                parsed = parse_client_log(args.client_log.read_text(encoding="utf-8", errors="replace"))
 
         if not parsed and args.client_log.is_file():
-            parsed = parse_client_log(args.client_log.read_text(errors="replace"))
+            parsed = parse_client_log(args.client_log.read_text(encoding="utf-8", errors="replace"))
         if peer_client_suite:
             peer_parsed = read_peer_results()
 
@@ -2103,7 +2112,7 @@ def main(argv: list[str] | None = None) -> int:
             for r in peer_results:
                 log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
             if args.client_log.is_file():
-                cl = args.client_log.read_text(errors="replace")
+                cl = args.client_log.read_text(encoding="utf-8", errors="replace")
                 for key in (
                     "7dtd-playtest",
                     "7dtd-connect",
