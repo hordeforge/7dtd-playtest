@@ -127,8 +127,8 @@ that module, or the simulation stops covering it.
 make install              # build + install playtest mod
 make install-pair         # playtest + connect
 make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
-make playtest-core        # stock dedicated + smoke,core
-make playtest-zdtd        # same against zdtd
+make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
+make playtest-zdtd        # demo suite against zdtd (port 27025)
 make playtest SUITE=core SERVER=stock
 ```
 
@@ -167,19 +167,27 @@ Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
 ## Offline gates (no game install)
 
 `make test` runs the ten offline gates on every push (CI:
-`.github/workflows/ci.yml`): catalog<->SCENARIOS surface (live rows + counts
-total must equal Catalog.cs), mod version surface (`scripts/test_version_surface.py`;
-ModInfo.xml == ModApi.Version == dist manifest, and CHANGELOG.md must carry an
-[Unreleased] section plus the current release entry), scenario-provider env surface,
-the stock-peer orchestration surface (`scripts/test_stock_peer_client.py`),
-the host lock,
-the deterministic simulation (`scripts/test_dst.py`), the orchestrator
-local-init order gate (`scripts/test_no_unbound_locals.py`; catches the
-read-before-assignment crash class that once shipped in `playtest_run.py`
-main() and only fires with real game binaries present), the orchestrator
-report/log surface (`scripts/test_report_surface.py`; JUnit and serverconfig
-XML attribute escaping plus parser survival on malformed JSON events),
-the orchestrator pure-logic units (`scripts/test_playtest_run_units.py`;
-fresh-save deletes only every world's copy of the named game save), and the compare diff
-(pytest via uv). CI also runs a wider seed sweep with `make dst`. A catalog addition that skips
-SCENARIOS.md fails CI. The mod build itself is not CI-able (game DLLs).
+`.github/workflows/ci.yml`):
+
+1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
+   + counts total must equal Catalog.cs. A catalog addition that skips
+   SCENARIOS.md fails CI.
+2. mod version surface (`scripts/test_version_surface.py`): ModInfo.xml ==
+   ModApi.Version == dist manifest, and CHANGELOG.md must carry an
+   [Unreleased] section plus the current release entry.
+3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
+4. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
+5. host lock (`scripts/test_playtest_lock.py`)
+6. deterministic simulation (`scripts/test_dst.py`)
+7. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
+   catches the read-before-assignment crash class that once shipped in
+   `playtest_run.py` main(); only fires with real game binaries present.
+8. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
+   and serverconfig XML attribute escaping plus parser survival on malformed
+   JSON events.
+9. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
+   fresh-save deletes only every world's copy of the named game save.
+10. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
+
+CI also runs a wider seed sweep with `make dst`. The mod build itself is not
+CI-able (game DLLs).
