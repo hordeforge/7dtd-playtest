@@ -56,13 +56,17 @@ uninstall:
 clean:
 	rm -rf "$(ROOT)/dist" "$(ROOT)/Source/PlayTestMod/bin" "$(ROOT)/Source/PlayTestMod/obj"
 
+# All host Python goes through uv so every machine uses one interpreter
+# honoring requires-python >=3.11 (bare python3 may be older on some distros).
+UV := uv run --project "$(ROOT)" python
+
 test:
-	python3 "$(ROOT)/scripts/test_catalog_surface.py"
-	python3 "$(ROOT)/scripts/test_scenario_provider_surface.py"
-	python3 "$(ROOT)/scripts/test_playtest_lock.py"
-	python3 "$(ROOT)/scripts/test_dst.py"
-	python3 "$(ROOT)/scripts/test_no_unbound_locals.py"
-	uv run --with pytest python "$(ROOT)/scripts/test_playtest_compare.py"
+	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"
+	$(UV) "$(ROOT)/scripts/test_scenario_provider_surface.py"
+	$(UV) "$(ROOT)/scripts/test_playtest_lock.py"
+	$(UV) "$(ROOT)/scripts/test_dst.py"
+	$(UV) "$(ROOT)/scripts/test_no_unbound_locals.py"
+	uv run --project "$(ROOT)" --with pytest python "$(ROOT)/scripts/test_playtest_compare.py"
 
 # Deterministic simulation of the exclusivity lock. No game, no server, no
 # wall-clock waiting: DST_SEEDS runs of simulated multi-agent contention with
@@ -71,14 +75,14 @@ test:
 DST_SEEDS ?= 200
 DST_AGENTS ?= 3
 dst:
-	python3 "$(ROOT)/scripts/dst_run.py" --regressions
-	python3 "$(ROOT)/scripts/dst_run.py" --iterations "$(DST_SEEDS)" --agents "$(DST_AGENTS)"
+	$(UV) "$(ROOT)/scripts/dst_run.py" --regressions
+	$(UV) "$(ROOT)/scripts/dst_run.py" --iterations "$(DST_SEEDS)" --agents "$(DST_AGENTS)"
 
 # Tail-bug hunt: keep drawing fresh seeds for DST_SOAK_SEC wall seconds and
 # record any failing seed in scripts/dst_seeds.txt.
 DST_SOAK_SEC ?= 300
 dst-soak:
-	python3 "$(ROOT)/scripts/dst_run.py" --soak "$(DST_SOAK_SEC)" \
+	$(UV) "$(ROOT)/scripts/dst_run.py" --soak "$(DST_SOAK_SEC)" \
 		--agents "$(DST_AGENTS)" --record --quiet
 
 # Full host orchestration: stock dedicated (default) + client, score logs.
@@ -86,7 +90,7 @@ dst-soak:
 playtest: install-pair
 	@mkdir -p "$(WORLD)"
 	PLAYTEST_LAPS="$(LAPS)" \
-	uv run --project "$(ROOT)" python "$(ROOT)/scripts/playtest_run.py" \
+	$(UV) "$(ROOT)/scripts/playtest_run.py" \
 		--server "$(SERVER)" \
 		--suite "$(SUITE)" \
 		--world-name "$(WORLD_NAME)" \
@@ -162,7 +166,7 @@ playtest-compare: install-pair
 		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" || true
 	$(MAKE) playtest SUITE="$(SUITE)" SERVER=zdtd PORT=27025 \
 		EXTRA_ARGS="--logdir $(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd" || true
-	uv run --project "$(ROOT)" python "$(ROOT)/scripts/playtest_compare.py" \
+	$(UV) "$(ROOT)/scripts/playtest_compare.py" \
 		--stock-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
 		--zdtd-dir "$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd" \
 		--out "$(ROOT)/workspace/comparison-playtest/$(SUITE)" \

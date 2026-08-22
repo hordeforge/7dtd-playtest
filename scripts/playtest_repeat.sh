@@ -15,6 +15,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORCH="$HERE/playtest_run.py"
+ROOT="$(cd "$HERE/.." && pwd)"
 SUITE="${PLAYTEST_SUITE:-demo}"
 LAPS="${PLAYTEST_LAPS:-3}"
 REPORT_DIR="${LOGDIR:-$HOME/.cache/7dtd-playtest}"
@@ -63,7 +64,7 @@ print(int(s.get("pass", 0)), int(s.get("fail", 0)), int(s.get("skip", 0)))
 
 for lap in $(seq 1 "$LAPS"); do
   echo "=== lap $lap/$LAPS ==="
-  if ! python3 "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
+  if ! uv run --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
     echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)"
     continue
   fi

@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -242,7 +243,7 @@ def start_stock_dedicated(
         disabled.mkdir(exist_ok=True)
         dest = disabled / "RealEarth"
         if dest.exists():
-            subprocess.run(["rm", "-rf", str(dest)], check=False)
+            shutil.rmtree(dest, ignore_errors=True)
         re_mod.rename(dest)
         log("quarantined RealEarth → Mods.disabled")
 
@@ -917,7 +918,7 @@ def fresh_save(userdata: Path, game_name: str) -> None:
             continue
         target = world_dir / game_name
         if target.is_dir():
-            subprocess.run(["rm", "-rf", str(target)], check=False)
+            shutil.rmtree(target, ignore_errors=True)
             removed += 1
             log(f"fresh-save removed {target}")
     if removed == 0:
