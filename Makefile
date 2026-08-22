@@ -62,6 +62,7 @@ UV := uv run --project "$(ROOT)" python
 
 test:
 	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"
+	$(UV) "$(ROOT)/scripts/test_version_surface.py"
 	$(UV) "$(ROOT)/scripts/test_scenario_provider_surface.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_lock.py"
 	$(UV) "$(ROOT)/scripts/test_dst.py"

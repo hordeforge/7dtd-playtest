@@ -18,9 +18,10 @@ jobs:
       # setup-uv caches uv's wheel/install store automatically on GitHub-hosted
       # runners (enable-cache defaults to auto), keyed off the uv.lock file.
       # The offline gates need no game install: catalog<->SCENARIOS surface
-      # (live rows + counts total), scenario-provider env surface, the host
-      # lock, the deterministic simulation, the orchestrator local-init order
-      # gate, and the compare diff (pytest via uv). The mod build itself is not
+      # (live rows + counts total), mod version/changelog sync, the
+      # scenario-provider env surface, the host lock, the deterministic
+      # simulation, the orchestrator local-init order gate, and the compare
+      # diff (pytest via uv). The mod build itself is not
       # CI-able (references game DLLs), but these gates catch the doc/catalog
       # drift that used to ship silently.
       - run: make test

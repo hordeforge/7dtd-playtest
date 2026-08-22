@@ -1,0 +1,3 @@
+# Host tooling is Linux-only (bash scripts, LF-sensitive Makefile); keep
+# every text file LF in the index and in working trees on any platform.
+* text=auto eol=lf

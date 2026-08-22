@@ -1,0 +1,73 @@
+# Changelog
+
+All notable changes to the `7dtd-playtest` client mod are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+Release model (inferred practice, now pinned by `make test`):
+
+- One version per artifact. The client mod version lives in `ModInfo.xml`
+  and `ModApi.Version`; git tags are annotated `vX.Y.Z` refs pointing at the
+  released commit. `scripts/test_version_surface.py` fails the offline gates
+  if these disagree or if a tagged version has no entry below.
+- The host orchestrator package (`pyproject.toml`) is an unpublished,
+  independently versioned helper; consumers interact with it through the
+  stable log contract and exit codes documented in the README, not through
+  its package version.
+- Consumer-facing contracts (stable `[7dtd-playtest]` log tokens, JSON event
+  schema `"v":1`, suite/env surface, exclusivity lock payload format, and the
+  C# provider API `CaseDef`/`CaseCtx`/`IScenarioProvider`/`Helpers`/`Report`)
+  may only change in a release whose entry below says so explicitly.
+
+## [Unreleased]
+
+No breaking changes: verified against the `v0.7.1` tag, the public C#
+provider surface, log contract tokens, lock payload keys
+(`running`/`session`/`acquired`/`heartbeat`), and suite env names are
+unchanged.
+
+### Added
+
+- `PLAYTEST_TELNET_PASSWORD` env and `--telnet-password`: one value feeds
+  both the generated server config and the orchestrator telnet client.
+  Default stays `retest`.
+- Deterministic simulation of the exclusivity lock: `make dst`
+  (`scripts/test_dst.py`, `DST.md`). Crash, torn-write, corruption, and
+  clock-skew faults replay from recorded seeds.
+- Offline local-init order gate for the orchestrator
+  (`scripts/test_no_unbound_locals.py`).
+
+### Changed
+
+- Host Python runs through `uv` only (requires Python >= 3.11).
+- Entity probes, fixture equips, and barrier bookkeeping share one
+  implementation; repeated parameterized barriers
+  (`barrier spawn_vehicle:<class>`) each reach the host as separate fixture
+  requests.
+
+### Fixed
+
+- SIGTERM/SIGHUP now shut down cleanly: detached client/server are stopped
+  and the exclusivity lock is released instead of left stale-but-live with
+  orphaned runtimes.
+- Passive stock peer launch is spaced one second behind the primary client
+  so the stock server's same-IP connection limiter (500 ms) no longer
+  rejects the second localhost client before authentication.
+- Sprint stamina drain guard added to the motor cases; malformed log events
+  are tolerated instead of aborting the run.
+
+## [0.7.1] - 2026-08-22
+
+Stock-client scenario suite snapshot. Gameplay surface (stock motor, stock
+attack, real C2S; no tele-fakes):
+
+- Locomotion, jump, stamina; entity/block melee; ranged (pipe pistol Meta).
+- `ItemDropServer`, loot collect, keystone place, eat, dig/place.
+- Creative UI; craft wooden club (queue plus output); campfire TE place.
+- Runner recovers from player death mid-suite instead of hanging.
+- Residual live coverage: multi-phase rejoin, multi-peer loadgen, 15 minute
+  soak, zdtd APM dump attach.
+- Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
+  residual suites separately fail=0.
+
+[Unreleased]: https://github.com/maci0/7dtd-playtest/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/maci0/7dtd-playtest/releases/tag/v0.7.1
