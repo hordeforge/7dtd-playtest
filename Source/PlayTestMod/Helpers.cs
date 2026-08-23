@@ -316,23 +316,30 @@ namespace ZdtdPlaytest
             return n;
         }
 
-        /// <summary>Stock worldTime: days in high bits, hours packed. Returns day (1-based-ish) and hour.</summary>
-        public static void DecodeWorldTime(ulong worldTime, out int day, out int hour, out int minute)
+        /// <summary>Stock worldTime: days in high bits, hours packed.</summary>
+        /// <remarks>
+        /// Returns false when the GameUtils decode is unavailable (API drift);
+        /// out values are meaningless then. Callers must surface the failure:
+        /// the old silent day=1/00:00 fallback decoded garbage as a valid
+        /// morning clock and let clock cases pass on nothing.
+        /// </remarks>
+        public static bool DecodeWorldTime(ulong worldTime, out int day, out int hour, out int minute)
         {
+            day = -1;
+            hour = -1;
+            minute = -1;
             // Matches common 7DTD packing: worldTime ticks; 24000-ish day length varies.
-            // Prefer GameUtils if present; fallback rough decode.
+            // Prefer GameUtils if present; no rough fallback (it could fake a pass).
             try
             {
                 day = GameUtils.WorldTimeToDays(worldTime);
                 hour = GameUtils.WorldTimeToHours(worldTime);
                 minute = GameUtils.WorldTimeToMinutes(worldTime);
-                return;
+                return true;
             }
             catch
             {
-                day = 1;
-                hour = 0;
-                minute = 0;
+                return false;
             }
         }
 
