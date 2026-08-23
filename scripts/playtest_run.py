@@ -1742,7 +1742,11 @@ def main(argv: list[str] | None = None) -> int:
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
         apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
         client_extra_env: dict[str, str] = {}
-        if "apm" in args.suite.split(","):
+        # Same , ; space delimiters as the client's Catalog.ExpandSuites (see
+        # suite_wants_host_fixtures): "smoke apm" must arm the dump env exactly
+        # like "smoke,apm", or the in-client apm case waits on a path this
+        # host never hands it and can only fail.
+        if "apm" in re.split(r"[,;\s]+", args.suite.lower()):
             client_extra_env["ZDTD_APM_DUMP"] = str(apm_dump_path)
             client_extra_env["ZDTD_APM_RUN_ID"] = apm_run_id
             # Preseed is explicitly NOT a valid live dump (client rejects APM_PRESEED).
