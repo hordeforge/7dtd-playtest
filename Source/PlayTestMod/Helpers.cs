@@ -216,46 +216,32 @@ namespace ZdtdPlaytest
             return false;
         }
 
-        /// <summary>
-        /// Snapshot of world entities within radius of pos. One walk of the
-        /// entity list shared by every count / find-nearest probe; empty on
-        /// API drift so callers keep their fallback behavior.
-        /// </summary>
-        static List<Entity> EntitiesInRadius(World world, Vector3 pos, float radius)
-        {
-            var found = new List<Entity>();
-            try
-            {
-                var list = world.Entities.list;
-                if (list == null) return found;
-                float r2 = radius * radius;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var e = list[i];
-                    if (e == null) continue;
-                    if ((e.GetPosition() - pos).sqrMagnitude > r2) continue;
-                    found.Add(e);
-                }
-            }
-            catch { /* API drift */ }
-            return found;
-        }
+        // Probe scans walk world.Entities.list directly in one pass. Wait
+        // predicates call these every game frame while a case waits, so each
+        // position must be read once and no intermediate list may be built.
+        // All return empty/zero on API drift so callers keep their fallback.
 
         /// <summary>Nearest entity of type T within radius, or null.</summary>
         static T FindNearest<T>(World world, Vector3 pos, float radius) where T : Entity
         {
             T best = null;
-            float bestD = radius * radius;
-            foreach (var e in EntitiesInRadius(world, pos, radius))
+            try
             {
-                if (!(e is T t)) continue;
-                float d = (t.GetPosition() - pos).sqrMagnitude;
-                if (d <= bestD)
+                var list = world.Entities.list;
+                if (list == null) return null;
+                float bestD = radius * radius;
+                for (int i = 0; i < list.Count; i++)
                 {
-                    bestD = d;
-                    best = t;
+                    if (!(list[i] is T t)) continue;
+                    float d = (t.GetPosition() - pos).sqrMagnitude;
+                    if (d <= bestD)
+                    {
+                        bestD = d;
+                        best = t;
+                    }
                 }
             }
+            catch { /* API drift */ }
             return best;
         }
 
@@ -265,13 +251,22 @@ namespace ZdtdPlaytest
         {
             sample = "";
             int n = 0;
-            foreach (var e in EntitiesInRadius(world, pos, radius))
+            try
             {
-                if (!(e is T)) continue;
-                n++;
-                if (sample.Length == 0)
-                    sample = e.GetType().Name + "#" + e.entityId;
+                var list = world.Entities.list;
+                if (list == null) return 0;
+                float r2 = radius * radius;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var e = list[i];
+                    if (!(e is T)) continue;
+                    if ((e.GetPosition() - pos).sqrMagnitude > r2) continue;
+                    n++;
+                    if (sample.Length == 0)
+                        sample = e.GetType().Name + "#" + e.entityId;
+                }
             }
+            catch { /* API drift */ }
             return n;
         }
 
@@ -281,12 +276,22 @@ namespace ZdtdPlaytest
             players = 0;
             otherAlive = 0;
             total = 0;
-            foreach (var e in EntitiesInRadius(world, pos, radius))
+            try
             {
-                total++;
-                if (e is EntityPlayer) players++;
-                else if (e is EntityAlive) otherAlive++;
+                var list = world.Entities.list;
+                if (list == null) return 0;
+                float r2 = radius * radius;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var e = list[i];
+                    if (e == null) continue;
+                    if ((e.GetPosition() - pos).sqrMagnitude > r2) continue;
+                    total++;
+                    if (e is EntityPlayer) players++;
+                    else if (e is EntityAlive) otherAlive++;
+                }
             }
+            catch { /* API drift */ }
             return total;
         }
 
@@ -404,24 +409,30 @@ namespace ZdtdPlaytest
             // now replicates traders that sit next to the spawn, and the combat
             // cases must hit a killable zombie, not an unkillable NPC.
             EntityAlive best = null, bestEnemy = null;
-            float bestD = radius * radius, bestEnemyD = radius * radius;
-            foreach (var e in EntitiesInRadius(world, pos, radius))
+            try
             {
-                var alive = e as EntityAlive;
-                if (alive == null || alive is EntityPlayer) continue;
-                if (alive.IsDead() || alive.Health <= 0) continue;
-                float d = (alive.GetPosition() - pos).sqrMagnitude;
-                if (d <= bestD)
+                var list = world.Entities.list;
+                if (list == null) return null;
+                float bestD = radius * radius, bestEnemyD = radius * radius;
+                for (int i = 0; i < list.Count; i++)
                 {
-                    bestD = d;
-                    best = alive;
-                }
-                if (alive is EntityZombie && d <= bestEnemyD)
-                {
-                    bestEnemyD = d;
-                    bestEnemy = alive;
+                    var alive = list[i] as EntityAlive;
+                    if (alive == null || alive is EntityPlayer) continue;
+                    if (alive.IsDead() || alive.Health <= 0) continue;
+                    float d = (alive.GetPosition() - pos).sqrMagnitude;
+                    if (d <= bestD)
+                    {
+                        bestD = d;
+                        best = alive;
+                    }
+                    if (alive is EntityZombie && d <= bestEnemyD)
+                    {
+                        bestEnemyD = d;
+                        bestEnemy = alive;
+                    }
                 }
             }
+            catch { /* API drift */ }
             return bestEnemy ?? best;
         }
 
@@ -431,18 +442,24 @@ namespace ZdtdPlaytest
         public static EntityAlive FindNearestZombieAlive(World world, Vector3 pos, float radius)
         {
             EntityAlive best = null;
-            float bestD = radius * radius;
-            foreach (var e in EntitiesInRadius(world, pos, radius))
+            try
             {
-                if (!(e is EntityZombie z)) continue;
-                if (z.IsDead() || z.Health <= 0) continue;
-                float d = (z.GetPosition() - pos).sqrMagnitude;
-                if (d <= bestD)
+                var list = world.Entities.list;
+                if (list == null) return null;
+                float bestD = radius * radius;
+                for (int i = 0; i < list.Count; i++)
                 {
-                    bestD = d;
-                    best = z;
+                    if (!(list[i] is EntityZombie z)) continue;
+                    if (z.IsDead() || z.Health <= 0) continue;
+                    float d = (z.GetPosition() - pos).sqrMagnitude;
+                    if (d <= bestD)
+                    {
+                        bestD = d;
+                        best = z;
+                    }
                 }
             }
+            catch { /* API drift */ }
             return best;
         }
 

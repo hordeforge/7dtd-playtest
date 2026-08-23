@@ -2479,7 +2479,11 @@ def main(argv: list[str] | None = None) -> int:
             for r in peer_results:
                 log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
             if args.client_log.is_file():
-                cl = args.client_log.read_text(encoding="utf-8", errors="replace")
+                # One split shared by every key grep: a failed run's client log
+                # can reach tens of MB, and re-splitting per key multiplies it.
+                cl_lines = args.client_log.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
                 for key in (
                     "7dtd-playtest",
                     "7dtd-fastconnect",
@@ -2488,7 +2492,7 @@ def main(argv: list[str] | None = None) -> int:
                     "ERROR",
                     "Exception",
                 ):
-                    hits = [ln for ln in cl.splitlines() if key in ln]
+                    hits = [ln for ln in cl_lines if key in ln]
                     if hits:
                         err(f"client log '{key}' ({len(hits)}): {hits[-3:]}")
             exit_code = 2
