@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -33,6 +34,17 @@ namespace ZdtdPlaytest
         static FieldInfo _runToggleActiveField;
         static bool _fieldsResolved;
 
+        // Per-player-type reflection caches. ApplyToPlayer runs up to 3x per game
+        // update while drive is active (runner Tick + PMC Prefix/Postfix), so
+        // member lookup must be resolved once, not per call.
+        static Type _freezeType;
+        static FieldInfo[] _freezeFields = Array.Empty<FieldInfo>();
+        static bool[] _freezeUnlock = Array.Empty<bool>();
+        static PropertyInfo _spectatorProp;
+        static Type _spawnType;
+        static FieldInfo _spawnedFlagField;
+        static FieldInfo _remoteFlagField;
+
         public static bool Active => _active;
 
         static void ResolveFields()
@@ -43,6 +55,55 @@ namespace ZdtdPlaytest
             _isAutorunField = AccessTools.Field(t, "isAutorun");
             _isAutorunInvalidField = AccessTools.Field(t, "isAutorunInvalid");
             _runToggleActiveField = AccessTools.Field(t, "runToggleActive");
+        }
+
+        /// <summary>
+        /// Resolve per-player reflection members once per concrete player type
+        /// (re-resolved only if the runtime type changes across respawn/rejoin).
+        /// </summary>
+        static void ResolvePlayerFields(EntityPlayerLocal player)
+        {
+            var t = player.GetType();
+            if (_freezeType != t)
+            {
+                _freezeType = t;
+                var names = new[] { "canMove", "bCanMove", "IsMotionLocked" };
+                var fis = new List<FieldInfo>(names.Length);
+                var unlocks = new List<bool>(names.Length);
+                foreach (var name in names)
+                {
+                    var fi = AccessTools.Field(t, name)
+                        ?? AccessTools.Field(typeof(EntityAlive), name)
+                        ?? AccessTools.Field(typeof(Entity), name);
+                    if (fi == null || fi.FieldType != typeof(bool)) continue;
+                    fis.Add(fi);
+                    // canMove true; IsMotionLocked false
+                    unlocks.Add(name.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) < 0);
+                }
+                _freezeFields = fis.ToArray();
+                _freezeUnlock = unlocks.ToArray();
+                _spectatorProp = AccessTools.Property(t, "IsSpectator")
+                    ?? AccessTools.Property(typeof(EntityPlayer), "IsSpectator");
+            }
+            if (_spawnType != t)
+            {
+                _spawnType = t;
+                _spawnedFlagField = null;
+                foreach (var name in new[] { "bSpawned", "isSpawned", "hasSpawned" })
+                {
+                    var fi = AccessTools.Field(typeof(Entity), name)
+                        ?? AccessTools.Field(t, name);
+                    if (fi == null || fi.FieldType != typeof(bool)) continue;
+                    _spawnedFlagField = fi;
+                    break;
+                }
+            }
+            if (_remoteFlagField == null)
+            {
+                var rf = AccessTools.Field(typeof(Entity), "isEntityRemote");
+                if (rf != null && rf.FieldType == typeof(bool))
+                    _remoteFlagField = rf;
+            }
         }
 
         public static void Start(float forward, float strafe = 0f, bool running = false, float? yawDeg = null, bool sneak = false, bool jump = false)
@@ -167,28 +228,16 @@ namespace ZdtdPlaytest
             // Clear common freezes that leave isMoving true but position frozen.
             try
             {
-                foreach (var name in new[] { "canMove", "bCanMove", "IsMotionLocked" })
+                ResolvePlayerFields(player);
+                for (int i = 0; i < _freezeFields.Length; i++)
                 {
-                    var fi = AccessTools.Field(player.GetType(), name)
-                        ?? AccessTools.Field(typeof(EntityAlive), name)
-                        ?? AccessTools.Field(typeof(Entity), name);
-                    if (fi == null) continue;
-                    if (fi.FieldType == typeof(bool))
-                    {
-                        // canMove true; IsMotionLocked false
-                        bool want = name.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) < 0;
-                        fi.SetValue(player, want);
-                    }
+                    try { _freezeFields[i].SetValue(player, _freezeUnlock[i]); }
+                    catch { /* */ }
                 }
                 try
                 {
-                    if (player.IsSpectator)
-                    {
-                        var pi = AccessTools.Property(player.GetType(), "IsSpectator")
-                            ?? AccessTools.Property(typeof(EntityPlayer), "IsSpectator");
-                        if (pi != null && pi.CanWrite)
-                            pi.SetValue(player, false, null);
-                    }
+                    if (player.IsSpectator && _spectatorProp != null && _spectatorProp.CanWrite)
+                        _spectatorProp.SetValue(player, false, null);
                 }
                 catch { /* */ }
             }
@@ -267,22 +316,19 @@ namespace ZdtdPlaytest
             // Local spawn flag so jump/ground queries work while MP spawn package lags.
             try
             {
-                if (!player.IsSpawned())
+                ResolvePlayerFields(player);
+                try
                 {
-                    foreach (var name in new[] { "bSpawned", "isSpawned", "hasSpawned" })
-                    {
-                        var fi = AccessTools.Field(typeof(Entity), name)
-                            ?? AccessTools.Field(player.GetType(), name);
-                        if (fi != null && fi.FieldType == typeof(bool))
-                        {
-                            fi.SetValue(player, true);
-                            break;
-                        }
-                    }
+                    if (!player.IsSpawned() && _spawnedFlagField != null)
+                        _spawnedFlagField.SetValue(player, true);
                 }
-                var remote = AccessTools.Field(typeof(Entity), "isEntityRemote");
-                if (remote != null && remote.FieldType == typeof(bool))
-                    remote.SetValue(player, false);
+                catch { /* */ }
+                try
+                {
+                    if (_remoteFlagField != null)
+                        _remoteFlagField.SetValue(player, false);
+                }
+                catch { /* */ }
             }
             catch { /* */ }
         }
@@ -291,6 +337,10 @@ namespace ZdtdPlaytest
         static MethodInfo _ccEnable;
         static MethodInfo _ccMove;
         static bool _ccResolved;
+        // Reused reflection arg slots: Invoke is synchronous on the game thread,
+        // so a shared array avoids a heap alloc per frame.
+        static readonly object[] CcEnableArgs = { true };
+        static readonly object[] CcMoveArgs = new object[1];
 
         static void ResolveCharacterControllerApi(object cc)
         {
@@ -344,7 +394,7 @@ namespace ZdtdPlaytest
                 }
                 if (cc == null) return;
                 ResolveCharacterControllerApi(cc);
-                try { _ccEnable?.Invoke(cc, new object[] { true }); } catch { /* */ }
+                try { _ccEnable?.Invoke(cc, CcEnableArgs); } catch { /* */ }
 
                 float yaw = player.rotation.y * Mathf.Deg2Rad;
                 // Unity forward from yaw: x=sin, z=cos (matches 7dtd horizontal plane).
@@ -366,7 +416,8 @@ namespace ZdtdPlaytest
                 float yVel = Time.unscaledTime < _jumpUntil ? 4.0f * dt : -3f * dt;
                 var move = new Vector3(horiz.x, yVel, horiz.z);
                 var p0 = player.GetPosition();
-                try { _ccMove?.Invoke(cc, new object[] { move }); } catch { /* */ }
+                CcMoveArgs[0] = move;
+                try { _ccMove?.Invoke(cc, CcMoveArgs); } catch { /* */ }
                 // If CharacterController.Move is a no-op under laggy spawn, advance by
                 // motor-scale continuous steps (cm-scale, not multi-meter tele hops).
                 try

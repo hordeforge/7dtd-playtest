@@ -182,6 +182,8 @@ namespace ZdtdPlaytest
             }
         }
 
+        static System.Reflection.MethodInfo _getWaterMethod;
+
         /// <summary>Read water mass at world cell if API available.</summary>
         public static bool CellHasWaterMass(World world, Vector3i pos)
         {
@@ -201,10 +203,11 @@ namespace ZdtdPlaytest
                 if (chunk != null)
                 {
                     // WaterDataHandle / GetWater may vary; presence of non-empty WaterValue.
-                    var mi = chunk.GetType().GetMethod("GetWater");
-                    if (mi != null)
+                    if (_getWaterMethod == null)
+                        _getWaterMethod = chunk.GetType().GetMethod("GetWater");
+                    if (_getWaterMethod != null)
                     {
-                        var wv = mi.Invoke(chunk, new object[] { pos.x & 15, pos.y, pos.z & 15 });
+                        var wv = _getWaterMethod.Invoke(chunk, new object[] { pos.x & 15, pos.y, pos.z & 15 });
                         if (wv is WaterValue water && water.HasMass()) return true;
                     }
                 }

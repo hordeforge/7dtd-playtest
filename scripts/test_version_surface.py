@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline gate: one mod version everywhere consumers can see it.
 
-The released version is declared in three places (ModInfo.xml, ModApi.cs
+The released version is declared in three places (ModInfo.xml, ModIdentity.cs
 Version, dist manifest) and described by CHANGELOG.md. This gate fails when
 they drift, so a bump cannot ship half-applied or without changelog notes.
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MOD_INFO = ROOT / "ModInfo.xml"
 DIST_MOD_INFO = ROOT / "dist" / "7dtd-playtest" / "ModInfo.xml"
-MOD_API = ROOT / "Source" / "PlayTestMod" / "ModApi.cs"
+MOD_API = ROOT / "Source" / "PlayTestMod" / "ModIdentity.cs"
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 
@@ -36,7 +36,7 @@ def main() -> int:
         f"ModInfo.xml version {manifest!r} is not X.Y.Z semver"
     )
     assert manifest == code, (
-        f"version drift: ModInfo.xml {manifest} != ModApi.Version {code}; "
+        f"version drift: ModInfo.xml {manifest} != ModIdentity.Version {code}; "
         "bump both together (game mod list and the runner banner show them)"
     )
     # dist/ is a build artifact (gitignored): absent on a clean clone and in
@@ -60,7 +60,7 @@ def main() -> int:
         "needs consumer-facing notes before it ships"
     )
 
-    print(f"OK mod version {manifest} matches ModApi.Version")
+    print(f"OK mod version {manifest} matches ModIdentity.Version")
     print("OK CHANGELOG.md has [Unreleased] and the current release entry")
     return 0
 

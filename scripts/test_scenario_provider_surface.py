@@ -186,7 +186,7 @@ def main() -> int:
     m_res = re.search(
         r'case\s+"residual"\s*:(.*?)break\s*;',
         catalog,
-        flags=re.S,
+        flags=re.DOTALL,
     )
     assert m_res, "Catalog ExpandSuites must have residual case"
     res_snip = m_res.group(1)

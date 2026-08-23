@@ -41,6 +41,12 @@ from pathlib import Path
 
 DEFAULT_LOCK_REL = Path(".cache") / "7dtd-playtest" / "playtest_running"
 SESSION_RE = re.compile(r"^[a-z][a-z0-9]*-[0-9]{8}-[0-9]{6}-[0-9a-f]+$")
+# Lock-file field safety: a session id is written verbatim into a
+# line-oriented key=value file every agent on the host parses, so it must
+# never carry newlines (field injection) or '=' / a leading '#' (key
+# spoofing). Deliberately looser than SESSION_RE so a conforming external
+# holder id still passes while injection stays impossible.
+SESSION_FIELD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 DEFAULT_STALE_SEC = 120
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 30
 
@@ -166,6 +172,24 @@ class PlaytestLockError(RuntimeError):
         super().__init__(message)
         self.held_by = held_by
         self.reason = reason
+
+
+def _require_session(session: str) -> str:
+    """Strip and validate a caller-supplied session id, or refuse.
+
+    Single gate for acquire/heartbeat/release so none of them can write a
+    field-breaking id into the lock file.
+    """
+    if not session or not str(session).strip():
+        raise PlaytestLockError("session id is required", reason="bad_session")
+    session = str(session).strip()
+    if not SESSION_FIELD_RE.fullmatch(session):
+        raise PlaytestLockError(
+            "session id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127} "
+            f"(single line, no '=' or control chars); got {session!r}",
+            reason="bad_session",
+        )
+    return session
 
 
 @dataclass(frozen=True)
@@ -352,6 +376,8 @@ def write_lock(
     if running:
         if not session:
             raise ValueError("session is required when running=yes")
+        if not SESSION_FIELD_RE.fullmatch(session):
+            raise ValueError(f"session id breaks lock-file fields: {session!r}")
         now = utc_now_iso(e)
         acq = acquired or now
         hb = heartbeat or now
@@ -513,9 +539,7 @@ def acquire(
     foreign lock (old/missing heartbeat) may be taken over only when no live
     runtime process is present.
     """
-    if not session or not str(session).strip():
-        raise PlaytestLockError("session id is required", reason="bad_session")
-    session = str(session).strip()
+    session = _require_session(session)
     e = _env(env)
     path = path or default_lock_path()
     probe = live_probe if live_probe is not None else default_live_runtime_running
@@ -592,9 +616,7 @@ def heartbeat(
     env: LockEnv | None = None,
 ) -> LockState:
     """Refresh heartbeat for the owning session. No-op fail if not owner."""
-    if not session or not str(session).strip():
-        raise PlaytestLockError("session id is required", reason="bad_session")
-    session = str(session).strip()
+    session = _require_session(session)
     e = _env(env)
     path = path or default_lock_path()
     result: dict[str, LockState | None] = {"state": None}
@@ -641,9 +663,7 @@ def release(
     live holder. Refusing to write unless we are the recorded holder removes
     that window and keeps release idempotent.
     """
-    if not session or not str(session).strip():
-        raise PlaytestLockError("session id is required", reason="bad_session")
-    session = str(session).strip()
+    session = _require_session(session)
     e = _env(env)
     path = path or default_lock_path()
     result: dict[str, LockState | None] = {"state": None}

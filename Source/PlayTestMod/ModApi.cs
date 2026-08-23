@@ -9,16 +9,13 @@ namespace ZdtdPlaytest
     /// </summary>
     public class ModApi : IModApi
     {
-        public const string HarmonyId = "com.zdtd.playtest";
-        public const string Version = "0.7.1";
-
         public void InitMod(Mod _modInstance)
         {
-            Log.Out("[7dtd-playtest] InitMod v" + Version);
+            Log.Out("[7dtd-playtest] InitMod v" + ModIdentity.Version);
 
             try
             {
-                var harmony = new Harmony(HarmonyId);
+                var harmony = new Harmony(ModIdentity.HarmonyId);
                 int ok = 0, fail = 0;
                 foreach (var t in typeof(ModApi).Assembly.GetTypes())
                 {

@@ -459,6 +459,37 @@ def test_non_utf8_lock_bytes_survive_read(tmp: Path) -> None:
     _assert(pl.read_lock(lock).running is True, "refused release left record alone")
 
 
+
+def test_session_field_injection_refused(tmp: Path) -> None:
+    """A session id must never be able to forge lock-file fields.
+
+    acquire/heartbeat/release all route through _require_session, and
+    write_lock refuses as a last line, so no caller can smuggle a newline
+    ("running=no" on its own line) or an '=' past the parser.
+    """
+    lock = tmp / "playtest_running"
+    bad = [
+        "sess\nrunning=no",       # field injection
+        "sess=other",             # key spoofing
+        "#sess",                  # comment/leading-hash
+        "sess with space",
+        "sess\x00nul",
+        "s" * 129,                # over length
+    ]
+    for sid in bad:
+        try:
+            pl.acquire(sid, path=lock, live_probe=lambda: False)
+            raise AssertionError(f"acquire accepted {sid!r}")
+        except pl.PlaytestLockError as e:
+            _assert(e.reason == "bad_session", f"{sid!r} reason={e.reason}")
+        _assert(not lock.exists(), f"{sid!r} must not create a lock file")
+
+    ok = "agent-20260823-120000-abc123"
+    pl.acquire(ok, path=lock, live_probe=lambda: False)
+    _assert(pl.read_lock(lock).session == ok, "valid session still acquires")
+    pl.release(ok, path=lock)
+
+
 def main() -> int:
     fails = 0
     with tempfile.TemporaryDirectory(prefix="playtest-lock-") as td:
@@ -489,6 +520,10 @@ def main() -> int:
             (
                 "heartbeat_thread_stop_before_start",
                 lambda: test_heartbeat_thread_stop_before_start(tmp / "hbstopped"),
+            ),
+            (
+                "session_field_injection_refused",
+                lambda: test_session_field_injection_refused(tmp / "sessfield"),
             ),
             ("playtest_run_wiring", test_playtest_run_wiring),
             ("parse_utc_timestamp_zones", test_parse_utc_timestamp_zones),
