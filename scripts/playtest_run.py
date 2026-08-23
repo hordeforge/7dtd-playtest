@@ -4,32 +4,41 @@
 Exit codes:
   0  all cases pass (DONE with fail=0)
   1  playtest assertion failures
-  2  harness error (no DONE, server/client fail, timeout, lock refused,
-     ports still bound after clean)
+  2  harness error (no DONE, server/client fail, timeout, lock refused)
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
 import os
 import re
+import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+import traceback
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import playtest_lock
-from playtest_telnet import TelnetAdmin
+import playtest_lock  # noqa: E402
+from playtest_log import (  # noqa: E402
+    ClientLogScan,
+    LogTail,
+    TailSource,
+    barrier_hits_prefix,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
-CONNECT = WORKSPACE / "7dtd-connect"
+CONNECT = WORKSPACE / "7dtd-fastconnect"
 LOADGEN = WORKSPACE / "7dtd-loadgen"
 DEFAULT_ZDTD = WORKSPACE / "zdtd" / "zig-out" / "bin" / "zdtd"
 DEFAULT_GAME_SRV = (
@@ -37,126 +46,123 @@ DEFAULT_GAME_SRV = (
 )
 DEFAULT_USERDATA = Path.home() / ".cache" / "7dtd-playtest-dedicated"
 STEAM_APPID = "251570"
+DEFAULT_COMPAT = (
+    Path.home() / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}"
+)
+
+
 def client_log_for_compat(compat: Path) -> Path:
     """Stock launch_client.sh's game log location for one Proton profile."""
     return (
         compat
         / "pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/logs"
-        / "output_log_client_zdtd_connect.txt"
+        / "output_log_client_7dtd_connect.txt"
     )
 
 
-CLIENT_LOG = client_log_for_compat(
-    Path.home() / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}"
-)
+CLIENT_LOG = client_log_for_compat(DEFAULT_COMPAT)
 
-RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
-SUMMARY_RE = re.compile(
-    r"\[7dtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
-)
-DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?:\s+exit_hint=(\d+))?")
-JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
-NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
+# Server-authoritative persist pad: every rejoin/persist flow teleports players
+# here before saveworld so the saved position is known and walkable. Tuple for
+# teleport_players_to, string form for raw spawnentityat commands.
+PERSIST_PAD_XYZ = (520, 62, 950)
+PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 
-# pkill -f patterns for clean/teardown of one exclusive run. The [/] in the
-# client exe pattern keeps pkill from matching this orchestrator's own cmdline.
-CLIENT_KILL_PATTERNS = [
+# Client + dedicated process patterns shared by the rejoin teardown steps.
+REJOIN_GAME_PROC_PATTERNS = [
+    r"7DaysToDieServer\.x86_64",
     r"[/]7DaysToDie\.exe",
     r"wine64-preloader.*7DaysToDie",
     r"proton.*7DaysToDie",
 ]
-DEDI_KILL_PATTERN = r"7DaysToDieServer\.x86_64"
-ZDTD_KILL_PATTERN = r"zig-out/bin/zdtd"
-LOADGEN_KILL_PATTERN = r"7dtd-loadgen"
 
-# World coords of the persist dig pad; rejoin/persist flows teleport players
-# here so saved position is deterministic (pos_survives_rejoin asserts on it).
-PERSIST_PAD_POS = (520.0, 62.0, 950.0)
+
+def mod_version() -> str:
+    """Version declared by ModInfo.xml (single source of truth), "unknown" if absent."""
+    try:
+        text = (ROOT / "ModInfo.xml").read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    m = re.search(r'<Version value="([^"]+)"', text)
+    return m.group(1) if m else "unknown"
+
+def positive_seconds(text: str) -> float:
+    """argparse type: a finite number of seconds > 0 (--timeout, env reader)."""
+    try:
+        val = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}") from None
+    if not math.isfinite(val) or val <= 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number of seconds > 0, got {text!r}"
+        )
+    return val
+
+
+def seconds_from_env(name: str, default: float) -> float:
+    """Read a positive-seconds env var; harness error (exit 2) when invalid.
+
+    A typo'd value must fail fast with the variable named, not surface later
+    as an instant "timeout after 0s" or a bare float() traceback.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return positive_seconds(raw)
+    except argparse.ArgumentTypeError as ex:
+        err(f"invalid {name}: {ex}")
+        raise SystemExit(2) from None
+
+
+def tcp_port(text: str) -> int:
+    """argparse type: TCP port 1..65535 (--port, --admin-port)."""
+    try:
+        val = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a port number: {text!r}") from None
+    if not 1 <= val <= 65535:
+        raise argparse.ArgumentTypeError(f"port out of range 1..65535: {val}")
+    return val
+
+
+def config_summary(args: argparse.Namespace) -> str:
+    """Effective top-level options as one startup log line.
+
+    The telnet password appears only as set/unset so run logs stay shareable;
+    everything here is already visible in --help or the generated paths.
+    """
+    parts = [
+        f"server={args.server}",
+        f"suite={args.suite.strip()}",
+        f"port={args.port}",
+        f"admin_port={args.admin_port}",
+        f"timeout_sec={args.timeout:g}",
+        f"world={args.world_name if args.server == 'stock' else args.world}",
+        f"game_name={args.game_name}",
+        f"logdir={args.logdir}",
+        f"fresh_save={bool(args.fresh_save)}",
+        f"no_server={bool(args.no_server)}",
+        f"fixtures={not args.no_fixtures}",
+        f"telnet_password={'set' if args.telnet_password else 'unset'}",
+    ]
+    if args.peer_client_name:
+        parts.append(f"peer={args.peer_client_name}")
+    return " ".join(parts)
 
 
 def log(msg: str) -> None:
     print(f"[playtest-orch] {msg}", flush=True)
 
 
-def barrier_hits(blob: str, name: str) -> int:
-    # Count only the human log line. Report.Barrier also emits JSON with
-    # the same name; summing both double-fires handlers (e.g. kills bots).
-    return blob.count(f"barrier {name}")
+def warn(msg: str) -> None:
+    """Recoverable problem: diagnostics belong on stderr, progress stays on stdout."""
+    print(f"[playtest-orch] warn: {msg}", file=sys.stderr, flush=True)
 
 
-def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
-    """Return full barrier names that start with prefix (e.g. chat_echo:token)."""
-    found: list[str] = []
-    # Human line only (same double-count reason as barrier_hits).
-    for m in re.finditer(
-        rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
-        blob,
-    ):
-        found.append(m.group(1))
-    # Dedup while preserving order (same token can appear many times).
-    return list(dict.fromkeys(found))
-
-
-class BarrierLedger:
-    """Barrier emissions seen vs host actions fired, accumulated across polls.
-
-    The client emits ``barrier <name>`` lines; each emission must trigger its
-    host action exactly once even when emissions land in different poll
-    chunks. Comparing a cumulative action counter against one chunk's hit
-    count drops every edge after the first chunk's quota, so emissions are
-    folded into a run-total here and actions fire until they catch up.
-    A failed telnet attempt leaves fired behind seen and retries on the
-    next poll instead of silently consuming the edge.
-    """
-
-    def __init__(self) -> None:
-        self.seen: dict[str, int] = {}
-        self.fired: dict[str, int] = {}
-
-    def observe(self, blob: str, name: str) -> int:
-        """Fold this chunk's hits for name into the run total; returns total."""
-        self.seen[name] = self.seen.get(name, 0) + barrier_hits(blob, name)
-        return self.seen[name]
-
-    def pending(self, name: str, cap: int | None = None) -> bool:
-        """True while fired lags seen for name (optionally capped)."""
-        target = self.seen.get(name, 0)
-        if cap is not None:
-            target = min(target, cap)
-        return self.fired.get(name, 0) < target
-
-    def mark_fired(self, name: str) -> None:
-        """Record one completed host action for name."""
-        self.fired[name] = self.fired.get(name, 0) + 1
-
-
-def fire_barrier_edges(
-    led: BarrierLedger,
-    chunk: str,
-    name: str,
-    open_admin: Callable[[], TelnetAdmin | None],
-    act: Callable[[TelnetAdmin], bool | None],
-    cap: int | None = None,
-) -> None:
-    """Fold this chunk's emissions of barrier ``name`` into the ledger, then
-    run one connected-telnet action per pending edge until none remain.
-
-    ``act(telnet)`` may return False to leave its edge pending for the next
-    poll (e.g. no player ids yet); any other result consumes the edge. A
-    failed telnet connect also leaves the edge pending.
-    """
-    led.observe(chunk, name)
-    while led.pending(name, cap=cap):
-        tn = open_admin()
-        if tn is None:
-            log(f"warn: {name}: telnet connect fail; retry next poll")
-            return
-        applied = act(tn)
-        tn.close()
-        if applied is False:
-            log(f"warn: {name}: not applied yet; retry next poll")
-            return
-        led.mark_fired(name)
+def err(msg: str) -> None:
+    """Terminal harness error (nonzero exit follows)."""
+    print(f"[playtest-orch] {msg}", file=sys.stderr, flush=True)
 
 
 def pkill_patterns(patterns: list[str], sig: str = "-9") -> None:
@@ -169,53 +175,18 @@ def pkill_patterns(patterns: list[str], sig: str = "-9") -> None:
         )
 
 
-def spawn_logged(
-    cmd: list[str],
-    log_path: Path,
-    *,
-    cwd: Path | None = None,
-    env: dict[str, str] | None = None,
-) -> subprocess.Popen:
-    """Start a detached process with stdout+stderr captured into log_path.
-
-    The log handle rides on the Popen as _log_fh so stop_proc can close it.
-    On Popen failure the handle is closed before raising (no fd leak).
-    """
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(log_path, "w", encoding="utf-8")  # noqa: SIM115 — handle rides the Popen as _log_fh; stop_proc closes it
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=fh,
-            stderr=subprocess.STDOUT,
-            env=env,
-            start_new_session=True,
-            cwd=str(cwd) if cwd is not None else None,
-        )
-    except BaseException:
-        fh.close()
-        raise
-    proc._log_fh = fh  # type: ignore[attr-defined]
-    return proc
-
-
-def clean_processes(*, kill_wine: bool = False, include_server: bool = True) -> None:
+def clean_processes(*, kill_wine: bool = False) -> None:
     """Stop prior servers/clients. Avoid killing whole wineserver by default
-    (that drops Steam); only kill game + dedicated + optional zdtd.
-    include_server=False (--no-server) spares the already-running dedicated/zdtd
-    the run was told to attach to."""
-    log(
-        "cleaning prior dedicated / client / zdtd"
-        if include_server
-        else "cleaning prior client only (sparing server: --no-server)"
-    )
-    patterns = list(CLIENT_KILL_PATTERNS)
-    if include_server:
-        patterns = [
-            DEDI_KILL_PATTERN,
-            r"7DaysToDieServe",  # truncated comm
-            ZDTD_KILL_PATTERN,
-        ] + patterns
+    (that drops Steam); only kill game + dedicated + optional zdtd."""
+    log("cleaning prior dedicated / client / zdtd")
+    patterns = [
+        r"7DaysToDieServer\.x86_64",
+        r"7DaysToDieServe",  # truncated comm
+        r"zig-out/bin/zdtd",
+        r"[/]7DaysToDie\.exe",
+        r"wine64-preloader.*7DaysToDie",
+        r"proton.*7DaysToDie",
+    ]
     pkill_patterns(patterns, sig="-15")
     time.sleep(2)
     pkill_patterns(patterns, sig="-9")
@@ -232,118 +203,38 @@ def clean_processes(*, kill_wine: bool = False, include_server: bool = True) -> 
     time.sleep(2)
 
 
-def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
-    """Poll an appending log for needle without re-reading the whole file.
+def truncate_file(path: Path, what: str) -> None:
+    """Empty an append-only log so incremental readers restart from zero."""
+    if not path.is_file():
+        return
+    try:
+        path.write_text("", encoding="utf-8")
+    except OSError as ex:
+        warn(f"could not truncate {what}: {ex}")
 
-    Reads only bytes appended since the last poll (plus a small overlap so a
-    match split across polls is still seen). Truncation restarts at offset 0.
-    """
-    deadline = time.time() + timeout
-    offset = 0
-    overlap = ""
-    while time.time() < deadline:
-        try:
-            size = path.stat().st_size
-        except OSError:
-            size = -1
-        if 0 <= size < offset:  # truncated / rotated
-            offset = 0
-            overlap = ""
-        if size > offset:
-            try:
-                with path.open("rb") as fh:
-                    fh.seek(offset)
-                    chunk = fh.read()
-                offset += len(chunk)
-                text = overlap + chunk.decode("utf-8", errors="replace")
-                if needle in text:
-                    return True
-                overlap = text[-len(needle):] if needle else ""
-            except OSError:
-                pass
+
+def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
+    # Elapsed-time budget: monotonic so an NTP step or manual clock change
+    # cannot extend or cut the wait.
+    deadline = time.monotonic() + timeout
+    # Incremental tail: O(new bytes) per poll instead of re-reading the whole
+    # log every 0.5s. This waits on server startup logs that reach tens of MB
+    # over a cold load, and the poll shares the machine with the game.
+    tail = LogTail(path)
+    while time.monotonic() < deadline:
+        if needle in tail.poll():
+            return True
         time.sleep(0.5)
     return False
 
 
-class LogTail:
-    """Incremental reader for a growing log file.
+def _literal_replacement(replacement: str):
+    """re.sub replacer that inserts ``replacement`` without backslash escapes."""
 
-    read_new() returns only complete lines appended since the previous call,
-    so poll loops stop re-reading and re-scanning the whole file each tick.
-    A partial trailing line is held back until its newline arrives, so no
-    barrier/result pattern can be missed or split. Truncation (fresh run
-    truncating the same path) restarts from zero.
-    """
+    def _sub(_m: re.Match[str]) -> str:
+        return replacement
 
-    def __init__(self, path: Path):
-        self.path = path
-        self._offset = 0
-        self._pending = b""
-
-    def read_new(self) -> str:
-        try:
-            size = self.path.stat().st_size
-        except OSError:
-            return ""
-        if size < self._offset:  # truncated / rotated
-            self._offset = 0
-            self._pending = b""
-        if size == self._offset:
-            return ""
-        try:
-            with self.path.open("rb") as fh:
-                fh.seek(self._offset)
-                chunk = fh.read(size - self._offset)
-        except OSError:
-            return ""
-        self._offset += len(chunk)
-        data = self._pending + chunk
-        cut = data.rfind(b"\n")
-        if cut < 0:
-            # No complete line yet; keep buffering until one lands.
-            self._pending = data
-            return ""
-        self._pending = data[cut + 1:]
-        return data[: cut + 1].decode("utf-8", errors="replace")
-
-    def read_all(self) -> str:
-        try:
-            return self.path.read_text(errors="replace")
-        except OSError:
-            return ""
-
-
-def merge_parsed(acc: dict | None, inc: dict) -> dict:
-    """Fold an incremental parse_client_log result into a running accumulator.
-
-    Stream preference follows parse_client_log's whole-blob rule: once any
-    valid JSON result event is seen, JSON becomes the authoritative result
-    stream for the run and human PASS/FAIL/SKIP lines (the mod emits both
-    shapes back to back) are echoes, so they are dropped even if an earlier
-    chunk recorded them.
-    """
-    if acc is None:
-        acc = {"stream": "human", "results": []}
-    if inc.get("summary") is not None:
-        acc["summary"] = inc["summary"]
-    if inc.get("done") is not None:
-        acc["done"] = inc["done"]
-    if inc.get("json_events"):
-        acc["json_events"] = (acc.get("json_events") or []) + inc["json_events"]
-    if inc.get("nre_like"):
-        merged = (acc.get("nre_like") or []) + inc["nre_like"]
-        acc["nre_like"] = merged[:50]
-    stream = inc.get("stream", "human")
-    results = inc.get("results") or []
-    if stream == "json":
-        if acc.get("stream") != "json":
-            # First JSON event wins retroactively, matching one-shot parsing.
-            acc["stream"] = "json"
-            acc["results"] = []
-        acc["results"] = (acc.get("results") or []) + results
-    elif acc.get("stream") != "json":
-        acc["results"] = (acc.get("results") or []) + results
-    return acc
+    return _sub
 
 
 def write_stock_config(
@@ -355,27 +246,41 @@ def write_stock_config(
     game_name: str,
     port: int,
     telnet_port: int,
+    telnet_password: str,
     max_players: int = 8,
-    telnet_password: str = "retest",
 ) -> None:
     text = src_cfg.read_text(encoding="utf-8")
-    # Operator-supplied strings land inside double-quoted XML attributes;
-    # escape them so quotes/&/< cannot break out or corrupt the serverconfig.
-    ud = xml_attr_escape(str(userdata.resolve()))
+    ud = str(userdata.resolve())
+    # Values land inside double-quoted XML attributes; a quote or ampersand in
+    # any of them would corrupt the property or smuggle extra ones into the
+    # generated serverconfig. Lambda replacements keep re.sub from
+    # interpreting backslashes in the value.
+    ud_attr = xml_attr(ud)
+    # The stock serverconfig.xml ships UserDataFolder commented out
+    # (`<!-- <property name="UserDataFolder" .../> -->`). Rewriting the value
+    # inside that comment leaves the server saving under its default
+    # ~/.local/share/7DaysToDie, so --fresh-save wiped an empty tree while
+    # player inventory and world state carried over between runs. Drop the
+    # commented form first so an active property is always written.
+    text = re.sub(
+        r'<!--\s*<property\s+name="UserDataFolder"[^>]*/>\s*-->',
+        "",
+        text,
+    )
     if 'name="UserDataFolder"' not in text:
         text = text.replace(
             "<ServerSettings>",
-            f'<ServerSettings>\n\t<property name="UserDataFolder" value="{ud}"/>',
+            f'<ServerSettings>\n\t<property name="UserDataFolder" value="{ud_attr}"/>',
         )
     else:
         text = re.sub(
             r'name="UserDataFolder"\s*value="[^"]*"',
-            f'name="UserDataFolder" value="{ud}"',
+            _literal_replacement(f'name="UserDataFolder" value="{ud_attr}"'),
             text,
         )
     repls = {
-        "GameWorld": xml_attr_escape(world_name),
-        "GameName": xml_attr_escape(game_name),
+        "GameWorld": world_name,
+        "GameName": game_name,
         "WorldGenSeed": "playtest",
         "WorldGenSize": "4096",
         "ServerPort": str(port),
@@ -392,7 +297,10 @@ def write_stock_config(
         "MaxSpawnedAnimals": "0",
         "TelnetEnabled": "true",
         "TelnetPort": str(telnet_port),
-        "TelnetPassword": xml_attr_escape(telnet_password),
+        # Same password TelnetAdmin authenticates with (--telnet-password /
+        # PLAYTEST_TELNET_PASSWORD). Writing a different literal here would
+        # make the orchestrator's telnet login fail on non-local auth.
+        "TelnetPassword": telnet_password,
         "BuildCreate": "true",
         "ServerPassword": "",
         "PlayerKillingMode": "0",
@@ -400,11 +308,48 @@ def write_stock_config(
     for k, v in repls.items():
         text = re.sub(
             rf'name="{k}"\s*value="[^"]*"',
-            f'name="{k}" value="{v}"',
+            _literal_replacement(f'name="{k}" value="{xml_attr(v)}"'),
             text,
         )
     out_cfg.parent.mkdir(parents=True, exist_ok=True)
     out_cfg.write_text(text, encoding="utf-8")
+    # The generated config carries TelnetPassword; keep it user-only instead
+    # of inheriting a world-readable umask.
+    try:
+        os.chmod(out_cfg, 0o600)
+    except OSError as ex:
+        warn(f"could not restrict serverconfig permissions to 0600: {ex}")
+
+
+def _popen_to_logfile(
+    cmd: list[str],
+    log_path: Path,
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.Popen:
+    """Start a detached process with stdout+stderr redirected into ``log_path``.
+
+    The handle is attached as ``_log_fh`` for stop_proc to close. If the
+    spawn itself fails (missing binary, exec error), the already-opened
+    descriptor is closed here instead of leaking until interpreter exit.
+    """
+    # Long-lived by design: the handle rides on proc._log_fh and stop_proc closes it.
+    fh = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=cwd,
+            env=env,
+        )
+    except OSError:
+        fh.close()
+        raise
+    proc._log_fh = fh  # type: ignore[attr-defined]
+    return proc
 
 
 def start_stock_dedicated(
@@ -416,7 +361,7 @@ def start_stock_dedicated(
     game_name: str,
     port: int,
     telnet_port: int,
-    telnet_password: str = "retest",
+    telnet_password: str,
 ) -> tuple[subprocess.Popen, Path]:
     """Start stock 7DaysToDieServer. Returns (proc, logfile path)."""
     if not (game_srv / "7DaysToDieServer.x86_64").is_file():
@@ -444,7 +389,7 @@ def start_stock_dedicated(
         disabled.mkdir(exist_ok=True)
         dest = disabled / "RealEarth"
         if dest.exists():
-            subprocess.run(["rm", "-rf", str(dest)], check=False)
+            shutil.rmtree(dest, ignore_errors=True)
         re_mod.rename(dest)
         log("quarantined RealEarth → Mods.disabled")
 
@@ -464,6 +409,7 @@ def start_stock_dedicated(
     )
     log(f"stock config → {cfg_out} world={world_name} port={port}")
 
+    server_log.parent.mkdir(parents=True, exist_ok=True)
     # Unity -logfile path
     unity_log = userdata / "Logs" / f"server_playtest_{world_name}.txt"
     if unity_log.is_file():
@@ -480,7 +426,8 @@ def start_stock_dedicated(
         f"-configfile={cfg_out}",
     ]
     log("start stock dedicated: " + " ".join(cmd))
-    proc = spawn_logged(cmd, server_log, cwd=game_srv)
+    proc = _popen_to_logfile(cmd, server_log, cwd=str(game_srv))
+    proc._unity_log = unity_log  # type: ignore[attr-defined]
     return proc, unity_log
 
 
@@ -493,6 +440,7 @@ def start_zdtd(
     server_log: Path,
 ) -> subprocess.Popen:
     world.mkdir(parents=True, exist_ok=True)
+    server_log.parent.mkdir(parents=True, exist_ok=True)
     map_dir = game_srv / "Data" / "Worlds" / "Navezgane"
     cmd = [
         str(zdtd),
@@ -510,75 +458,20 @@ def start_zdtd(
         str(admin_port),
     ]
     log("start zdtd: " + " ".join(cmd))
-    return spawn_logged(cmd, server_log)
+    return _popen_to_logfile(cmd, server_log)
 
 
-# Backend readiness marker and wait budget (stock world load is slow cold).
-SERVER_READY_SPECS = {
-    "stock": ("StartGame done", 600.0),
-    "zdtd": ("tick=20Hz", 60.0),
-}
+# Detached mute helpers started per client launch. They self-exit after their
+# poll window, but nothing else waits on them: without an explicit reap each
+# one lingers as a zombie for the rest of a long soak run.
+_MUTE_HELPER_PROCS: list[subprocess.Popen] = []
 
 
-def start_configured_server(
-    args: argparse.Namespace, server_log: Path
-) -> tuple[subprocess.Popen, Path | None]:
-    """Start the selected backend. Returns (proc, unity_log or None)."""
-    if args.server == "stock":
-        return start_stock_dedicated(
-            args.game_srv,
-            args.userdata,
-            server_log,
-            world_name=args.world_name,
-            game_name=args.game_name,
-            port=args.port,
-            telnet_port=args.admin_port,
-            telnet_password=args.telnet_password,
-        )
-    return (
-        start_zdtd(
-            args.zdtd,
-            args.world,
-            args.port,
-            args.admin_port,
-            args.game_srv,
-            server_log,
-        ),
-        None,
-    )
-
-
-def wait_server_ready(
-    args: argparse.Namespace,
-    proc: subprocess.Popen,
-    server_log: Path,
-    unity_log: Path | None,
-    *,
-    context: str = "",
-) -> tuple[bool, bool]:
-    """Wait for the backend readiness marker.
-
-    Stock logs its marker to the Unity log; zdtd to the orchestrator-captured
-    stdout. Returns (marker_seen, exited_early). Logs the tail when the
-    process died.
-    """
-    ready_log = unity_log if args.server == "stock" else server_log
-    marker, timeout = SERVER_READY_SPECS[args.server]
-    if wait_file_contains(ready_log, marker, timeout=timeout):
-        log(f"{args.server} ready{context} ({marker})")
-        return True, False
-    if proc.poll() is not None:
-        log(f"{args.server} exited early code={proc.returncode}{context}")
-        if ready_log.is_file():
-            log(
-                "tail server log:\n"
-                + "\n".join(
-                    ready_log.read_text(errors="replace").splitlines()[-40:]
-                )
-            )
-        return False, True
-    log(f"warn: no {marker}{context}; server still running, proceeding")
-    return False, False
+def reap_finished_helpers() -> None:
+    """Reap exited detached helpers (mute audio) so they cannot accumulate."""
+    for p in _MUTE_HELPER_PROCS[:]:
+        if p.poll() is not None:
+            _MUTE_HELPER_PROCS.remove(p)
 
 
 def client_mute_enabled() -> bool:
@@ -592,36 +485,34 @@ def client_mute_enabled() -> bool:
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
-def mute_client_audio_async() -> subprocess.Popen | None:
+def mute_client_audio_async() -> None:
     """Poll PipeWire/Pulse for 7DaysToDie sink-input and mute it (default on).
 
-    Prefer 7dtd-connect's mute_client_audio.sh (same helper launch_client uses).
+    Prefer 7dtd-fastconnect's mute_client_audio.sh (same helper launch_client uses).
     Best-effort: missing pactl/jq only logs a warning inside the helper.
-    Returns the helper process so stop_proc can reap/kill it at teardown;
-    without that wait path each launch leaves an unreaped child behind.
     """
     if not client_mute_enabled():
         log("client mute: off (CLIENT_MUTE=0)")
-        return None
+        return
     helper = CONNECT / "scripts" / "mute_client_audio.sh"
     wait_s = os.environ.get(
         "CLIENT_MUTE_TIMEOUT",
         os.environ.get("SEVEN_DAYS_TO_DIE_CLIENT_MUTE_TIMEOUT", "60"),
     )
     if not helper.is_file():
-        log(f"client mute: helper missing ({helper}); skip")
-        return None
+        warn(f"client mute: helper missing ({helper}); skip")
+        return
     log(f"client mute: on (opt-out CLIENT_MUTE=0); polling up to {wait_s}s")
     try:
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             ["bash", str(helper), str(wait_s)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+        _MUTE_HELPER_PROCS.append(proc)
     except OSError as ex:
-        log(f"client mute: failed to start helper: {ex}")
-        return None
+        warn(f"client mute: failed to start helper: {ex}")
 
 
 def start_client(
@@ -634,12 +525,10 @@ def start_client(
 ) -> subprocess.Popen:
     launch = CONNECT / "scripts" / "launch_client.sh"
     env = os.environ.copy()
-    env["ZDTD_CONNECT"] = f"127.0.0.1:{port}"
+    env["7DTD_CONNECT"] = f"127.0.0.1:{port}"
     if run_suite:
         env["PLAYTEST_SUITE"] = suite
         env["PLAYTEST"] = "1"
-        if "PLAYTEST_LAPS" in os.environ:
-            env["PLAYTEST_LAPS"] = os.environ["PLAYTEST_LAPS"]
     else:
         # A stock peer must join and remain in the world, not run a duplicate
         # scenario suite or inherit a suite selection from its parent process.
@@ -657,21 +546,15 @@ def start_client(
         env["CLIENT_MUTE"] = "1" if client_mute_enabled() else "0"
     if extra_env:
         env.update(extra_env)
+    client_launch_log.parent.mkdir(parents=True, exist_ok=True)
     role = "scenario" if run_suite else "stock-peer"
-    log(f"start client role={role} suite={suite or '(none)'} connect={env['ZDTD_CONNECT']}")
-    proc = spawn_logged(["bash", str(launch)], client_launch_log, cwd=CONNECT, env=env)
+    log(f"start client role={role} suite={suite or '(none)'} connect={env['7DTD_CONNECT']}")
+    proc = _popen_to_logfile(
+        ["bash", str(launch)], client_launch_log, cwd=str(CONNECT), env=env
+    )
     # Belt-and-suspenders: connect mutes itself; also start poll from orch.
-    # The helper rides the client proc so teardown reaps it (no stray child
-    # outliving the run outside the pkill patterns).
-    proc._mute_helper = mute_client_audio_async()  # type: ignore[attr-defined]
+    mute_client_audio_async()
     return proc
-
-
-# Bound for the synchronous loadgen build below. It runs while this
-# orchestrator holds the exclusivity lock with a live heartbeat thread:
-# an unbounded build would wedge one poll iteration forever, keeping the
-# run past its own deadline and the lock fresh past stale takeover.
-LOADGEN_BUILD_TIMEOUT_SEC = 600.0
 
 
 def ensure_loadgen_built() -> Path | None:
@@ -680,7 +563,7 @@ def ensure_loadgen_built() -> Path | None:
         return exe
     proj = LOADGEN / "src" / "LoadGen" / "LoadGen.csproj"
     if not proj.is_file():
-        log(f"loadgen project missing: {proj}")
+        warn(f"loadgen project missing: {proj}")
         return None
     log("building loadgen…")
     try:
@@ -689,19 +572,22 @@ def ensure_loadgen_built() -> Path | None:
             cwd=str(LOADGEN),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
-            timeout=LOADGEN_BUILD_TIMEOUT_SEC,
+            timeout=_LOADGEN_BUILD_TIMEOUT_SEC,
         )
-    except subprocess.TimeoutExpired as ex:
-        # subprocess.run killed + reaped the timed-out child.
-        tail = ex.stderr if isinstance(ex.stderr, str) else ""
-        log(f"loadgen build timeout after {LOADGEN_BUILD_TIMEOUT_SEC:.0f}s {tail[-400:]}")
+    except subprocess.TimeoutExpired:
+        warn(
+            f"loadgen build timed out after {_LOADGEN_BUILD_TIMEOUT_SEC:g}s; "
+            "skipping loadgen barriers this run"
+        )
         return None
     except OSError as ex:
-        log(f"loadgen build failed to start: {ex}")
+        warn(f"loadgen build could not start: {ex}")
         return None
     if r.returncode != 0:
-        log(f"loadgen build failed: {r.stderr[-400:]}")
+        warn(f"loadgen build failed: {r.stderr[-400:]}")
         return None
     return exe if exe.is_file() else None
 
@@ -718,6 +604,7 @@ def start_loadgen(
     if exe is None:
         return None
     litenet = game_port + 2
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         str(exe),
         "--join",
@@ -734,7 +621,7 @@ def start_loadgen(
         "0.0",
     ]
     log(f"start loadgen count={count} litenet={litenet} timeout_ms={timeout_ms}")
-    return spawn_logged(cmd, log_path, cwd=LOADGEN)
+    return _popen_to_logfile(cmd, log_path, cwd=str(LOADGEN))
 
 
 def write_zdtd_apm_dump(
@@ -748,7 +635,7 @@ def write_zdtd_apm_dump(
 ) -> bool:
     """Run short offline zdtd --ticks for APM text snapshot (docs/APM.md)."""
     if not zdtd.is_file():
-        log(f"apm dump: missing zdtd {zdtd}")
+        warn(f"apm dump: missing zdtd {zdtd}")
         return False
     map_dir = game_srv / "Data" / "Worlds" / "Navezgane"
     cmd = [
@@ -767,15 +654,23 @@ def write_zdtd_apm_dump(
     ]
     log(f"apm dump: {' '.join(cmd)}")
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired) as ex:
-        log(f"apm dump fail: {ex}")
+        warn(f"apm dump fail: {ex}")
         return False
     out = (r.stdout or "") + (r.stderr or "")
     # Fail closed: do not invent markers. Client would soft-pass a synthetic dump.
     has_marker = "zdtd-apm" in out or "wall_ns" in out or "tick_total" in out
     if not has_marker or not out.strip():
-        log(f"apm dump: no live markers in output (len={len(out)} rc={r.returncode})")
+        warn(f"apm dump: no live markers in output (len={len(out)} rc={r.returncode})")
         dump_path.parent.mkdir(parents=True, exist_ok=True)
         dump_path.write_text(
             "APM_DUMP_FAILED no markers from zdtd --ticks\n",
@@ -794,178 +689,95 @@ def write_zdtd_apm_dump(
     return dump_path.is_file() and dump_path.stat().st_size > 0
 
 
-def stop_proc(proc: subprocess.Popen | None, *, term_timeout: float = 8.0) -> None:
-    """Stop one run-owned process group, reap it, and close its log handle.
+# Bounded waits around each escalation step of stop_proc. Module-level so the
+# offline gate can shrink them instead of waiting out the production values.
+_STOP_TERM_WAIT_SEC = 8.0
+_STOP_KILL_WAIT_SEC = 8.0
 
-    Also stops any helper riding the proc (client mute poller) so no child
-    of this orchestrator is left unreaped or running past teardown.
-    """
+# A cold dotnet build is minutes, not tens of minutes. Without a timeout a
+# hung compiler would block the poll loop forever: the wall-clock deadline
+# only fires between polls, so the run would never reach it.
+_LOADGEN_BUILD_TIMEOUT_SEC = 600.0
+
+
+def stop_proc(proc: subprocess.Popen | None) -> None:
     if proc is None:
         return
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
-        try:
+        # A process already gone mid-teardown must not fail the others.
+        with contextlib.suppress(Exception):
             proc.terminate()
-        except Exception:  # noqa: BLE001, S110 — best-effort SIGTERM fallback
-            pass
     try:
-        proc.wait(timeout=term_timeout)
+        proc.wait(timeout=_STOP_TERM_WAIT_SEC)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
-        except Exception:  # noqa: BLE001 — fall through to per-process kill
-            try:
+        except Exception:
+            with contextlib.suppress(Exception):
                 proc.kill()
-            except Exception:  # noqa: BLE001, S110 — already SIGKILLed the group
-                pass
-        # Reap after SIGKILL: an unreaped child stays a zombie until orchestrator
-        # exit, and the rejoin flow must see its predecessor fully dead before
-        # starting a new server on the same ports.
+        # SIGKILL needs its own reap: without wait() the killed child stays a
+        # zombie until this orchestrator exits.
         try:
-            proc.wait(timeout=5)
-        except Exception:  # noqa: BLE001, S110 — reap is best-effort after kill
-            pass
+            proc.wait(timeout=_STOP_KILL_WAIT_SEC)
+        except subprocess.TimeoutExpired:
+            warn(f"stop_proc: pid {proc.pid} not reaped after SIGKILL")
     fh = getattr(proc, "_log_fh", None)
     if fh:
-        try:
+        with contextlib.suppress(Exception):
             fh.close()
-        except Exception:  # noqa: BLE001, S110 — log fd close is best-effort
-            pass
-    helper = getattr(proc, "_mute_helper", None)
-    if helper is not None:
-        # Already-exited helpers reap here; wedged ones are killed. Either way
-        # the orchestrator leaves no zombie and no live stray.
-        stop_proc(helper, term_timeout=term_timeout)
-
-
-def parse_client_log(text: str) -> dict:
-    """Parse playtest log. Prefer JSON events when present (avoid double human+JSON)."""
-    human_results: list[dict] = []
-    json_results: list[dict] = []
-    summary = None
-    done = None
-    json_events: list[dict] = []
-    json_summary = None
-    json_done = None
-    human_summary = None
-    human_done = None
-    # Single pass: NRE-like lines ride the same iteration as result parsing.
-    nre_hits: list[str] = []
-
-    for line in text.splitlines():
-        if len(nre_hits) < 50 and NRE_RE.search(line):
-            nre_hits.append(line)
-        m = JSON_RE.search(line)
-        if m:
-            try:
-                ev = json.loads(m.group(1))
-                json_events.append(ev)
-                if ev.get("t") == "result":
-                    json_results.append(
-                        {
-                            "status": ev.get("status", "").upper(),
-                            "case": f"{ev.get('suite', '')}/{ev.get('case', '')}",
-                            "detail": ev.get("detail", ""),
-                        }
-                    )
-                elif ev.get("t") == "summary":
-                    json_summary = {
-                        "pass": int(ev.get("pass", 0)),
-                        "fail": int(ev.get("fail", 0)),
-                        "skip": int(ev.get("skip", 0)),
-                    }
-                elif ev.get("t") == "done":
-                    json_done = {"exit_hint": int(ev.get("exit_hint", 1))}
-            except json.JSONDecodeError:
-                pass
-            continue
-
-        m = RESULT_RE.search(line)
-        if m:
-            human_results.append(
-                {
-                    "status": m.group(1),
-                    "case": m.group(2),
-                    "detail": (m.group(3) or "").strip(),
-                }
-            )
-            continue
-        m = SUMMARY_RE.search(line)
-        if m:
-            human_summary = {
-                "pass": int(m.group(1)),
-                "fail": int(m.group(2)),
-                "skip": int(m.group(3) or 0),
-            }
-            continue
-        m = DONE_RE.search(line)
-        if m:
-            hint = int(m.group(1)) if m.group(1) is not None else None
-            human_done = {"exit_hint": hint}
-
-    if json_results:
-        results = json_results
-        summary = json_summary or human_summary
-        done = json_done or human_done
-        stream = "json"
-    else:
-        results = human_results
-        summary = human_summary
-        done = human_done
-        stream = "human"
-
-    if summary is None and results:
-        summary = {
-            "pass": sum(1 for r in results if r["status"] == "PASS"),
-            "fail": sum(1 for r in results if r["status"] == "FAIL"),
-            "skip": sum(1 for r in results if r["status"] == "SKIP"),
-        }
-
-    return {
-        "results": results,
-        "summary": summary,
-        "done": done,
-        "json_events": json_events,
-        "nre_like": nre_hits,
-        "stream": stream,
-    }
 
 
 def write_report(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as ex:
+        # A full disk must not erase the run's verdict: the caller keeps
+        # going so SUMMARY/exit still reflect the playtest result.
+        err(f"could not write report {path}: {ex}")
+        return
     log(f"report → {path}")
 
 
-def xml_attr_escape(value: str) -> str:
-    """Escape a string for use inside a double-quoted XML attribute."""
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
+# Characters that are illegal anywhere in an XML 1.0 document: C0 controls
+# except tab/LF/CR, DEL plus C1 controls, surrogates, and the noncharacters
+# U+FFFE/U+FFFF. They cannot be escaped (no numeric reference exists for
+# them), so a single NUL surviving from a binary log line would make the
+# whole generated document unparseable; they are dropped before escaping.
+_XML_ILLEGAL_RE = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]"
+)
 
 
-def write_junit(
-    path: Path, suite: str, results: list[dict], summary: dict | None
-) -> None:
-    """Minimal JUnit XML for CI UIs."""
+def xml_attr(value: str) -> str:
+    """Escape a value for safe inclusion inside a double-quoted XML attribute.
+
+    Case ids and detail text come from client log lines (game output, mod
+    detail strings), so every XML special must be escaped or a crafted line
+    breaks out of the attribute into arbitrary report markup. Characters
+    illegal in XML 1.0 are dropped first: escaping cannot represent them.
+    """
+    return xml_escape(_XML_ILLEGAL_RE.sub("", str(value)), {'"': "&quot;", "'": "&apos;"})
+
+
+def write_junit(path: Path, suite: str, results: list[dict]) -> None:
+    """Minimal JUnit XML for CI UIs. Counters derive from ``results``."""
     tests = len(results)
     failures = sum(1 for r in results if r.get("status") == "FAIL")
     skipped = sum(1 for r in results if r.get("status") == "SKIP")
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         (
-            f'<testsuite name="7dtd-playtest.{xml_attr_escape(suite)}" tests="{tests}" '
+            f'<testsuite name="7dtd-playtest.{xml_attr(suite)}" tests="{tests}" '
             f'failures="{failures}" skipped="{skipped}">'
         ),
     ]
     for r in results:
-        case = xml_attr_escape(r.get("case", "unknown"))
+        case = xml_attr(r.get("case", "unknown"))
         status = r.get("status", "FAIL")
-        detail = xml_attr_escape(r.get("detail") or "")
+        detail = xml_attr(r.get("detail") or "")
         lines.append(f'  <testcase classname="playtest" name="{case}">')
         if status == "FAIL":
             lines.append(f'    <failure message="{detail}"/>')
@@ -973,79 +785,557 @@ def write_junit(
             lines.append(f'    <skipped message="{detail}"/>')
         lines.append("  </testcase>")
     lines.append("</testsuite>")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError as ex:
+        err(f"could not write junit {path}: {ex}")
+        return
     log(f"junit → {path}")
 
 
-def fresh_save(userdata: Path, game_name: str) -> None:
-    """Remove stock save folder for a clean, reproducible world state."""
-    # Typical layout: UserData/Saves/<World>/<GameName>
+class TelnetAdmin:
+    """Minimal stock dedicated telnet (password prompt)."""
+
+    # Substrings that mark a listents line as non-player AI. One shared table
+    # so clear_ai and kill_non_player_ai cannot drift apart again.
+    AI_LINE_KEYWORDS = (
+        "zombie",
+        "animal",
+        "vulture",
+        "bear",
+        "wolf",
+        "snake",
+        "kind=zombie",
+        "kind=animal",
+    )
+
+    def __init__(self, host: str, port: int, password: str):
+        self.host = host
+        self.port = port
+        self.password = password
+        self._sock: socket.socket | None = None
+
+    def connect(self, timeout: float = 5.0) -> bool:
+        try:
+            self.close()
+            s = socket.create_connection((self.host, self.port), timeout=timeout)
+            s.settimeout(2.0)
+            self._sock = s
+            banner = self._recv(0.8)
+            if "password" in banner.lower():
+                self._send(self.password)
+                _ = self._recv(0.6)
+            log(f"telnet connected {self.host}:{self.port} banner={banner[:60]!r}")
+            return True
+        except OSError as ex:
+            warn(f"telnet connect fail: {ex}")
+            self.close()
+            return False
+
+    def exec(self, cmd: str) -> str:
+        if not self._sock:
+            return ""
+        try:
+            self._send(cmd)
+            # zdtd admin is polled on the 20 Hz tick; allow a few frames.
+            return self._recv(1.2)
+        except OSError as ex:
+            # The session is broken (reset pipe, server gone). Close now so
+            # later execs fail fast as "no socket" instead of re-raising on a
+            # dead fd, and replies stay distinguishable from silence.
+            warn(f"telnet exec fail: {ex}")
+            self.close()
+            return ""
+
+    def _ai_entity_ids(self, out: str) -> list[str]:
+        """Entity ids from listents lines matching the shared AI keyword table."""
+        ids: list[str] = []
+        for line in out.splitlines():
+            low = line.lower()
+            if not any(k in low for k in self.AI_LINE_KEYWORDS):
+                continue
+            m = re.search(r"(?:id|ID)\s*=\s*(\d+)", line)
+            if m:
+                ids.append(m.group(1))
+        return ids
+
+    def clear_ai(self) -> None:
+        """Remove non-player AI without killing the human player.
+
+        Do **not** use stock `killall` here: it also kills the player entity and
+        leaves the demo stuck on a death screen.
+        """
+        out = self.exec("listents")
+        killed = 0
+        for eid in self._ai_entity_ids(out):
+            self.exec(f"kill {eid}")
+            killed += 1
+        log(f"telnet clear_ai killed~={killed} (listents sample {out[:100]!r})")
+
+    def kill_non_player_ai(self) -> int:
+        """Kill zombie/animal entities from listents (not the player)."""
+        out = self.exec("listents")
+        killed = 0
+        players = {str(i) for i in self.list_player_ids()}
+        for eid in self._ai_entity_ids(out):
+            if eid in players:
+                continue
+            r = self.exec(f"kill {eid}")
+            log(f"telnet kill {eid} → {r[:80]!r}")
+            killed += 1
+        if killed == 0:
+            # Broader: kill all entity ids in listents that are not players
+            for m in re.finditer(r"(?:id|ID)\s*=\s*(\d+)", out):
+                eid = m.group(1)
+                if eid in players:
+                    continue
+                if int(eid) < 100:
+                    continue
+                r = self.exec(f"kill {eid}")
+                log(f"telnet kill fallback {eid} → {r[:80]!r}")
+                killed += 1
+                if killed >= 16:
+                    break
+        # No killall here either: stock killall also kills the player entity,
+        # and this helper is named for leaving players alive.
+        log(f"telnet kill_non_player_ai killed~={killed}")
+        return killed
+
+    def list_player_ids(self) -> list[int]:
+        """Parse stock `listplayers` / zdtd `list` for entity ids."""
+        out = self.exec("listplayers")
+        if not out or "unknown" in out.lower():
+            out = self.exec("list") or out
+        if "id=" not in out:
+            # The reply can lag the 1.2 s settle right after login; one more
+            # read before giving up, and say what came back so a later run
+            # is not left with "empty/unparsed".
+            out += self._recv(1.5)
+            if "id=" not in out:
+                log(f"telnet listplayers reply unparsed: {out[-160:]!r}")
+        ids = [
+            int(x) for x in re.findall(r"(?:id|entity)\s*=\s*(\d+)", out, flags=re.IGNORECASE)
+        ]
+        # zdtd console style: "(entity 107)"
+        ids += [int(x) for x in re.findall(r"\(entity\s+(\d+)\)", out, flags=re.IGNORECASE)]
+        ids = [i for i in ids if i > 0]
+        return list(dict.fromkeys(ids))
+
+    def teleport_players_to(self, x: float, y: float, z: float) -> int:
+        """Teleport every listed player to world coords. Returns how many cmds ran."""
+        ids = self.list_player_ids()
+        if not ids:
+            warn("telnet teleport: no players from listplayers")
+            return 0
+        n = 0
+        for pid in ids:
+            r = self.exec(f"teleportplayer {pid} {x:g} {y:g} {z:g}")
+            log(f"telnet teleportplayer {pid} {x:g} {y:g} {z:g} → {r[:120]!r}")
+            n += 1
+        return n
+
+    def spawn_near_players(self, entity: str) -> int:
+        ids = self.list_player_ids()
+        if not ids:
+            log("telnet listplayers empty/unparsed for spawn")
+            return 0
+        # One passive-ish spawn near first player only (no scouts: they swarm and kill).
+        r = self.exec(f"spawnentity {ids[0]} {entity}")
+        spawned = 0 if "No spawn point" in r else 1
+        if spawned == 0:
+            # Offset from known pad so the zombie is visible but not on top of the player.
+            for pos in (PERSIST_PAD_COORDS, "530 62 960", "515 62 955"):
+                r = self.exec(f"spawnentityat {entity} {pos}")
+                if r and "ERR" not in r.upper() and "Unknown" not in r:
+                    spawned += 1
+                    break
+        log(f"telnet spawn near players={ids[:1]} units~={spawned} type={entity}")
+        return spawned
+
+    def _send(self, line: str) -> None:
+        assert self._sock
+        self._sock.sendall((line + "\n").encode("utf-8", errors="replace"))
+
+    def _recv(self, settle: float) -> str:
+        assert self._sock
+        time.sleep(settle)
+        chunks: list[bytes] = []
+        self._sock.settimeout(0.25)
+        try:
+            while True:
+                try:
+                    data = self._sock.recv(4096)
+                except TimeoutError:
+                    break
+                except OSError:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+                if len(chunks) > 32:
+                    break
+        finally:
+            self._sock.settimeout(2.0)
+        return b"".join(chunks).decode("utf-8", errors="replace")
+
+    def close(self) -> None:
+        if self._sock:
+            with contextlib.suppress(OSError):
+                self._sock.close()
+            self._sock = None
+
+
+def install_signal_handlers() -> None:
+    """Convert SIGTERM/SIGHUP into SystemExit so the finally-based cleanup runs.
+
+    Default signal action kills the process without unwinding: the detached
+    client/server survive (start_new_session) and the lock file goes stale
+    while a live runtime blocks takeover (stale_but_live wedge). Raising
+    SystemExit routes termination through main()'s finally, which stops the
+    runtime processes and releases the exclusivity lock.
+    """
+    sig_names = ("SIGTERM", "SIGHUP")
+
+    def _exit_fast(signum, _frame):
+        # A second hit during cleanup must not raise inside the finally block
+        # and skip stop_proc/release, so ignore repeats while we unwind.
+        for name in sig_names:
+            s = getattr(signal, name, None)
+            if s is not None:
+                # Re-registering can fail once the interpreter is tearing down.
+                with contextlib.suppress(ValueError, OSError):
+                    signal.signal(s, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
+    for name in sig_names:
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _exit_fast)
+        except (ValueError, OSError) as ex:
+            # ValueError: main() driven from a non-main thread; keep running.
+            warn(f"cannot install {name} handler: {ex}")
+
+
+# Soft-delete window for destructive pre-run wipes (--fresh-save, zdtd world
+# reset, prior client-log evidence): data moves under <logdir>/quarantine and
+# is pruned to the newest QUARANTINE_KEEP entries instead of being destroyed.
+# A mispointed --userdata/--game-name/--world therefore costs a copy-back, not
+# an unrecoverable loss.
+QUARANTINE_DIRNAME = "quarantine"
+QUARANTINE_KEEP = 5
+
+# Per-run evidence (report-<epoch>.json / junit-<epoch>.xml) lands in the
+# cache logdir on every orchestrated run and nothing reads older generations
+# back: without a bound, months of runs fill the disk one file pair at a
+# time. Same newest-wins policy as quarantine evidence; per pattern so a kept
+# report never loses its junit twin.
+REPORT_KEEP = 50
+
+
+def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
+    """Keep only the newest `keep` report/junit files per pattern."""
+    if keep <= 0:
+        return
+    for pattern in ("report-*.json", "junit-*.xml"):
+        try:
+            entries = sorted(p for p in logdir.glob(pattern) if p.is_file())
+        except OSError as ex:
+            warn(f"artifact prune skipped ({ex}); old {pattern} will accumulate")
+            continue
+        for old in entries[:-keep]:
+            with contextlib.suppress(OSError):
+                old.unlink()
+
+
+def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
+    """Keep only the newest `keep` quarantine entries (dirs or files)."""
+    try:
+        entries = sorted(qroot.iterdir())
+    except OSError as ex:
+        warn(f"quarantine prune skipped ({ex}); old entries will accumulate")
+        return
+    for old in entries[:-keep]:
+        if old.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+        else:
+            with contextlib.suppress(OSError):
+                old.unlink()
+
+
+def _quarantine_entry(qroot: Path, label: str) -> Path | None:
+    """Create a timestamped quarantine entry dir; prune older ones.
+
+    None means the quarantine itself is unusable (disk, permissions): callers
+    must then leave the data in place rather than destroy it unrecoverably.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    entry = qroot / f"{stamp}-{label}"
+    n = 0
+    while entry.exists():
+        n += 1
+        entry = qroot / f"{stamp}-{label}.{n}"
+    try:
+        entry.mkdir(parents=True)
+    except OSError as ex:
+        warn(f"quarantine unavailable ({ex}); keeping data in place")
+        return None
+    prune_quarantine(qroot)
+    return entry
+
+
+def _quarantine_move(src: Path, entry: Path, rel: str) -> bool:
+    """Move src to entry/<rel>/<name>; False leaves src untouched in place."""
+    dest_root = entry / rel
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest_root / src.name))
+        return True
+    except OSError as ex:
+        warn(f"quarantine: could not move {src} aside: {ex}")
+        return False
+
+
+def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
+    """Move stock save folders aside into `quarantine` for a clean world.
+
+    Typical layout: UserData/Saves/<World>/<GameName>. Every world's copy of
+    the named game goes; sibling saves and stray files stay. Removal means
+    "recoverable until pruned", so a mispointed --userdata cannot destroy real
+    playthroughs irrecoverably.
+    """
     saves = userdata / "Saves"
     if not saves.is_dir():
         return
+    entry = _quarantine_entry(quarantine, "stock-save")
     removed = 0
+    failed = 0
     for world_dir in saves.iterdir():
         if not world_dir.is_dir():
             continue
         target = world_dir / game_name
         if target.is_dir():
-            subprocess.run(["rm", "-rf", str(target)], check=False)
+            moved = (
+                entry is not None
+                and _quarantine_move(target, entry, f"{world_dir.name}--{game_name}")
+            )
+            if not moved:
+                # A surviving save would silently poison the run: dig/place
+                # would then fail on the previous run's terrain, not on the
+                # server. Say so instead of logging a false "removed".
+                failed += 1
+                warn(
+                    f"fresh-save: could not remove {target}; "
+                    "stale save will be reused"
+                )
+                continue
             removed += 1
             log(f"fresh-save removed {target}")
-    if removed == 0:
+    if removed == 0 and failed == 0:
         log(f"fresh-save: no existing save named {game_name}")
 
 
-# Suite ids / aliases whose built-in cases emit host-fixture barriers in
-# Catalog.cs (spawn_zombie, kill_fixture_zombie, kill_player, settime_*,
-# spawn_trader, spawn_vehicle). Must stay a superset of every suite id whose
-# cases emit those barriers: a missing entry silently disables the admin
-# fixture plane when that suite runs standalone (client-side spawn fallbacks
-# are not server-authoritative on a dedicated server). The structural drift
-# test derives the expected set from Catalog.cs (test_catalog_surface.py).
-FIXTURE_SUITE_KEYS = (
-    "demo",
-    "combat",
-    "economy",
-    "vehicle",
-    "finale",
-    "full",
-    "all",
-    "live",
-    "benchmark",
-    "bench",
-    "mp",
-    "residual",
+def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
+    """Move zdtd persisted state aside (`--world`) for a clean starting bag.
+
+    players.zsv / containers.zct / blockmeta.zbm plus c_*.zch* chunk overlays
+    go to `quarantine` so dig/place start from the map baseline; a failed move
+    leaves the file in place (stale state reused, never silent loss).
+    """
+    if not world.is_dir():
+        return
+    entry = _quarantine_entry(quarantine, f"zdtd-world--{world.name}")
+    if entry is None:
+        warn(f"fresh-save: could not clean {world}; stale world will be reused")
+        return
+    state = 0
+    for name in ("players.zsv", "containers.zct", "blockmeta.zbm"):
+        p = world / name
+        if p.is_file() and _quarantine_move(p, entry, "state"):
+            state += 1
+            log(f"fresh-save removed {p}")
+    chunks = 0
+    for ch in sorted(world.glob("c_*.zch*")):
+        if _quarantine_move(ch, entry, "chunks"):
+            chunks += 1
+    if state == 0 and chunks == 0:
+        log(f"fresh-save: no persisted zdtd state under {world}")
+        return
+    log(
+        f"fresh-save zdtd world cleaned under {world} "
+        f"(state={state}, chunks={chunks})"
+    )
+
+
+def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> None:
+    """Copy the previous run's log into the quarantine before truncation.
+
+    The truncation itself stays: incremental readers depend on starting from
+    an empty file. Only the evidence of the previous run is preserved.
+    """
+    if path is None or not path.is_file():
+        return
+    entry = _quarantine_entry(qroot, kind)
+    if entry is None:
+        return
+    try:
+        shutil.copy2(path, entry / path.name)
+    except OSError as ex:
+        warn(f"could not preserve previous {kind}: {ex}")
+
+
+# Suite ids whose live cases depend on host-serviced admin fixtures. The
+# barrier handlers below (spawn_zombie, kill_fixture_zombie, spawn_trader,
+# spawn_vehicle, kill_player, settime_*, bot_spawn, bot_player_near) only arm
+# when the selection names one of these; every other suite must stay
+# telnet-free. demo/full/all/live/benchmark/bench/mp/residual are legacy
+# aliases whose expansions include fixture suites.
+FIXTURE_SUITE_IDS = frozenset(
+    (
+        # Aliases that expand into fixture-bearing suites.
+        "demo",
+        "full",
+        "all",
+        "live",
+        "benchmark",
+        "bench",
+        "mp",
+        "residual",
+        # Catalog suites with live cases that fire host-serviced barriers:
+        # combat/economy (AI + traders), vehicle (host-owned spawns),
+        # finale (player kill), bot (BotMod telnet commands).
+        "combat",
+        "economy",
+        "vehicle",
+        "finale",
+        "bot",
+    )
 )
 
 
-def suite_tokens(raw: str) -> set[str]:
-    """Split a PLAYTEST-suite argument into its lowercase suite ids/aliases.
+def suite_wants_host_fixtures(suite: str) -> bool:
+    """True when any selected suite id needs host telnet fixtures.
 
-    The client accepts ',', ';', and whitespace separators (Catalog.ExpandSuites),
-    so the host must tokenize the same way. Exact tokens, not substrings: a
-    provider suite named "temp_check" must not trip the "mp" key, and
-    "gateway" must not inherit "gate"'s exclusions.
+    Matches whole suite tokens (same , ; space delimiters as the client's
+    Catalog.ExpandSuites), never substrings of the joined list: a bare
+    "smoke" or "gate" run stays telnet-free, while every catalog suite whose
+    live cases emit barrier lines opens the fixture path.
     """
-    return {p.lower() for p in re.split(r"[,;\s]+", raw or "") if p}
+    return any(
+        token in FIXTURE_SUITE_IDS
+        for token in re.split(r"[,;\s]+", suite.lower())
+        if token
+    )
 
 
-def suite_wants_zombie_fixture(suite: str) -> bool:
-    tokens = suite_tokens(suite)
-    wants = bool(tokens & set(FIXTURE_SUITE_KEYS))
-    excluded = bool(tokens & {"demo_min", "gate"})
-    smoke_only = tokens == {"smoke"}
-    return wants and not excluded and not smoke_only
+# Every barrier the orchestrator counts in the client log and services over
+# telnet/admin. Single source for both the fired-count and seen-count tables
+# in main(), so a new barrier cannot be added to one and missed by the other.
+BARRIER_NAMES: tuple[str, ...] = (
+    "spawn_zombie",
+    "spawn_trader",
+    "kill_fixture_zombie",
+    "kill_player",
+    "settime_bloodmoon",
+    "settime_day",
+    "spawn_vehicle",
+    "spawn_loadgen_peer",
+    "spawn_loadgen_bots",
+    "bot_spawn",
+    "bot_player_near",
+    "persist_setup_done",
+    "rejoin_setup_done",
+    "teleport_persist_pad",
+    "apm_dump",
+    "chat_echo",
+)
+
+
+# Cap on settime_bloodmoon fires per run: re-barrier spam was flipping the
+# world back to 22:00 after settime_day and killing the player in economy cases.
+SETTIME_BLOODMOON_MAX_FIRES = 2
+
+
+def barrier_line_hits(blob: str, name: str) -> int:
+    """Count human `barrier <name>` lines in ``blob`` (whole-name match).
+
+    Report.Barrier also emits JSON with the same name; summing both
+    double-fires handlers (e.g. kills bots). The whole-name match keeps
+    "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
+    lines, which are collected separately via barrier_hits_prefix.
+    """
+    return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
+
+
+def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
+    """Fold the barrier lines of one newly read chunk into cumulative totals.
+
+    Poll loops feed only appended chunks through here instead of re-scanning
+    the whole log each poll; totals only grow, matching how handlers compare
+    their fired counts against everything seen so far.
+    """
+    for name in totals:
+        hits = barrier_line_hits(blob, name)
+        if hits:
+            totals[name] += hits
+
+
+def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:
+    """Fresh (fired, seen) counter pair for one client-log generation.
+
+    The pair must be created together because handlers fire while
+    ``fired[name] < seen[name]`` within a generation. Resetting only one side
+    at the rejoin boundary keeps stale fired counts from the setup phase, so
+    a verify-phase emission of an already-serviced name (teleport_persist_pad,
+    rejoin_setup_done, or any provider-named barrier) stays swallowed until
+    new lines exceed the leftover count instead of firing once, as intended.
+    """
+    return (
+        dict.fromkeys(BARRIER_NAMES, 0),
+        dict.fromkeys(BARRIER_NAMES, 0),
+    )
+
+
+def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
+    """Drain newly appended complete lines through the shared line parser.
+
+    Returns the new text so per-line greps in the caller see exactly what was
+    parsed. Both sides share ClientLogScan's parser so incremental results
+    cannot drift from parse_client_log over the same bytes.
+    """
+    chunk = tail.poll()
+    if not chunk:
+        return ""
+    for line in chunk.splitlines():
+        scan.feed_line(line)
+    scan.feed_chunk(chunk)
+    return chunk
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="stock-client playtest orchestrator")
+    ap = argparse.ArgumentParser(
+        description="stock-client playtest orchestrator",
+        epilog=(
+            "examples:\n"
+            "  playtest_run.py --suite smoke\n"
+            "  playtest_run.py --server zdtd --port 27025\n"
+            "  playtest_run.py --no-server --skip-clean\n"
+            "exit codes: 0 all cases pass, 1 case failures, 2 harness error\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--version",
+        action="version",
+        version=f"playtest_run.py {mod_version()}",
+    )
     ap.add_argument(
         "--server",
         choices=("stock", "zdtd"),
         default=os.environ.get("PLAYTEST_SERVER", "stock"),
-        help="server backend (default: stock dedicated)",
+        help="server backend (env PLAYTEST_SERVER; default stock dedicated)",
     )
     ap.add_argument(
         "--suite",
@@ -1070,24 +1360,36 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--port",
-        type=int,
+        type=tcp_port,
         default=None,
         help="ServerPort / connect-to-IP port (stock default 26900, zdtd 27025)",
     )
-    ap.add_argument("--admin-port", type=int, default=8081, help="telnet/admin port")
     ap.add_argument(
-        "--zdtd", type=Path, default=Path(os.environ.get("ZDTD", str(DEFAULT_ZDTD)))
+        "--admin-port", type=tcp_port, default=8081, help="telnet/admin port"
     )
-    ap.add_argument("--game-srv", type=Path, default=DEFAULT_GAME_SRV)
+    ap.add_argument(
+        "--zdtd",
+        type=Path,
+        default=Path(os.environ.get("ZDTD", str(DEFAULT_ZDTD))),
+        help="zdtd server binary (env ZDTD)",
+    )
+    ap.add_argument(
+        "--game-srv",
+        type=Path,
+        default=DEFAULT_GAME_SRV,
+        help="stock dedicated server install dir",
+    )
     ap.add_argument(
         "--userdata",
         type=Path,
         default=Path(os.environ.get("RE_DEDICATED_USERDATA", str(DEFAULT_USERDATA))),
+        help="stock dedicated userdata dir (env RE_DEDICATED_USERDATA)",
     )
     ap.add_argument(
         "--timeout",
-        type=float,
-        default=float(os.environ.get("PLAYTEST_TIMEOUT_SEC", "900")),
+        type=positive_seconds,
+        default=None,
+        help="harness wall-clock timeout in seconds > 0 (env PLAYTEST_TIMEOUT_SEC)",
     )
     ap.add_argument(
         "--rejoin-setup-suite",
@@ -1113,19 +1415,30 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(
             os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest"))
         ),
+        help="report/server log dir (env LOGDIR)",
     )
-    ap.add_argument("--skip-clean", action="store_true")
+    ap.add_argument(
+        "--skip-clean",
+        action="store_true",
+        help="do not pkill leftover game processes before start",
+    )
     ap.add_argument(
         "--kill-wine", action="store_true", help="also kill wineserver (disrupts Steam)"
     )
     ap.add_argument(
         "--no-server", action="store_true", help="use already-running server"
     )
-    ap.add_argument("--client-log", type=Path, default=CLIENT_LOG)
+    ap.add_argument(
+        "--client-log",
+        type=Path,
+        default=CLIENT_LOG,
+        help="client output log to parse for results",
+    )
     ap.add_argument(
         "--peer-client-name",
         default=os.environ.get("PLAYTEST_PEER_CLIENT_NAME", ""),
-        help="optional distinct Local-platform name for one passive stock peer",
+        help="optional distinct Local-platform name for one passive stock peer"
+        " (env PLAYTEST_PEER_CLIENT_NAME)",
     )
     ap.add_argument(
         "--peer-client-compat",
@@ -1135,7 +1448,8 @@ def main(argv: list[str] | None = None) -> int:
             if os.environ.get("PLAYTEST_PEER_CLIENT_COMPAT")
             else None
         ),
-        help="separate initialized Proton compat profile for --peer-client-name",
+        help="separate initialized Proton compat profile for --peer-client-name"
+        " (env PLAYTEST_PEER_CLIENT_COMPAT)",
     )
     ap.add_argument(
         "--peer-client-log",
@@ -1146,7 +1460,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--peer-client-suite",
         default=os.environ.get("PLAYTEST_PEER_CLIENT_SUITE", ""),
-        help="optional suite for the stock peer; empty leaves it passive",
+        help="optional suite for the stock peer; empty leaves it passive"
+        " (env PLAYTEST_PEER_CLIENT_SUITE)",
     )
     ap.add_argument(
         "--peer-client-teleport",
@@ -1159,7 +1474,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--telnet-password",
         default=os.environ.get("PLAYTEST_TELNET_PASSWORD", "retest"),
-        help="stock dedicated telnet password",
+        help="stock dedicated telnet password (env PLAYTEST_TELNET_PASSWORD)",
     )
     ap.add_argument(
         "--no-fixtures",
@@ -1215,6 +1530,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.port is None:
         args.port = 27025 if args.server == "zdtd" else 26900
+    if args.timeout is None:
+        args.timeout = seconds_from_env("PLAYTEST_TIMEOUT_SEC", 900.0)
+
+    # One effective-config line at startup (password redacted) so a misread
+    # env var or stale shell default is visible in every log without --help.
+    log("config: " + config_summary(args))
 
     report_path = args.logdir / f"report-{int(time.time())}.json"
     server_log = args.logdir / "server-orch.log"
@@ -1226,48 +1547,53 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.server == "zdtd" and not args.no_server and not args.zdtd.is_file():
-        log(f"missing zdtd binary: {args.zdtd}")
+        err(f"missing zdtd binary: {args.zdtd}")
         return 2
     if (
         args.server == "stock"
         and not args.no_server
         and not (args.game_srv / "7DaysToDieServer.x86_64").is_file()
     ):
-        log(f"missing stock dedicated under {args.game_srv}")
+        err(f"missing stock dedicated under {args.game_srv}")
         return 2
     if not (CONNECT / "scripts" / "launch_client.sh").is_file():
-        log(f"missing connect launcher under {CONNECT}")
+        err(f"missing connect launcher under {CONNECT}")
         return 2
     if peer_client_name and not args.peer_client_compat.is_dir():
-        log(f"peer compat profile is missing or not a directory: {args.peer_client_compat}")
+        err(f"peer compat profile is missing or not a directory: {args.peer_client_compat}")
         return 2
 
-    # Pre-bound so the finally block can stop whatever this run launched even
-    # on early exceptions (lock refused paths return before the try).
-    server_proc: subprocess.Popen | None = None
-    client_proc: subprocess.Popen | None = None
-    peer_client_proc: subprocess.Popen | None = None
-    loadgen_proc: subprocess.Popen | None = None
+    server_proc = None
+    client_proc = None
+    peer_client_proc = None
+    loadgen_proc = None
+    exit_code = 2
+    parsed: dict = {}
+    summary: dict | None = None
     unity_log: Path | None = None
     lock_session = (args.session or "").strip() or playtest_lock.new_session_id("playtest")
     lock_path = playtest_lock.default_lock_path()
     lock_held = False
     lock_heartbeat: playtest_lock.HeartbeatThread | None = None
 
+    install_signal_handlers()
+
     try:
-        t0 = time.time()
+        # Duration measurement on the monotonic clock; wall clock only for
+        # naming and recorded instants.
+        t0 = time.monotonic()
         # Exclusive live-client lock BEFORE clean_processes / launch so a second
         # orchestrator cannot wipe another agent's client. See AGENTS.md.
         try:
             playtest_lock.acquire(lock_session, path=lock_path)
         except playtest_lock.PlaytestLockError as ex:
             holder = ex.held_by or "unknown"
-            log(
+            err(
                 f"refusing start: {ex} "
                 f"(held_by={holder} reason={ex.reason} file={lock_path})"
             )
-            log(
-                "see AGENTS.md — Playtest / live-client exclusivity; "
+            err(
+                "see AGENTS.md (Playtest / live-client exclusivity); "
                 "set PLAYTEST_LOCK_FILE / PLAYTEST_SESSION_ID to coordinate"
             )
             return 2
@@ -1279,12 +1605,12 @@ def main(argv: list[str] | None = None) -> int:
         lock_heartbeat = playtest_lock.HeartbeatThread(
             lock_session,
             path=lock_path,
-            on_error=lambda ex: log(f"warn: lock heartbeat: {ex}"),
+            on_error=lambda ex: warn(f"lock heartbeat: {ex}"),
         )
         lock_heartbeat.start()
 
         if not args.skip_clean:
-            clean_processes(kill_wine=args.kill_wine, include_server=not args.no_server)
+            clean_processes(kill_wine=args.kill_wine)
 
         # After clean, refuse to double-bind if something else still owns ports
         # (orphan outside our pkill patterns, or race with another host).
@@ -1295,53 +1621,92 @@ def main(argv: list[str] | None = None) -> int:
                 if playtest_lock.tcp_port_in_use(p)
             ]
             if busy:
-                log(
+                err(
                     f"refusing start: TCP port(s) still in use after clean: {busy} "
                     f"(another dedicated/zdtd or leftover process). "
                     f"Stop it or pick different --port/--admin-port."
                 )
                 return 2
 
+        qroot = args.logdir / QUARANTINE_DIRNAME
         if args.fresh_save:
             if args.server == "stock":
-                fresh_save(args.userdata, args.game_name)
+                fresh_save(args.userdata, args.game_name, qroot)
             elif args.server == "zdtd" and args.world is not None:
-                # zdtd persists players.zsv / chunks under --world; wipe for clean bag.
-                wpath = Path(args.world)
-                if wpath.is_dir():
-                    for name in ("players.zsv", "containers.zct", "blockmeta.zbm"):
-                        p = wpath / name
-                        if p.is_file():
-                            try:
-                                p.unlink()
-                                log(f"fresh-save removed {p}")
-                            except OSError as ex:
-                                log(f"fresh-save warn {p}: {ex}")
-                    # Drop chunk overlays so dig/place start from map baseline.
-                    for ch in wpath.glob("c_*.zch*"):
-                        try:
-                            ch.unlink()
-                        except OSError:
-                            pass
-                    log(f"fresh-save zdtd world cleaned under {wpath}")
+                fresh_zdtd_world(Path(args.world), qroot)
 
-        if args.client_log.is_file():
-            try:
-                args.client_log.write_text("", encoding="utf-8")
-            except OSError as ex:
-                log(f"warn: could not truncate client log: {ex}")
+        snapshot_previous_log(args.client_log, qroot, "client-log")
         if peer_client_log is not None:
-            try:
-                peer_client_log.parent.mkdir(parents=True, exist_ok=True)
-                peer_client_log.write_text("", encoding="utf-8")
-            except OSError as ex:
-                log(f"warn: could not truncate peer client log: {ex}")
+            snapshot_previous_log(peer_client_log, qroot, "peer-client-log")
+        truncate_file(args.client_log, "client log")
+        if peer_client_log is not None:
+            peer_client_log.parent.mkdir(parents=True, exist_ok=True)
+            truncate_file(peer_client_log, "peer client log")
+
+        # Incremental readers created right after the truncation above so every
+        # later append is seen exactly once. Later truncations (rejoin phases)
+        # are detected by LogTail as a shrink and restart from zero.
+        client_tail = LogTail(args.client_log)
+        client_scan = ClientLogScan()
+        peer_tail = (
+            LogTail(peer_client_log) if peer_client_log is not None else None
+        )
+        peer_scan = ClientLogScan()
+
+        # Telnet/admin surface, needed by start_stock_dedicated (config password)
+        # and every barrier handler below. Assigned once, before first use.
+        telnet_host = "127.0.0.1"
+        telnet_port = args.admin_port
+        telnet_password = args.telnet_password
 
         if not args.no_server:
-            server_proc, unity_log = start_configured_server(args, server_log)
-            _, exited_early = wait_server_ready(args, server_proc, server_log, unity_log)
-            if exited_early:
-                return 2
+            if args.server == "stock":
+                server_proc, unity_log = start_stock_dedicated(
+                    args.game_srv,
+                    args.userdata,
+                    server_log,
+                    world_name=args.world_name,
+                    game_name=args.game_name,
+                    port=args.port,
+                    telnet_port=args.admin_port,
+                    telnet_password=telnet_password,
+                )
+                ready_log = unity_log
+                # Navezgane load: up to ~10 min cold
+                if not wait_file_contains(ready_log, "StartGame done", timeout=600):
+                    if server_proc.poll() is not None:
+                        err(
+                            f"stock dedicated exited early code={server_proc.returncode}"
+                        )
+                        if ready_log.is_file():
+                            err(
+                                "tail server log:\n"
+                                + "\n".join(
+                                    ready_log.read_text(
+                                        encoding="utf-8", errors="replace"
+                                    ).splitlines()[-40:]
+                                )
+                            )
+                        return 2
+                    warn("no StartGame done yet; server still running, proceeding")
+                else:
+                    log("stock dedicated ready (StartGame done)")
+            else:
+                server_proc = start_zdtd(
+                    args.zdtd,
+                    args.world,
+                    args.port,
+                    args.admin_port,
+                    args.game_srv,
+                    server_log,
+                )
+                if not wait_file_contains(server_log, "tick=20Hz", timeout=60):
+                    if server_proc.poll() is not None:
+                        log(f"zdtd exited early code={server_proc.returncode}")
+                        return 2
+                    warn("no tick=20Hz; proceeding")
+                else:
+                    log("zdtd ready (tick=20Hz)")
 
         # zdtd admin TCP speaks the same command surface the orch uses for stock
         # telnet (listplayers/listents/kill/spawnentity/settime). Enable fixtures
@@ -1349,47 +1714,35 @@ def main(argv: list[str] | None = None) -> int:
         want_fixtures = (
             args.server in ("stock", "zdtd")
             and not args.no_fixtures
-            and suite_wants_zombie_fixture(args.suite)
+            and suite_wants_host_fixtures(args.suite)
         )
-        telnet_host = "127.0.0.1"
-        telnet_port = args.admin_port
-        telnet_password = args.telnet_password
 
-        deadline = time.time() + args.timeout
+        # Poll budget on the monotonic clock so a wall-clock step (NTP or
+        # manual) during a long soak cannot hang or truncate the run.
+        deadline = time.monotonic() + args.timeout
         # soak_long needs ≥15 min wall + setup; bump default timeout.
-        if "soak_long" in suite_tokens(args.suite):
-            deadline = time.time() + max(args.timeout, 1100.0)
-            log(f"soak_long timeout deadline wall_s>={int(deadline - time.time())}")
-        last_progress = 0.0
-        # Barrier ledger: emissions (seen) vs completed host actions (fired),
-        # accumulated across polls so edges split across chunks still fire
-        # exactly once each. Multi-fire is expected: combat + sleeper +
-        # economy may re-spawn/kill.
-        led = BarrierLedger()
-
-        def open_admin() -> TelnetAdmin | None:
-            tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-            return tn if tn.connect() else None
-
-        def run_barrier(
-            name: str,
-            act: Callable[[TelnetAdmin], bool | None],
-            *,
-            chunk: str,
-            cap: int | None = None,
-        ) -> None:
-            fire_barrier_edges(led, chunk, name, open_admin, act, cap=cap)
-
+        if "soak_long" in args.suite:
+            deadline = time.monotonic() + max(args.timeout, 1100.0)
+            log(f"soak_long timeout deadline wall_s>={int(deadline - time.monotonic())}")
+        last_progress = float("-inf")
+        # Fired and seen counts per barrier (fired may trail seen: combat +
+        # sleeper + economy re-spawn/kill). Created as one pair per log
+        # generation so a handler can never compare across generations.
+        barrier_counts, barrier_seen = new_barrier_tables()
         ready_seen = False
         peer_ready_seen = not bool(peer_client_suite)
         peer_teleport_done = args.peer_client_teleport is None
         rejoin_teleport_done = args.rejoin_teleport is None
         cleaned_ai = False
+        # One-shot barrier state for parameterized barriers (per run, not per call).
         chat_tokens_fired: set[str] = set()
+        vehicle_spawns_fired: dict[str, int] = {}
+        # Cumulative spawn_vehicle:<class> barrier lines seen in the log.
+        vehicle_seen: dict[str, int] = {}
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
         apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
         client_extra_env: dict[str, str] = {}
-        if "apm" in suite_tokens(args.suite):
+        if "apm" in args.suite.split(","):
             client_extra_env["ZDTD_APM_DUMP"] = str(apm_dump_path)
             client_extra_env["ZDTD_APM_RUN_ID"] = apm_run_id
             # Preseed is explicitly NOT a valid live dump (client rejects APM_PRESEED).
@@ -1411,9 +1764,15 @@ def main(argv: list[str] | None = None) -> int:
                 extra_env=client_extra_env or None,
             )
             if peer_client_name:
+                # V3.1 LiteNetLibAuthWrapperServer rejects same-IP connection
+                # attempts less than 500 ms apart. Both local stock clients
+                # use 127.0.0.1, so launching them back-to-back deterministically
+                # strands the peer at ConnectionRejected/RateLimit. Keep a
+                # full-second margin over the installed engine's limit.
+                time.sleep(1.0)
                 peer_env = {
                     "COMPAT": str(args.peer_client_compat),
-                    "ZDTD_PLAYER_NAME": peer_client_name,
+                    "7DTD_PLAYER_NAME": peer_client_name,
                 }
                 peer_client_proc = start_client(
                     args.port,
@@ -1432,45 +1791,52 @@ def main(argv: list[str] | None = None) -> int:
                 "restart server → rejoin verify"
             )
             stop_proc(client_proc)
-            if args.client_log.is_file():
-                try:
-                    args.client_log.write_text("", encoding="utf-8")
-                except OSError:
-                    pass
+            truncate_file(args.client_log, "client log")
+            # Fresh readers for the new log generation: the scan must hold only
+            # setup-phase events, not bytes from before the truncation.
+            client_tail = LogTail(args.client_log)
+            client_scan = ClientLogScan()
             client_proc = start_client(
                 args.port,
                 rejoin_setup_suite,
                 client_launch_log,
                 extra_env=client_extra_env,
             )
-            setup_deadline = time.time() + min(args.timeout, 300)
-            last_setup_progress = 0.0
-            setup_tail = LogTail(args.client_log)
-            setup_acc: dict | None = None
-            while time.time() < setup_deadline:
-                chunk = setup_tail.read_new()
+            setup_deadline = time.monotonic() + min(args.timeout, 300)
+            last_setup_progress = float("-inf")
+            rejoin_setup_seen = 0
+            while time.monotonic() < setup_deadline:
+                reap_finished_helpers()
+                chunk = pump_log_tail(client_tail, client_scan)
                 if chunk:
-                    now = time.time()
+                    now = time.monotonic()
                     if now - last_setup_progress > 8:
                         last_setup_progress = now
                         crumbs = [
                             ln
                             for ln in chunk.splitlines()
-                            if "[7dtd-playtest]" in ln or "[zdtd-connect]" in ln
+                            if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
                         ]
                         if crumbs:
                             log(f"setup progress: {crumbs[-1][-160:]}")
+                    add_barrier_hits(barrier_seen, chunk)
+                    # The provider barrier name is arbitrary, so it cannot live
+                    # in the fixed barrier_seen table; count it separately.
+                    rejoin_setup_seen += barrier_line_hits(chunk, rejoin_setup_barrier)
                     if not provider_rejoin:
                         # Server-authoritative pad tele so pos_survives_rejoin is real.
-                        led.observe(chunk, "teleport_persist_pad")
-                        while led.pending("teleport_persist_pad"):
+                        while (
+                            barrier_counts["teleport_persist_pad"]
+                            < barrier_seen["teleport_persist_pad"]
+                        ):
                             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                             n = 0
                             if tn.connect():
-                                n = tn.teleport_players_to(*PERSIST_PAD_POS)
+                                n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
                                 if n == 0:
                                     log(
-                                        "warn: teleport_persist_pad: no player ids yet; retry next poll"
+                                        "warn: teleport_persist_pad: no player ids"
+                                        "; retry next poll"
                                     )
                                     tn.close()
                                     break
@@ -1483,18 +1849,18 @@ def main(argv: list[str] | None = None) -> int:
                                     "warn: teleport_persist_pad: telnet connect fail; retry"
                                 )
                                 break
-                            led.mark_fired("teleport_persist_pad")
-                    led.observe(chunk, rejoin_setup_barrier)
-                    if led.pending(rejoin_setup_barrier):
+                            barrier_counts["teleport_persist_pad"] += 1
+                    if rejoin_setup_seen > barrier_counts["rejoin_setup_done"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             n = 1
                             if not provider_rejoin:
                                 # Re-tele pad once more so last write before disconnect is pad pos.
-                                n = tn.teleport_players_to(*PERSIST_PAD_POS)
+                                n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
                             if n == 0:
                                 log(
-                                    f"warn: {rejoin_setup_barrier}: no player ids yet; retry next poll"
+                                    f"warn: {rejoin_setup_barrier}: no player ids"
+                                    "; retry next poll"
                                 )
                                 tn.close()
                             else:
@@ -1506,13 +1872,11 @@ def main(argv: list[str] | None = None) -> int:
                                 r = tn.exec("saveworld")
                                 log(f"telnet saveworld (settle) → {r[:100]!r}")
                                 tn.close()
-                                while led.pending(rejoin_setup_barrier):
-                                    led.mark_fired(rejoin_setup_barrier)
+                                barrier_counts["rejoin_setup_done"] = rejoin_setup_seen
                         else:
-                            log(f"warn: {rejoin_setup_barrier}: telnet connect fail; retry")
-                    setup_acc = merge_parsed(setup_acc, parse_client_log(chunk))
-                    if setup_acc.get("done") is not None:
-                        setup_parsed = setup_acc
+                            warn(f"{rejoin_setup_barrier}: telnet connect fail; retry")
+                    setup_parsed = client_scan.result()
+                    if setup_parsed.get("done") is not None:
                         log(
                             f"{rejoin_label} setup DONE "
                             f"pass={setup_parsed.get('summary', {}).get('pass')} "
@@ -1521,25 +1885,16 @@ def main(argv: list[str] | None = None) -> int:
                         break
                 if client_proc is not None and client_proc.poll() is not None:
                     time.sleep(1)
-                    chunk = setup_tail.read_new()
-                    if chunk:
-                        setup_acc = merge_parsed(setup_acc, parse_client_log(chunk))
-                    if (setup_acc or {}).get("done") is not None:
+                    if client_scan.result().get("done") is not None:
                         log(f"{rejoin_label} setup DONE (client exited)")
                         break
                 time.sleep(0.5)
             # Require setup DONE before rejoin verify; otherwise fixtures never existed.
-            setup_text = ""
-            if args.client_log.is_file():
-                try:
-                    setup_text = args.client_log.read_text(errors="replace")
-                except OSError:
-                    setup_text = ""
-            setup_parsed = parse_client_log(setup_text) if setup_text else {}
+            setup_parsed = client_scan.result()
             setup_done = setup_parsed.get("done") is not None
             setup_fail = int((setup_parsed.get("summary") or {}).get("fail") or 0)
             setup_pass = int((setup_parsed.get("summary") or {}).get("pass") or 0)
-            setup_barrier_seen = led.fired.get(rejoin_setup_barrier, 0) > 0
+            setup_barrier_seen = barrier_counts["rejoin_setup_done"] > 0
             if not setup_done or setup_fail > 0 or not setup_barrier_seen:
                 log(
                     f"{rejoin_label} setup incomplete done={setup_done} pass={setup_pass} "
@@ -1548,17 +1903,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 stop_proc(client_proc)
                 client_proc = None
-                if not args.no_server:
-                    stop_proc(server_proc)
-                    server_proc = None
-                abort_patterns = list(CLIENT_KILL_PATTERNS)
-                if not args.no_server:
-                    # Only the run that owns/started a dedicated may kill it.
-                    abort_patterns.insert(0, DEDI_KILL_PATTERN)
-                pkill_patterns(
-                    abort_patterns,
-                    sig="-9",
-                )
+                stop_proc(server_proc)
+                server_proc = None
+                pkill_patterns(REJOIN_GAME_PROC_PATTERNS, sig="-9")
                 summary = {
                     "pass": setup_pass,
                     "fail": max(setup_fail, 1),
@@ -1576,8 +1923,9 @@ def main(argv: list[str] | None = None) -> int:
                         "error": f"{rejoin_label} setup incomplete",
                     },
                 )
-                write_junit(junit_path, args.suite, results, summary)
-                log(f"FAIL harness: {rejoin_label} setup incomplete")
+                write_junit(junit_path, args.suite, results)
+                prune_run_artifacts(args.logdir)
+                err(f"FAIL harness: {rejoin_label} setup incomplete")
                 return 2
 
             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
@@ -1585,7 +1933,7 @@ def main(argv: list[str] | None = None) -> int:
                 # Persist needs the pad as the last player state; providers retain
                 # the position their setup case actually established.
                 if not provider_rejoin:
-                    tn.teleport_players_to(*PERSIST_PAD_POS)
+                    tn.teleport_players_to(*PERSIST_PAD_XYZ)
                 time.sleep(1.5)
                 r = tn.exec("saveworld")
                 log(f"telnet saveworld (post-setup) → {r[:100]!r}")
@@ -1597,137 +1945,97 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(4)
             stop_proc(client_proc)
             client_proc = None
-            if args.no_server:
-                # External dedicated/zdtd stays up across the rejoin; only the
-                # scenario client cycles (kickall above already dropped it).
-                log("rejoin: keeping external server alive (--no-server)")
-                time.sleep(2)
-            else:
-                stop_proc(server_proc)
-                server_proc = None
-                # Prefer graceful exit first; escalate only if still alive.
-                pkill_patterns(
-                    [DEDI_KILL_PATTERN],
-                    sig="-15",
+            stop_proc(server_proc)
+            server_proc = None
+            # Prefer graceful exit first; escalate only if still alive.
+            pkill_patterns(
+                [
+                    r"7DaysToDieServer\.x86_64",
+                ],
+                sig="-15",
+            )
+            time.sleep(3)
+            pkill_patterns(REJOIN_GAME_PROC_PATTERNS, sig="-9")
+            time.sleep(5)
+            # Restart dedicated on same save (no fresh_save).
+            if args.server == "stock" and not args.no_server:
+                server_proc, unity_log = start_stock_dedicated(
+                    args.game_srv,
+                    args.userdata,
+                    server_log,
+                    world_name=args.world_name,
+                    game_name=args.game_name,
+                    port=args.port,
+                    telnet_port=args.admin_port,
+                    telnet_password=telnet_password,
                 )
-                time.sleep(3)
-                pkill_patterns(
-                    [
-                        DEDI_KILL_PATTERN,
-                        ZDTD_KILL_PATTERN,
-                    ]
-                    + CLIENT_KILL_PATTERNS,
-                    sig="-9",
+                ready_log = unity_log
+                if wait_file_contains(ready_log, "StartGame done", timeout=600):
+                    log("stock dedicated ready after rejoin restart")
+                else:
+                    warn("no StartGame done after rejoin restart; proceeding")
+            elif args.server == "zdtd" and not args.no_server:
+                server_proc = start_zdtd(
+                    args.zdtd,
+                    args.world,
+                    args.port,
+                    args.admin_port,
+                    args.game_srv,
+                    server_log,
                 )
-                time.sleep(5)
-            if not args.no_server:
-                # Restart on same save (no fresh_save).
-                server_proc, unity_log = start_configured_server(args, server_log)
-                wait_server_ready(
-                    args, server_proc, server_log, unity_log,
-                    context=" after rejoin restart",
-                )
-            if args.client_log.is_file():
-                try:
-                    args.client_log.write_text("", encoding="utf-8")
-                except OSError:
-                    pass
+                if wait_file_contains(server_log, "tick=20Hz", timeout=60):
+                    log("zdtd ready after rejoin restart (tick=20Hz)")
+                else:
+                    warn("no tick=20Hz after rejoin restart; proceeding")
+            truncate_file(args.client_log, "client log")
+            # Fresh readers + fresh counter pair for the verify generation: the
+            # old log's barrier lines were already serviced (or deliberately
+            # dropped with the setup client) and must neither re-fire nor leak
+            # into the final parsed report, nor leave fired counts that would
+            # swallow the first verify-generation emission of the same name.
+            client_tail = LogTail(args.client_log)
+            client_scan = ClientLogScan()
+            barrier_counts, barrier_seen = new_barrier_tables()
             client_proc = start_client(
                 args.port, args.suite, client_launch_log, extra_env=client_extra_env
             )
             ready_seen = False
             rejoin_teleport_done = args.rejoin_teleport is None
-            deadline = time.time() + min(args.timeout, 400)
+            deadline = time.monotonic() + min(args.timeout, 400)
 
         # Always defined so timeout / missing client logs cannot UnboundLocalError.
-        parsed: dict = {}
         peer_parsed: dict = {}
         primary_done_logged = False
 
         def read_peer_results() -> dict:
-            if peer_client_log is None or not peer_client_log.is_file():
+            if peer_tail is None:
                 return {}
-            try:
-                return parse_client_log(peer_client_log.read_text(errors="replace"))
-            except OSError:
-                return {}
+            # Drain first so callers between poll ticks still see fresh bytes.
+            pump_log_tail(peer_tail, peer_scan)
+            return peer_scan.result()
 
         def peer_suite_done() -> bool:
             return not peer_client_suite or peer_parsed.get("done") is not None
 
-        # Incremental tails: process only appended complete lines each poll so
-        # scan cost tracks new data, not total log size (logs grow to tens of
-        # MB over soak runs and this host shares CPU with the game under test).
-        client_tail = LogTail(args.client_log)
-        peer_tail = LogTail(peer_client_log) if peer_client_log is not None else None
-
-        # Host fixture actions; each runs on one connected telnet per barrier
-        # edge (see run_barrier).
-        def spawn_zombie(tn: TelnetAdmin) -> None:
-            n = tn.spawn_near_players("zombieBoe", per=1)
-            if n == 0:
-                time.sleep(1.0)
-                tn.spawn_near_players("zombieBoe", per=1)
-
-        def kill_player(tn: TelnetAdmin) -> None:
-            # Kill the human player entity for death-screen case (not AI).
-            out = tn.exec("listplayers")
-            pids = [
-                int(x)
-                for x in re.findall(r"id\s*=\s*(\d+)", out, flags=re.IGNORECASE)
-            ]
-            for pid in pids[:1]:
-                r = tn.exec(f"kill {pid}")
-                log(f"telnet kill_player {pid} → {r[:80]!r}")
-
-        def set_bloodmoon_night(tn: TelnetAdmin) -> None:
-            # Day1 22:00 only (not day-7 BM horde).
-            r = tn.exec("settime 22000")
-            log(f"telnet settime 22000 → {r[:120]!r}")
-
-        def restore_day(tn: TelnetAdmin) -> None:
-            # Morning restore; always last after any night set in this poll.
-            r = tn.exec("settime 8000")
-            log(f"telnet settime 8000 (day) → {r[:120]!r}")
-            # Clear AI again after night so leftovers do not down the player.
-            tn.clear_ai()
-
-        def spawn_vehicle(tn: TelnetAdmin) -> None:
-            # Same path as zombies: spawnentity <playerId> <class>
-            n = tn.spawn_near_players("vehicleBicycle", per=1)
-            if n == 0:
-                for cmd in (
-                    "spawnentityat vehicleBicycle 520 62 950",
-                    "se vehicleBicycle",
-                ):
-                    r = tn.exec(cmd)
-                    log(f"telnet vehicle {cmd} → {r[:80]!r}")
-            else:
-                log(f"telnet spawn vehicle near players units~={n}")
-
-        def spawn_trader(tn: TelnetAdmin) -> None:
-            n = tn.spawn_near_players("npcTraderJoel", per=1)
-            if n == 0:
-                n = tn.spawn_near_players("npcTraderBob", per=1)
-            log(f"telnet spawn trader near players units~={n}")
-
-        def teleport_to_pad(tn: TelnetAdmin) -> bool:
-            return tn.teleport_players_to(*PERSIST_PAD_POS) > 0
-
-        while time.time() < deadline:
-            chunk = client_tail.read_new()
+        while time.monotonic() < deadline:
+            reap_finished_helpers()
+            chunk = pump_log_tail(client_tail, client_scan)
+            peer_chunk = (
+                pump_log_tail(peer_tail, peer_scan) if peer_tail is not None else ""
+            )
             if chunk:
                 # Progress crumbs for long joins
-                now = time.time()
+                now = time.monotonic()
                 if now - last_progress > 8:
                     last_progress = now
                     crumbs = [
                         ln
                         for ln in chunk.splitlines()
-                        if "[7dtd-playtest]" in ln or "[zdtd-connect]" in ln
+                        if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
                     ]
                     if crumbs:
                         log(f"progress: {crumbs[-1][-160:]}")
+                add_barrier_hits(barrier_seen, chunk)
 
                 if not ready_seen and "ready player=" in chunk:
                     ready_seen = True
@@ -1740,6 +2048,8 @@ def main(argv: list[str] | None = None) -> int:
                             # Do NOT enable dm/god here: finale player_death_screen needs
                             # a real kill, and god mode blocked telnet kill entirely.
                             tn.close()
+                        else:
+                            warn("post-ready clear_ai: telnet connect fail")
                         cleaned_ai = True
 
                 if ready_seen and not rejoin_teleport_done:
@@ -1753,39 +2063,178 @@ def main(argv: list[str] | None = None) -> int:
                         x, y, z = args.rejoin_teleport
                         log(f"provider rejoin teleport complete → {x:g} {y:g} {z:g}")
                     else:
-                        log("warn: provider rejoin teleport: no joined player yet; retry")
+                        warn("provider rejoin teleport: no joined player yet; retry")
 
                 if want_fixtures:
                     # spawn_zombie (may fire more than once: combat + sleeper_wake)
-                    run_barrier("spawn_zombie", spawn_zombie, chunk=chunk)
+                    while (
+                        barrier_counts["spawn_zombie"]
+                        < barrier_seen["spawn_zombie"]
+                    ):
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("spawn_zombie: telnet connect fail; retry next poll")
+                            break
+                        n = tn.spawn_near_players("zombieBoe")
+                        if n == 0:
+                            time.sleep(1.0)
+                            tn.spawn_near_players("zombieBoe")
+                        tn.close()
+                        barrier_counts["spawn_zombie"] += 1
 
-                    run_barrier(
-                        "kill_fixture_zombie",
-                        lambda tn: tn.kill_non_player_ai(),
-                        chunk=chunk,
-                    )
+                    while barrier_counts["bot_spawn"] < barrier_seen["bot_spawn"]:
+                        # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if needed
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("bot_spawn: telnet connect fail; retry next poll")
+                            break
+                        out = tn.exec("bot list")
+                        # Count bots from bot list output (lines with "Bot ")
+                        n = len(re.findall(r"Bot ", out))
+                        if n < 4:
+                            r = tn.exec("bot count 6")
+                            log(f"telnet bot count 6 -> {r[:120]!r}")
+                        tn.close()
+                        barrier_counts["bot_spawn"] += 1
 
-                    run_barrier("kill_player", kill_player, chunk=chunk)
+                    while (
+                        barrier_counts["bot_player_near"]
+                        < barrier_seen["bot_player_near"]
+                    ):
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("bot_player_near: telnet connect fail; retry next poll")
+                            break
+                        pids = tn.list_player_ids()
+                        if pids:
+                            ident = str(pids[0])
+                            r = tn.exec(f"bot player {ident} 1")
+                            log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
+                        else:
+                            r = tn.exec("bot spawn 1")
+                            log(f"telnet bot spawn 1 -> {r[:120]!r}")
+                        tn.close()
+                        barrier_counts["bot_player_near"] += 1
 
-                    # Cap night sets: re-barrier spam was flipping the world back
-                    # to 22:00 after settime_day and killing the player in economy
-                    # cases. Later emissions beyond the cap stay pending forever,
-                    # which is the intended swallow.
-                    run_barrier(
-                        "settime_bloodmoon", set_bloodmoon_night, chunk=chunk, cap=2
-                    )
+                    while (
+                        barrier_counts["kill_fixture_zombie"]
+                        < barrier_seen["kill_fixture_zombie"]
+                    ):
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("kill_fixture_zombie: telnet connect fail; retry next poll")
+                            break
+                        tn.kill_non_player_ai()
+                        tn.close()
+                        barrier_counts["kill_fixture_zombie"] += 1
 
-                    run_barrier("settime_day", restore_day, chunk=chunk)
-                    run_barrier("spawn_vehicle", spawn_vehicle, chunk=chunk)
-                    run_barrier("spawn_trader", spawn_trader, chunk=chunk)
+                    while barrier_counts["kill_player"] < barrier_seen["kill_player"]:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("kill_player: telnet connect fail; retry next poll")
+                            break
+                        # Kill the human player entity for death-screen case (not AI).
+                        out = tn.exec("listplayers")
+                        pids = [
+                            int(x)
+                            for x in re.findall(r"id\s*=\s*(\d+)", out, flags=re.IGNORECASE)
+                        ]
+                        for pid in pids[:1]:
+                            r = tn.exec(f"kill {pid}")
+                            log(f"telnet kill_player {pid} → {r[:80]!r}")
+                        tn.close()
+                        barrier_counts["kill_player"] += 1
+
+                    # Cap night sets: re-barrier spam was flipping the world back to 22:00
+                    # after settime_day and killing the player in economy cases.
+                    while (
+                        barrier_counts["settime_bloodmoon"] < SETTIME_BLOODMOON_MAX_FIRES
+                        and barrier_counts["settime_bloodmoon"]
+                        < barrier_seen["settime_bloodmoon"]
+                    ):
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("settime_bloodmoon: telnet connect fail; retry next poll")
+                            break
+                        # Day1 22:00 only (not day-7 BM horde).
+                        r = tn.exec("settime 22000")
+                        log(f"telnet settime 22000 → {r[:120]!r}")
+                        tn.close()
+                        barrier_counts["settime_bloodmoon"] += 1
+                    if (
+                        barrier_counts["settime_bloodmoon"] >= SETTIME_BLOODMOON_MAX_FIRES
+                        and barrier_seen["settime_bloodmoon"]
+                        > barrier_counts["settime_bloodmoon"]
+                    ):
+                        # Cap reached: extras could never fire, so swallow them
+                        # here. A connect failure must keep retrying instead.
+                        barrier_counts["settime_bloodmoon"] = barrier_seen[
+                            "settime_bloodmoon"
+                        ]
+
+                    while barrier_counts["settime_day"] < barrier_seen["settime_day"]:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("settime_day: telnet connect fail; retry next poll")
+                            break
+                        # Morning restore; always last after any night set in this poll.
+                        r = tn.exec("settime 8000")
+                        log(f"telnet settime 8000 (day) → {r[:120]!r}")
+                        # Clear AI again after night so leftovers do not down the player.
+                        tn.clear_ai()
+                        tn.close()
+                        barrier_counts["settime_day"] += 1
+
+                    while barrier_counts["spawn_vehicle"] < barrier_seen["spawn_vehicle"]:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("spawn_vehicle: telnet connect fail; retry next poll")
+                            break
+                        # Same path as zombies: spawnentity <playerId> <class>
+                        n = tn.spawn_near_players("vehicleBicycle")
+                        if n == 0:
+                            for cmd in (
+                                f"spawnentityat vehicleBicycle {PERSIST_PAD_COORDS}",
+                                "se vehicleBicycle",
+                            ):
+                                r = tn.exec(cmd)
+                                log(f"telnet vehicle {cmd} → {r[:80]!r}")
+                        else:
+                            log(f"telnet spawn vehicle near players units~={n}")
+                        tn.close()
+                        barrier_counts["spawn_vehicle"] += 1
+
+                    while barrier_counts["spawn_trader"] < barrier_seen["spawn_trader"]:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if not tn.connect():
+                            warn("spawn_trader: telnet connect fail; retry next poll")
+                            break
+                        n = tn.spawn_near_players("npcTraderJoel")
+                        if n == 0:
+                            n = tn.spawn_near_players("npcTraderBob")
+                        log(f"telnet spawn trader near players units~={n}")
+                        tn.close()
+                        barrier_counts["spawn_trader"] += 1
 
                 # Multi-peer / chat / APM barriers (stock or zdtd).
-                led.observe(chunk, "spawn_loadgen_peer")
-                while led.pending("spawn_loadgen_peer"):
+                while (
+                    barrier_counts["spawn_loadgen_peer"]
+                    < barrier_seen["spawn_loadgen_peer"]
+                ):
                     if loadgen_proc is not None and loadgen_proc.poll() is None:
                         # Already running; consume this edge without restart.
-                        led.mark_fired("spawn_loadgen_peer")
+                        barrier_counts["spawn_loadgen_peer"] += 1
                         continue
+                    if loadgen_proc is not None:
+                        # Prior instance already exited: release its log handle
+                        # before rebinding instead of waiting on GC.
+                        fh = getattr(loadgen_proc, "_log_fh", None)
+                        try:
+                            if fh is not None:
+                                fh.close()
+                        except OSError:
+                            pass
+                        loadgen_proc = None
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
                         count=1,
@@ -1793,12 +2242,14 @@ def main(argv: list[str] | None = None) -> int:
                         log_path=args.logdir / "loadgen_peer.log",
                     )
                     if loadgen_proc is None:
-                        log("warn: loadgen peer start failed; will retry next poll")
+                        warn("loadgen peer start failed; will retry next poll")
                         break
-                    led.mark_fired("spawn_loadgen_peer")
+                    barrier_counts["spawn_loadgen_peer"] += 1
 
-                led.observe(chunk, "spawn_loadgen_bots")
-                while led.pending("spawn_loadgen_bots"):
+                while (
+                    barrier_counts["spawn_loadgen_bots"]
+                    < barrier_seen["spawn_loadgen_bots"]
+                ):
                     stop_proc(loadgen_proc)
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
@@ -1807,9 +2258,9 @@ def main(argv: list[str] | None = None) -> int:
                         log_path=args.logdir / "loadgen_bots.log",
                     )
                     if loadgen_proc is None:
-                        log("warn: loadgen bots start failed; will retry next poll")
+                        warn("loadgen bots start failed; will retry next poll")
                         break
-                    led.mark_fired("spawn_loadgen_bots")
+                    barrier_counts["spawn_loadgen_bots"] += 1
 
                 for full in barrier_hits_prefix(chunk, "chat_echo:"):
                     # Fire once per unique token name (only after successful telnet say).
@@ -1820,19 +2271,61 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     if not tn.connect():
-                        log(f"warn: chat_echo:{token} telnet connect fail; retry")
+                        warn(f"chat_echo:{token} telnet connect fail; retry")
                         continue
                     for cmd in (f"say {token}", f'say "{token}"'):
                         r = tn.exec(cmd)
                         log(f"telnet {cmd} → {r[:100]!r}")
                     tn.close()
                     chat_tokens_fired.add(token)
-                    led.mark_fired("chat_echo")
+                    barrier_counts["chat_echo"] += 1
 
-                run_barrier("teleport_persist_pad", teleport_to_pad, chunk=chunk)
+                # spawn_vehicle:<entityClass>: one host-owned vehicle of that
+                # class per barrier line (a provider case that needs, say, a
+                # gyrocopter rather than the bare barrier's bicycle). A vehicle
+                # the client creates itself is never known to the dedicated
+                # server: every position update for it is rejected as an
+                # invalid entityId and it cannot fly, so providers must ask the
+                # host for one the same way the stock vehicle cases do.
+                for full in barrier_hits_prefix(chunk, "spawn_vehicle:"):
+                    cls = full.split(":", 1)[-1].strip()
+                    if cls:
+                        vehicle_seen[cls] = vehicle_seen.get(cls, 0) + 1
+                for cls, seen in vehicle_seen.items():
+                    while vehicle_spawns_fired.get(cls, 0) < seen:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if tn.connect():
+                            n = tn.spawn_near_players(cls)
+                            if n == 0:
+                                r = tn.exec(f"spawnentityat {cls} {PERSIST_PAD_COORDS}")
+                                log(f"telnet vehicle spawnentityat {cls} → {r[:80]!r}")
+                            else:
+                                log(f"telnet spawn vehicle {cls} near players units~={n}")
+                            tn.close()
+                        else:
+                            warn(f"spawn_vehicle:{cls} telnet connect fail; retry")
+                            break
+                        vehicle_spawns_fired[cls] = vehicle_spawns_fired.get(cls, 0) + 1
 
-                led.observe(chunk, "apm_dump")
-                while led.pending("apm_dump"):
+                while (
+                    barrier_counts["teleport_persist_pad"]
+                    < barrier_seen["teleport_persist_pad"]
+                ):
+                    tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                    n = 0
+                    if tn.connect():
+                        n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
+                        if n == 0:
+                            warn("teleport_persist_pad: no player ids yet; retry")
+                            tn.close()
+                            break
+                        tn.close()
+                    else:
+                        warn("teleport_persist_pad: telnet connect fail; retry")
+                        break
+                    barrier_counts["teleport_persist_pad"] += 1
+
+                while barrier_counts["apm_dump"] < barrier_seen["apm_dump"]:
                     ok = write_zdtd_apm_dump(
                         args.zdtd,
                         args.world,
@@ -1842,45 +2335,25 @@ def main(argv: list[str] | None = None) -> int:
                         run_id=apm_run_id,
                     )
                     if not ok:
-                        log("warn: apm dump write failed; retry next poll")
+                        warn("apm dump write failed; retry next poll")
                         break
-                    led.mark_fired("apm_dump")
+                    barrier_counts["apm_dump"] += 1
 
-                if "DONE" in chunk and "[7dtd-playtest]" in chunk:
-                    parsed = parse_client_log(client_tail.read_all())
-                    if parsed.get("done") is not None:
-                        if not primary_done_logged:
-                            primary_done_logged = True
-                            log("saw DONE in primary client log")
-                        peer_parsed = read_peer_results()
-                        if peer_suite_done():
-                            log("saw DONE in every scenario client log")
-                            break
+                parsed = client_scan.result()
+                if parsed.get("done") is not None:
+                    if not primary_done_logged:
+                        primary_done_logged = True
+                        log("saw DONE in primary client log")
+                    peer_parsed = read_peer_results()
+                    if peer_suite_done():
+                        log("saw DONE in every scenario client log")
+                        break
 
-            # Fold only newly appended peer lines into the accumulator; a
-            # whole-file re-parse per poll is quadratic over soak logs. A final
-            # full parse below refreshes results/summary for the report.
-            peer_stream_needed = not peer_ready_seen or (
-                peer_client_suite and peer_parsed.get("done") is None
-            )
-            if peer_tail is not None and peer_stream_needed:
-                pchunk = peer_tail.read_new()
-                if pchunk:
-                    if "ready player=" in pchunk:
-                        peer_ready_seen = True
-                        log("peer client playtest ready")
-                    if peer_client_suite and peer_parsed.get("done") is None:
-                        peer_parsed = merge_parsed(
-                            peer_parsed, parse_client_log(pchunk)
-                        )
-                # Late peer completion after primary DONE must still exit the loop.
-                if (
-                    peer_client_suite
-                    and parsed.get("done") is not None
-                    and peer_suite_done()
-                ):
-                    log("saw DONE in every scenario client log")
-                    break
+            if not peer_ready_seen and peer_chunk and "ready player=" in peer_chunk:
+                peer_ready_seen = True
+                log("peer client playtest ready")
+            if peer_client_suite:
+                peer_parsed = read_peer_results()
 
             if (
                 ready_seen
@@ -1898,21 +2371,23 @@ def main(argv: list[str] | None = None) -> int:
                     x, y, z = args.peer_client_teleport
                     log(f"stock peer teleport complete players={moved} → {x:g} {y:g} {z:g}")
                 else:
-                    log("warn: stock peer teleport: waiting for both joined players")
+                    warn("stock peer teleport: waiting for both joined players")
 
             if client_proc is not None and client_proc.poll() is not None:
                 time.sleep(2)
-                parsed = parse_client_log(client_tail.read_all())
+                pump_log_tail(client_tail, client_scan)
+                parsed = client_scan.result()
                 peer_parsed = read_peer_results()
                 if parsed.get("done") is not None and peer_suite_done():
                     break
             time.sleep(0.5)
         else:
-            log(f"timeout after {args.timeout}s waiting for DONE")
-            parsed = parse_client_log(client_tail.read_all())
+            log(f"timeout after {time.monotonic() - t0:.0f}s waiting for DONE")
 
-        if not parsed:
-            parsed = parse_client_log(client_tail.read_all())
+        # Final parse from everything drained so far, plus any bytes appended
+        # between the last poll and here.
+        pump_log_tail(client_tail, client_scan)
+        parsed = client_scan.result()
         if peer_client_suite:
             peer_parsed = read_peer_results()
 
@@ -1925,16 +2400,24 @@ def main(argv: list[str] | None = None) -> int:
         peer_results = peer_parsed.get("results") or []
         peer_nre = peer_parsed.get("nre_like") or []
         combined_results = results + peer_results
-        wall_s = time.time() - t0
+        wall_s = time.monotonic() - t0
 
-        # Slowest cases from results if ms present in JSON events
+        # Slowest cases from results if ms present in JSON events. Event lines
+        # come from the client log, so ms can be garbage or non-finite; either
+        # would raise here (losing the whole report) or poison sort/JSON.
         slowest = []
         for ev in parsed.get("json_events") or []:
             if ev.get("t") == "result" and ev.get("status") in ("pass", "fail"):
+                try:
+                    ms = float(ev.get("ms") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(ms):
+                    continue
                 slowest.append(
                     (
                         f"{ev.get('suite')}/{ev.get('case')}",
-                        float(ev.get("ms") or 0),
+                        ms,
                     )
                 )
         slowest.sort(key=lambda x: -x[1])
@@ -1957,6 +2440,8 @@ def main(argv: list[str] | None = None) -> int:
             "nre_like_sample": nre[:10],
             "peer_nre_like_count": len(peer_nre),
             "peer_nre_like_sample": peer_nre[:10],
+            "malformed_client_events": parsed.get("malformed_events", 0),
+            "peer_malformed_client_events": peer_parsed.get("malformed_events", 0),
             "client_log": str(args.client_log),
             "peer_client_log": str(peer_client_log) if peer_client_log else None,
             "peer_client_suite": peer_client_suite or None,
@@ -1964,23 +2449,25 @@ def main(argv: list[str] | None = None) -> int:
             "unity_log": str(unity_log) if unity_log else None,
             "timeout_sec": args.timeout,
             "wall_sec": round(wall_s, 1),
+            "ran_epoch": int(time.time()),
             "fixtures": {
-                "zombie_spawn_attempted": led.fired.get("spawn_zombie", 0) > 0,
-                "kill_fixture_zombie_attempted": led.fired.get("kill_fixture_zombie", 0) > 0,
-                # fired = host actions completed; seen = barrier emissions parsed.
-                # A gap (seen > fired) means telnet actions kept failing.
-                "barrier_counts": dict(led.fired),
-                "barrier_seen": dict(led.seen),
+                "zombie_spawn_attempted": barrier_counts.get("spawn_zombie", 0) > 0,
+                "kill_fixture_attempted": barrier_counts.get("kill_fixture_zombie", 0) > 0,
+                "barrier_counts": dict(barrier_counts),
                 "fresh_save": bool(args.fresh_save),
             },
         }
         write_report(report_path, payload)
         junit_path = args.junit or (args.logdir / f"junit-{int(time.time())}.xml")
-        write_junit(junit_path, args.suite, combined_results, summary)
+        write_junit(junit_path, args.suite, combined_results)
+        # A user-provided --junit path outside logdir is deliberate evidence
+        # placement and is never pruned; only the timestamped logdir defaults
+        # are bounded.
+        prune_run_artifacts(args.logdir)
 
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"
-            log(f"FAIL harness: no DONE from {missing} playtest mod")
+            err(f"FAIL harness: no DONE from {missing} playtest mod")
             if summary:
                 log(f"partial summary={summary}")
             for r in results:
@@ -1988,10 +2475,10 @@ def main(argv: list[str] | None = None) -> int:
             for r in peer_results:
                 log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
             if args.client_log.is_file():
-                cl = args.client_log.read_text(errors="replace")
+                cl = args.client_log.read_text(encoding="utf-8", errors="replace")
                 for key in (
                     "7dtd-playtest",
-                    "zdtd-connect",
+                    "7dtd-fastconnect",
                     "InitMod",
                     "Connect",
                     "ERROR",
@@ -1999,7 +2486,7 @@ def main(argv: list[str] | None = None) -> int:
                 ):
                     hits = [ln for ln in cl.splitlines() if key in ln]
                     if hits:
-                        log(f"client log '{key}' ({len(hits)}): {hits[-3:]}")
+                        err(f"client log '{key}' ({len(hits)}): {hits[-3:]}")
             exit_code = 2
         else:
             if summary:
@@ -2024,6 +2511,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"primary={len(nre)} peer={len(peer_nre)} "
                     "NRE/underrun-like client lines (see report)"
                 )
+            malformed = int(parsed.get("malformed_events") or 0) + int(
+                peer_parsed.get("malformed_events") or 0
+            )
+            if malformed:
+                warn(
+                    f"{malformed} client event line(s) looked like JSON but did "
+                    "not parse; skipped (count in report)"
+                )
             fails = int(summary["fail"]) if summary else None
             if fails is None and done.get("exit_hint") is not None:
                 fails = int(done["exit_hint"])
@@ -2042,30 +2537,42 @@ def main(argv: list[str] | None = None) -> int:
             lock_heartbeat.stop()
             lock_heartbeat = None
         if lock_held:
+            # client/server/peer/loadgen are pre-initialized to None before the
+            # try block, so the finally can always reference them directly.
             stop_proc(client_proc)
             stop_proc(peer_client_proc)
             stop_proc(loadgen_proc)
             stop_proc(server_proc)
-            # Soft clean after: leave Steam alone. --no-server runs must not
-            # kill the external dedicated/zdtd they were told to attach to.
-            teardown = CLIENT_KILL_PATTERNS + [LOADGEN_KILL_PATTERN]
-            if not args.no_server:
-                teardown = [
-                    DEDI_KILL_PATTERN,
-                    ZDTD_KILL_PATTERN,
-                ] + teardown
+            # Soft clean after: leave Steam alone
             pkill_patterns(
-                teardown,
+                [
+                    r"7DaysToDieServer\.x86_64",
+                    r"[/]7DaysToDie\.exe",
+                    r"wine64-preloader.*7DaysToDie",
+                    r"zig-out/bin/zdtd",
+                    r"7dtd-loadgen",
+                ],
                 sig="-9",
             )
             try:
                 playtest_lock.release(lock_session, path=lock_path)
                 log(f"playtest lock released session={lock_session}")
             except playtest_lock.PlaytestLockError as ex:
-                log(f"warn: playtest lock release refused: {ex}")
+                warn(f"playtest lock release refused: {ex}")
             except OSError as ex:
-                log(f"warn: playtest lock release failed: {ex}")
+                warn(f"playtest lock release failed: {ex}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception:
+        # main() documents 2 = harness error. An unhandled crash must not fall
+        # through to Python's default exit code 1, which means playtest
+        # assertion failures. The finally inside main() has already stopped
+        # runtimes and released the lock by the time we get here.
+        err("harness crashed: unhandled exception (exit 2)")
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(2)

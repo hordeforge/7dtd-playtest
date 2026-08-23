@@ -1,0 +1,928 @@
+{
+ "cases": [
+  {
+   "case": "benchmark/bag_present",
+   "stock": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/biome_id",
+   "stock": {
+    "detail": "biome=3 name=pine_forest",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "biome=3 name=pine_forest",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/block_damage_melee",
+   "stock": {
+    "detail": "type0=20304 now=0 dmg0=0 dmg=0 pulses=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=3 pulses=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/block_sample_ring",
+   "stock": {
+    "detail": "solid=25 air=0 distinct=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "solid=25 air=0 distinct=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/buffs",
+   "stock": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/cgo_ready",
+   "stock": {
+    "detail": "cgo=64 need=26 fixedSize=False",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "cgo=81 need=39 fixedSize=False",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/character_open",
+   "stock": {
+    "detail": "opened character",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened character",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/chunk_under_player",
+   "stock": {
+    "detail": "chunk_has=True block=0 at 922, 61, 890",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "chunk_has=True block=0 at -269, 61, 460",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/craft_open",
+   "stock": {
+    "detail": "opened crafting (verified)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened crafting (verified)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/creative_menu",
+   "stock": {
+    "detail": "opened creative",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened creative",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/day_clock",
+   "stock": {
+    "detail": "day=1 07:02 raw=7042",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "day=1 08:22 raw=8382",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/deco_trees",
+   "stock": {
+    "detail": "plantish=13 solidSample=244",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "plantish=9 solidSample=179",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/dig_confirm",
+   "stock": {
+    "detail": "was=17 now=0 at 922, 62, 891",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "was=7 now=0 at -269, 62, 461",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/entities_in_radius",
+   "stock": {
+    "detail": "total=3 players=1 alive_other=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "total=4 players=1 alive_other=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/ground",
+   "stock": {
+    "detail": "block=7 at 919, 60, 878",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "block=7 at -273, 60, 449",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/held_slot_report",
+   "stock": {
+    "detail": "slot=0 type=65537 quality=4",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "slot=0 type=65537 quality=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/inventory",
+   "stock": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/inventory_open",
+   "stock": {
+    "detail": "opened backpack (verified)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened backpack (verified)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/join_ready",
+   "stock": {
+    "detail": "pos=(919.00, 61.08, 878.00) hp=99 id=177 spawned=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pos=(-273.00, 61.08, 449.00) hp=100 id=115 spawned=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/jump_motor",
+   "stock": {
+    "detail": "y0=60.51 peak=62.53 rise=2.02",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "y0=61.08 peak=63.12 rise=2.04",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/look",
+   "stock": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/look_pitch",
+   "stock": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/look_yaw_sweep",
+   "stock": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/map_open",
+   "stock": {
+    "detail": "opened map",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened map",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/place_confirm",
+   "stock": {
+    "detail": "want=17 now=17 at 922, 62, 891",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "want=7 now=7 at -269, 62, 461",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/poi_textures_non_terrain",
+   "stock": {
+    "detail": "maxBlockType=24868 solid=4 distinct=4",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "maxBlockType=24818 solid=0 distinct=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/quest_log_open",
+   "stock": {
+    "detail": "opened quests",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened quests",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/quests_journal",
+   "stock": {
+    "detail": "journal_quests=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "journal_quests=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/skills_open",
+   "stock": {
+    "detail": "opened skills",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened skills",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/sneak_motor",
+   "stock": {
+    "detail": "horiz=3.17 hopMax=0.09 motionTicks=147",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=3.16 hopMax=0.03 motionTicks=218",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/sprint_motor",
+   "stock": {
+    "detail": "horiz=9.20 m/s~=4.60 hopMax=0.16 motionTicks=157",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=9.07 m/s~=4.53 hopMax=0.06 motionTicks=237",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/stamina_drains_sprint",
+   "stock": {
+    "detail": "stam0=100.0 min=98.1 drain=1.9",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "stam0=100.0 min=98.2 drain=1.8",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/stats",
+   "stock": {
+    "detail": "hp=99/99 stam=99",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "hp=100/100 stam=99",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/ui_close_all",
+   "stock": {
+    "detail": "close_all requested",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "close_all requested",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/walk_lateral",
+   "stock": {
+    "detail": "horiz=1.52 dx=1.52 dz=0.00 hopMax=0.07 motionTicks=24",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.52 dx=1.52 dz=0.00 hopMax=0.03 motionTicks=56",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/walk_motor",
+   "stock": {
+    "detail": "horiz=1.51 hopMax=0.07 motionTicks=37",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.50 hopMax=0.05 motionTicks=46",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/walk_ring",
+   "stock": {
+    "detail": "path~=12.90 motionTicks=299 legs=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "path~=12.68 motionTicks=398 legs=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/water_plane",
+   "stock": {
+    "detail": "water=0 mass=True type=0 isWater=False sent=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "water=0 mass=True type=0 isWater=False sent=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/weather_array",
+   "stock": {
+    "detail": "global= biome=3 bw=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "global= biome=3 bw=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/world_time",
+   "stock": {
+    "detail": "worldTime=7177",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "worldTime=8538",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark/world_time_advances",
+   "stock": {
+    "detail": "t0=7181 now=7182 delta=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "t0=8540 now=8541 delta=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/bag_present",
+   "stock": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/biome_id",
+   "stock": {
+    "detail": "biome=3 name=pine_forest",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "biome=3 name=pine_forest",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/block_damage_melee",
+   "stock": {
+    "detail": "type0=20304 now=0 dmg0=0 dmg=0 pulses=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=3 pulses=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/block_sample_ring",
+   "stock": {
+    "detail": "solid=25 air=0 distinct=4",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "solid=25 air=0 distinct=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/buffs",
+   "stock": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/cgo_ready",
+   "stock": {
+    "detail": "cgo=72 need=26 fixedSize=False",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "cgo=90 need=39 fixedSize=False",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/character_open",
+   "stock": {
+    "detail": "opened character",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened character",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/chunk_under_player",
+   "stock": {
+    "detail": "chunk_has=True block=24684 at 926, 61, 901",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "chunk_has=True block=0 at -265, 61, 472",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/craft_open",
+   "stock": {
+    "detail": "opened crafting",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened crafting",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/creative_menu",
+   "stock": {
+    "detail": "opened creative",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened creative",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/day_clock",
+   "stock": {
+    "detail": "day=1 07:14 raw=7247",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "day=1 08:36 raw=8614",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/deco_trees",
+   "stock": {
+    "detail": "plantish=66 solidSample=434",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "plantish=14 solidSample=184",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/dig_confirm",
+   "stock": {
+    "detail": "was=7 now=0 at 926, 62, 902",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "was=7 now=0 at -265, 62, 473",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/entities_in_radius",
+   "stock": {
+    "detail": "total=3 players=1 alive_other=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "total=4 players=1 alive_other=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/ground",
+   "stock": {
+    "detail": "block=17 at 922, 60, 890",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "block=7 at -269, 60, 460",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/held_slot_report",
+   "stock": {
+    "detail": "slot=0 type=65537 quality=4",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "slot=0 type=65537 quality=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/inventory",
+   "stock": {
+    "detail": "holding_type=65537",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "holding_type=65537",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/inventory_open",
+   "stock": {
+    "detail": "opened backpack (verified)",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened backpack (verified)",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/join_ready",
+   "stock": {
+    "detail": "pos=(922.90, 61.08, 890.27) hp=100 id=177 spawned=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pos=(-268.42, 61.08, 460.31) hp=100 id=115 spawned=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/jump_motor",
+   "stock": {
+    "detail": "y0=61.08 peak=63.12 rise=2.04",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "y0=61.08 peak=63.11 rise=2.03",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/look",
+   "stock": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/look_pitch",
+   "stock": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/look_yaw_sweep",
+   "stock": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/map_open",
+   "stock": {
+    "detail": "opened map",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened map",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/place_confirm",
+   "stock": {
+    "detail": "want=7 now=7 at 926, 62, 902",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "want=7 now=7 at -265, 62, 473",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/poi_textures_non_terrain",
+   "stock": {
+    "detail": "maxBlockType=24868 solid=18 distinct=7",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "maxBlockType=24818 solid=0 distinct=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/quest_log_open",
+   "stock": {
+    "detail": "opened quests",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened quests",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/quests_journal",
+   "stock": {
+    "detail": "journal_quests=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "journal_quests=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/skills_open",
+   "stock": {
+    "detail": "opened skills",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "opened skills",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/sneak_motor",
+   "stock": {
+    "detail": "horiz=3.17 hopMax=0.08 motionTicks=147",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=3.16 hopMax=0.03 motionTicks=192",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/sprint_motor",
+   "stock": {
+    "detail": "horiz=9.09 m/s~=4.54 hopMax=0.13 motionTicks=149",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=9.07 m/s~=4.54 hopMax=0.08 motionTicks=191",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/stamina_drains_sprint",
+   "stock": {
+    "detail": "stam0=100.0 min=98.2 drain=1.8",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "stam0=100.0 min=98.1 drain=1.9",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/stats",
+   "stock": {
+    "detail": "hp=100/100 stam=100",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "hp=84/100 stam=100",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/ui_close_all",
+   "stock": {
+    "detail": "close_all requested",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "close_all requested",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/walk_lateral",
+   "stock": {
+    "detail": "horiz=1.52 dx=1.52 dz=0.00 hopMax=0.05 motionTicks=42",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.51 dx=1.51 dz=0.00 hopMax=0.04 motionTicks=44",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/walk_motor",
+   "stock": {
+    "detail": "horiz=1.51 hopMax=0.15 motionTicks=29",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.53 hopMax=0.04 motionTicks=48",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/walk_ring",
+   "stock": {
+    "detail": "path~=13.34 motionTicks=322 legs=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "path~=13.53 motionTicks=402 legs=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/water_plane",
+   "stock": {
+    "detail": "water=2 mass=True type=24684 isWater=False sent=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "water=0 mass=True type=0 isWater=False sent=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/weather_array",
+   "stock": {
+    "detail": "global= biome=3 bw=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "global= biome=3 bw=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/world_time",
+   "stock": {
+    "detail": "worldTime=7382",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "worldTime=8769",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "benchmark@1/world_time_advances",
+   "stock": {
+    "detail": "t0=7385 now=7386 delta=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "t0=8773 now=8774 delta=1",
+    "status": "PASS"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [],
+ "stock": {
+  "nreLike": 0,
+  "server": "stock",
+  "summary": {
+   "fail": 0,
+   "pass": 82,
+   "skip": 0
+  },
+  "wall": 157.1
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "server": "zdtd",
+  "summary": {
+   "fail": 0,
+   "pass": 82,
+   "skip": 0
+  },
+  "wall": 128.0
+ }
+}

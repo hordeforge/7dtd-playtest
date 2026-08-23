@@ -1,7 +1,12 @@
 .venv/
 __pycache__/
+.pytest_cache/
 dist/
 Source/PlayTestMod/bin/
 Source/PlayTestMod/obj/
+
+# playtest-compare run dirs: keep the reports, ignore the run state.
+workspace/comparison-playtest/*/stock/
+workspace/comparison-playtest/*/zdtd/
 .local/
 *.flock

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 
@@ -43,6 +44,7 @@ namespace ZdtdPlaytest
                         break;
                     case "full":
                     case "all":
+                    case "live":
                         // persist needs multi-phase orch (SUITE=persist only); mp needs loadgen
                         // barriers (use SUITE=mp or residual). Do not expand them into full.
                         AddUnique(list,
@@ -54,21 +56,13 @@ namespace ZdtdPlaytest
                         // Fast PR gate: live-only smoke+core (no deferred floods)
                         AddUnique(list, "smoke", "core");
                         break;
-                    case "live":
-                        AddUnique(list,
-                            "smoke", "core", "world", "ui", "combat", "economy",
-                            "quest", "vehicle", "power", "finale", "soak");
-                        break;
                     case "residual":
+                    case "residual_light": // explicit synonym
                         // Lightweight in-client residual probe only (mp + short soak).
                         // The Make target playtest-residual is different: it runs
                         // separate host orch for persist, mp, apm, and soak_long
-                        // (multi-phase / long wall-clock). Do not expand those here —
+                        // (multi-phase / long wall-clock). Do not expand those here:
                         // persist needs persist_setup host barriers; soak_long is ≥15m.
-                        AddUnique(list, "mp", "soak");
-                        break;
-                    case "residual_light":
-                        // Explicit synonym for residual (mp + short soak only).
                         AddUnique(list, "mp", "soak");
                         break;
                     case "persist":
@@ -107,24 +101,12 @@ namespace ZdtdPlaytest
             foreach (var name in SuiteNames)
                 sb.Append(name).Append(',');
             Report.Info(sb.ToString().TrimEnd(','));
-            // One line per case for host scrapers
+            // One line per case for host scrapers (built-in suites + external providers).
             var tmp = new List<CaseDef>();
-            foreach (var name in SuiteNames)
+            foreach (var name in SuiteNames.Concat(ScenarioProviders.SuiteIds()))
             {
                 tmp.Clear();
                 AppendSuite(tmp, name, 0);
-                foreach (var c in tmp)
-                {
-                    string st = c.Deferred ? "deferred" : "live";
-                    Report.Info("case " + c.Suite + "/" + c.Id + " status=" + st
-                        + " tags=" + string.Join("+", c.Tags ?? Array.Empty<string>())
-                        + (c.Deferred ? " reason=" + c.DeferReason : ""));
-                }
-            }
-            foreach (var name in ScenarioProviders.SuiteIds())
-            {
-                tmp.Clear();
-                ScenarioProviders.AppendSuite(tmp, name, 0);
                 foreach (var c in tmp)
                 {
                     string st = c.Deferred ? "deferred" : "live";
@@ -139,7 +121,7 @@ namespace ZdtdPlaytest
         {
             "smoke", "core", "world", "ui", "combat", "economy",
             "quest", "vehicle", "power", "finale", "persist", "persist_setup",
-            "mp", "soak", "soak_long", "apm", "benchmark",
+            "mp", "soak", "soak_long", "apm", "benchmark", "bot",
         };
 
         // Fixed Navezgane pad for multi-phase rejoin (same coords after restart).
@@ -149,11 +131,6 @@ namespace ZdtdPlaytest
         static readonly Vector3 PersistPlayerPos = new Vector3(520f, 62f, 950f);
         const string PersistItemName = "resourceScrapIron";
         static string _chatToken = "";
-
-        // Cardinal yaw table shared by look_yaw_sweep / walk_ring waits; the
-        // wait lambdas run every gmUpdate frame, so the table must not be
-        // re-allocated per tick.
-        static readonly float[] CardinalYaws = { 0f, 90f, 180f, 270f };
 
         public static void AppendSuite(List<CaseDef> q, string suite, int lap)
         {
@@ -176,15 +153,13 @@ namespace ZdtdPlaytest
                 case "soak": AddSoak(q, label); break;
                 case "soak_long": AddSoakLong(q, label); break;
                 case "apm": AddApm(q, label); break;
+                case "bot": AddBot(q, label); break;
                 case "benchmark":
                     // Timed attract path; outer loop multiplies by LAPS
-                    {
-                        string bl = "benchmark" + (lap > 0 ? "@" + lap : "");
-                        AddSmoke(q, bl);
-                        AddCore(q, bl);
-                        AddWorld(q, bl);
-                        AddUi(q, bl);
-                    }
+                    AddSmoke(q, label);
+                    AddCore(q, label);
+                    AddWorld(q, label);
+                    AddUi(q, label);
                     break;
                 default:
                     ScenarioProviders.AppendSuite(q, suite, lap);
@@ -204,6 +179,48 @@ namespace ZdtdPlaytest
         static CaseDef Defer(string suite, string id, string[] tags, string reason)
         {
             return CaseDef.Defer(suite, id, tags, reason);
+        }
+
+        // ── shared melee-fixture seeds / tool equips ─────────────────────
+
+        static readonly string[] SoftSeedBlocks =
+        {
+            "hayBaleSquare", "hayBaleRound", "cntTrashPile01", "cntTrashPile02",
+            "frameShapes", "woodShapes",
+        };
+
+        static readonly string[] BlockDamageTools =
+        {
+            "meleeToolRepairT0StoneAxe", "meleeToolShovelT0StoneShovel",
+            "meleeWpnBladeT0BoneKnife", "meleeToolRepairT1ClawHammer",
+        };
+
+        /// <summary>Soft vanilla block for damage fixtures; under-feet clone as fallback.</summary>
+        static BlockValue ResolveSoftSeed(EntityPlayerLocal p, World world, out string usedName)
+        {
+            foreach (var name in SoftSeedBlocks)
+            {
+                try
+                {
+                    var bv = Block.GetBlockValue(name, true);
+                    if (!bv.isair && bv.type != 0) { usedName = name; return bv; }
+                }
+                catch { /* */ }
+            }
+            usedName = "underFeet";
+            return Helpers.BlockUnderFeet(p, world);
+        }
+
+        /// <summary>Give + equip the first resolvable item name. Equipped name or "".</summary>
+        static string EquipFirstMatching(EntityPlayerLocal p, string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!Helpers.TryGetItem(name, out var iv)) continue;
+                if (!Helpers.TryGiveItem(p, new ItemStack(iv, 1))) continue;
+                if (Helpers.TryEquipItemType(p, iv.type) >= 0) return name;
+            }
+            return "";
         }
 
         // ── smoke ────────────────────────────────────────────────────────
@@ -304,12 +321,13 @@ namespace ZdtdPlaytest
                 ctx.Detail = "sweep start";
             }, wait: ctx =>
             {
+                float[] yaws = { 0f, 90f, 180f, 270f };
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 int want = Math.Min(3, (int)(elapsed / 0.35f));
                 if (want != ctx.IntA && want <= 3)
                 {
                     ctx.IntA = want;
-                    ctx.Player.SetRotation(new Vector3(0, CardinalYaws[want], 0));
+                    ctx.Player.SetRotation(new Vector3(0, yaws[want], 0));
                 }
                 ctx.Detail = "yaw_step=" + ctx.IntA;
                 return elapsed >= 1.5f;
@@ -372,17 +390,19 @@ namespace ZdtdPlaytest
                 ctx.IntB = 0; // motion ticks
                 ctx.FloatA = 0f; // path length approx
                 ctx.PlaceBlockType = 0; // last distance mm from leg start
-                LocomotionDrive.Start(1f, 0f, false, CardinalYaws[0]);
+                float[] yaws = { 0f, 90f, 180f, 270f };
+                LocomotionDrive.Start(1f, 0f, false, yaws[0]);
                 ctx.Detail = "leg=0 yaw=0";
             }, wait: ctx =>
             {
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 // ~1.0s per leg
                 int leg = Math.Min(3, (int)(elapsed / 1.0f));
+                float[] yaws = { 0f, 90f, 180f, 270f };
                 if (leg != ctx.IntA)
                 {
                     ctx.IntA = leg;
-                    LocomotionDrive.SetYaw(CardinalYaws[leg]);
+                    LocomotionDrive.SetYaw(yaws[leg]);
                     LocomotionDrive.SetDirection(1f, 0f, false);
                 }
                 else
@@ -393,7 +413,7 @@ namespace ZdtdPlaytest
                 var pos = ctx.Player.GetPosition();
                 float d = LocomotionDrive.HorizDist(pos, ctx.StartPos);
                 // Path length from successive samples (never reset baseline on leg change).
-                // Last sample stored as cm in WasBlockType (x) / PlaceBlockType (z).
+                // Last pos components live in WasBlockType / PlaceBlockType (cm).
                 float lastX = ctx.WasBlockType / 100f;
                 float lastZ = ctx.PlaceBlockType / 100f;
                 if (ctx.WasBlockType != 0 || ctx.PlaceBlockType != 0)
@@ -744,51 +764,11 @@ namespace ZdtdPlaytest
                 var origin = Helpers.FixtureSeedOrigin(ctx.Player, ctx.World);
                 // Eye-level-ish neighbor (not under feet).
                 ctx.TargetBlock = origin + new Vector3i(0, 1, 1);
-                // Prefer soft vanilla blocks.
-                BlockValue seed = BlockValue.Air;
-                string[] soft =
-                {
-                    "hayBaleSquare", "hayBaleRound", "cntTrashPile01", "cntTrashPile02",
-                    "frameShapes", "woodShapes",
-                };
-                string used = "";
-                foreach (var name in soft)
-                {
-                    try
-                    {
-                        var bv = Block.GetBlockValue(name, true);
-                        if (bv.isair || bv.type == 0) continue;
-                        seed = bv;
-                        used = name;
-                        break;
-                    }
-                    catch { /* */ }
-                }
-                if (seed.type == 0)
-                {
-                    // Fallback: clone non-air under feet (may be hard terrain).
-                    seed = Helpers.BlockUnderFeet(ctx.Player, ctx.World);
-                    used = "underFeet";
-                }
+                BlockValue seed = ResolveSoftSeed(ctx.Player, ctx.World, out string used);
                 ctx.PlaceBlockType = seed.type;
                 Helpers.SetBlockRpc(ctx.World, ctx.TargetBlock, seed);
                 // Equip stone axe / claw hammer / bone knife for block damage.
-                string[] tools =
-                {
-                    "meleeToolRepairT0StoneAxe", "meleeToolShovelT0StoneShovel",
-                    "meleeWpnBladeT0BoneKnife", "meleeToolRepairT1ClawHammer",
-                };
-                string tool = "";
-                foreach (var tname in tools)
-                {
-                    if (!Helpers.TryGetItem(tname, out var iv)) continue;
-                    if (!Helpers.TryGiveItem(ctx.Player, new ItemStack(iv, 1))) continue;
-                    if (Helpers.TryEquipItemType(ctx.Player, iv.type) >= 0)
-                    {
-                        tool = tname;
-                        break;
-                    }
-                }
+                string tool = EquipFirstMatching(ctx.Player, BlockDamageTools);
                 ctx.Detail = "seed=" + used + " type=" + ctx.PlaceBlockType
                     + " at " + ctx.TargetBlock + " tool=" + tool;
             }, wait: ctx =>
@@ -886,7 +866,8 @@ namespace ZdtdPlaytest
                     var inv = ctx.Player.inventory;
                     int slot = inv != null ? inv.holdingItemIdx : -1;
                     int type = inv != null ? inv.holdingItemItemValue.type : -1;
-                    ctx.Detail = "slot=" + slot + " type=" + type;
+                    int quality = inv != null ? inv.holdingItemItemValue.Quality : -1;
+                    ctx.Detail = "slot=" + slot + " type=" + type + " quality=" + quality;
                     ctx.PlaceBlockType = inv != null ? 1 : 0;
                 }
                 catch (Exception ex)
@@ -959,7 +940,6 @@ namespace ZdtdPlaytest
                 try
                 {
                     ulong t = ctx.World.worldTime;
-                    ctx.FloatA = t;
                     // day-ish: stock packs days in high bits; just ensure readable
                     ctx.Detail = "worldTime=" + t;
                     ctx.PlaceBlockType = 1;
@@ -1029,15 +1009,9 @@ namespace ZdtdPlaytest
                 // Chunk settle after tele.
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 if (elapsed < 1.2f) return false;
-                // Radius scan is O(radius^2 * height) block reads; resample at
-                // 2 Hz instead of every gmUpdate frame (FloatA holds last scan).
-                if (elapsed - ctx.FloatA >= 0.5f)
-                {
-                    ctx.FloatA = elapsed;
-                    var pos = ctx.Player.GetPosition();
-                    int m = Helpers.MaxBlockTypeInRadius(ctx.World, pos, 32);
-                    if (m > ctx.IntA) ctx.IntA = m;
-                }
+                var pos = ctx.Player.GetPosition();
+                int m = Helpers.MaxBlockTypeInRadius(ctx.World, pos, 32);
+                if (m > ctx.IntA) ctx.IntA = m;
                 ctx.Detail = "maxBlockType=" + ctx.IntA + " t=" + elapsed.ToString("0.0");
                 return ctx.IntA >= 256 || elapsed >= 4f;
             }, assert: ctx =>
@@ -1152,15 +1126,9 @@ namespace ZdtdPlaytest
                     string d;
                     Helpers.RequestWaterSet(ctx.Player, ctx.TargetBlock, out d);
                 }
-                // Radius walk is O(radius^2) block reads; resample at 2 Hz
-                // instead of every gmUpdate frame (FloatA holds last scan).
-                if (elapsed - ctx.FloatA >= 0.5f)
-                {
-                    ctx.FloatA = elapsed;
-                    int n = Helpers.CountWaterInRadius(ctx.World, ctx.Player.GetPosition(), 64);
-                    if (n > ctx.IntA) ctx.IntA = n;
-                }
+                int n = Helpers.CountWaterInRadius(ctx.World, ctx.Player.GetPosition(), 64);
                 bool mass = Helpers.CellHasWaterMass(ctx.World, ctx.TargetBlock);
+                if (n > ctx.IntA) ctx.IntA = n;
                 if (mass) ctx.IntA = Math.Max(ctx.IntA, 1);
                 ctx.Detail = "water=" + ctx.IntA + " mass=" + mass + " t=" + elapsed.ToString("0.0");
                 return ctx.IntA > 0 || mass || elapsed >= 5f;
@@ -1360,17 +1328,11 @@ namespace ZdtdPlaytest
                 ctx.FloatA = 0f; // lowest HP seen
                 ctx.PlaceBlockType = 0; // swing pulses
                 // Prefer a weapon over bare hands; keep standoff so zombie does not melt us.
-                string[] tools =
+                EquipFirstMatching(ctx.Player, new[]
                 {
                     "meleeToolRepairT0StoneAxe", "meleeWpnBladeT0BoneKnife",
                     "meleeToolShovelT0StoneShovel",
-                };
-                foreach (var tname in tools)
-                {
-                    if (!Helpers.TryGetItem(tname, out var iv)) continue;
-                    if (!Helpers.TryGiveItem(ctx.Player, new ItemStack(iv, 1))) continue;
-                    if (Helpers.TryEquipItemType(ctx.Player, iv.type) >= 0) break;
-                }
+                });
                 Helpers.FaceAndStandNear(ctx.Player, z, standoff: 1.15f);
                 Helpers.PulsePrimaryAttack(ctx.Player);
                 ctx.Detail = "targetId=" + ctx.IntA + " hp0=" + ctx.IntB
@@ -1644,49 +1606,11 @@ namespace ZdtdPlaytest
                 ctx.WasBlockType = 0; // 0=seeding, 1=hitting
                 ctx.IntA = 0; // dmg0
                 ctx.IntB = 0; // pulses
-                BlockValue seed = BlockValue.Air;
-                string used = "";
-                string[] soft =
-                {
-                    "hayBaleSquare", "hayBaleRound", "cntTrashPile01", "cntTrashPile02",
-                    "frameShapes", "woodShapes",
-                };
-                foreach (var name in soft)
-                {
-                    try
-                    {
-                        var bv = Block.GetBlockValue(name, true);
-                        if (bv.isair || bv.type == 0) continue;
-                        seed = bv;
-                        used = name;
-                        break;
-                    }
-                    catch { /* */ }
-                }
-                if (seed.type == 0)
-                {
-                    seed = Helpers.BlockUnderFeet(ctx.Player, ctx.World);
-                    used = "underFeet";
-                }
+                BlockValue seed = ResolveSoftSeed(ctx.Player, ctx.World, out string used);
                 ctx.PlaceBlockType = seed.type;
                 Helpers.SetBlockLocal(ctx.World, ctx.TargetBlock, seed);
                 Helpers.SetBlockRpc(ctx.World, ctx.TargetBlock, seed);
-                string[] tools =
-                {
-                    "meleeToolRepairT0StoneAxe", "meleeToolShovelT0StoneShovel",
-                    "meleeWpnBladeT0BoneKnife", "meleeToolRepairT1ClawHammer",
-                };
-                string tool = "";
-                foreach (var tname in tools)
-                {
-                    if (!Helpers.TryGetItem(tname, out var iv)) continue;
-                    if (!Helpers.TryGiveItem(ctx.Player, new ItemStack(iv, 1))) continue;
-                    if (Helpers.TryEquipItemType(ctx.Player, iv.type) >= 0)
-                    {
-                        tool = tname;
-                        break;
-                    }
-                }
+                string tool = EquipFirstMatching(ctx.Player, BlockDamageTools);
                 Helpers.LookAt(ctx.Player, ctx.TargetBlock.ToVector3Center());
                 ctx.Detail = "seed=" + used + " type=" + ctx.PlaceBlockType
                     + " at " + ctx.TargetBlock + " tool=" + tool;
@@ -2159,7 +2083,7 @@ namespace ZdtdPlaytest
                 int totalSlots;
                 ctx.IntB = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
                 ctx.PlaceBlockType = 0;
-                ctx.FloatA = -1f; // collect entity id
+                ctx.IntC = -1; // collect entity id
                 // Prefer unique item so bag occupancy change is likely.
                 string used = "";
                 string[] names = { "resourceScrapIron", "resourceRockSmall", "resourceWood", "casinoCoin" };
@@ -2186,7 +2110,9 @@ namespace ZdtdPlaytest
                     var item = Helpers.FindNearestEntityItem(ctx.World, ctx.Player.GetPosition(), 32f);
                     if (item != null)
                     {
-                        ctx.FloatA = item.entityId;
+                        // Entity ids exceed float exactness above 2^24; keep
+                        // them in an int slot so the gone-check stays exact.
+                        ctx.IntC = item.entityId;
                         try
                         {
                             // Stand on the drop so collect range is valid.
@@ -2199,11 +2125,11 @@ namespace ZdtdPlaytest
                 }
                 int totalSlots;
                 int bagNow = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
-                bool gone = n < ctx.IntA || (ctx.FloatA > 0 && Helpers.FindAliveById(ctx.World, (int)ctx.FloatA) == null
+                bool gone = n < ctx.IntA || (ctx.IntC > 0 && Helpers.FindAliveById(ctx.World, ctx.IntC) == null
                     && Helpers.FindNearestEntityItem(ctx.World, ctx.Player.GetPosition(), 32f) == null);
                 // EntityItem is not EntityAlive; re-check by entity id in list.
                 bool entityGone = false;
-                if (ctx.FloatA > 0)
+                if (ctx.IntC > 0)
                 {
                     entityGone = true;
                     try
@@ -2213,7 +2139,7 @@ namespace ZdtdPlaytest
                         {
                             for (int i = 0; i < list.Count; i++)
                             {
-                                if (list[i] != null && list[i].entityId == (int)ctx.FloatA)
+                                if (list[i] != null && list[i].entityId == ctx.IntC)
                                 {
                                     entityGone = false;
                                     break;
@@ -2225,7 +2151,7 @@ namespace ZdtdPlaytest
                 }
                 bool bagUp = bagNow > ctx.IntB;
                 ctx.Detail = "items0=" + ctx.IntA + " items=" + n + " bag0=" + ctx.IntB
-                    + " bag=" + bagNow + " eid=" + ((int)ctx.FloatA)
+                    + " bag=" + bagNow + " eid=" + ctx.IntC
                     + " gone=" + entityGone + " t=" + elapsed.ToString("0.0");
                 return entityGone || bagUp || (n < ctx.IntA);
             }, assert: ctx =>
@@ -2240,7 +2166,7 @@ namespace ZdtdPlaytest
                 int totalSlots;
                 int bagNow = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
                 bool entityGone = false;
-                if (ctx.FloatA > 0)
+                if (ctx.IntC > 0)
                 {
                     entityGone = true;
                     try
@@ -2250,7 +2176,7 @@ namespace ZdtdPlaytest
                         {
                             for (int i = 0; i < list.Count; i++)
                             {
-                                if (list[i] != null && list[i].entityId == (int)ctx.FloatA)
+                                if (list[i] != null && list[i].entityId == ctx.IntC)
                                 {
                                     entityGone = false;
                                     break;
@@ -2262,7 +2188,7 @@ namespace ZdtdPlaytest
                 }
                 bool ok = entityGone || bagNow > ctx.IntB || n < ctx.IntA;
                 ctx.Detail = "items0=" + ctx.IntA + " items=" + n + " bag0=" + ctx.IntB
-                    + " bag=" + bagNow + " eid=" + ((int)ctx.FloatA) + " gone=" + entityGone;
+                    + " bag=" + bagNow + " eid=" + ctx.IntC + " gone=" + entityGone;
                 return ok;
             }, timeout: 14f, fail: "EntityItem collect did not remove drop", pause: 0.5f));
 
@@ -2319,7 +2245,7 @@ namespace ZdtdPlaytest
                 var b = ctx.World.GetBlock(ctx.TargetBlock);
                 string cd;
                 int claims = Helpers.CountLocalLandClaims(out cd);
-                bool blockOk = b.type != 0 && (ctx.WasBlockType == 0 || b.type == ctx.WasBlockType || b.type != 0);
+                bool blockOk = b.type != 0;
                 bool claimOk = claims > ctx.IntA && ctx.IntA >= 0;
                 // Re-seed once if still air.
                 if (b.type == 0 && elapsed > 2f && elapsed < 3f)
@@ -3256,7 +3182,7 @@ namespace ZdtdPlaytest
                 }
                 catch (Exception ex)
                 {
-                    // Bicycle may have no fuel system — report driveable instead.
+                    // Bicycle may have no fuel system; report driveable instead.
                     try
                     {
                         ctx.Detail = "nofuel api " + ex.Message + " driveable=" + v.isDriveable();
@@ -4356,6 +4282,127 @@ namespace ZdtdPlaytest
         }
 
         // ── soak (short + long) ──────────────────────────────────────────
+
+
+        static void AddBot(List<CaseDef> q, string suite)
+        {
+            // All cases assume BotMod is installed on stock dedi (zombieSoldier bots).
+            // No inventory faking: we observe via world.Entities.list and server telnet bot commands.
+
+            q.Add(Live(suite, "bot_spawn_visible", new[] { "bot", "demo" }, ctx =>
+            {
+                // Host will have already auto-spawned TargetBotCount via BotManager.
+                // Also request one explicit spawn near the player for determinism.
+                Report.Barrier("bot_spawn");
+                ctx.IntA = 0;
+                ctx.Detail = "request bot spawn near player";
+            }, wait: ctx =>
+            {
+                int bots = 0, total = 0;
+                var pos = ctx.Player.GetPosition();
+                for (int i = 0; i < ctx.World.Entities.list.Count; i++)
+                {
+                    var e = ctx.World.Entities.list[i] as EntityAlive;
+                    if (e == null || e is EntityPlayer || e.IsDead()) continue;
+                    // BotMod bots are zombieSoldier with very specific spawnpoints; count any zombie within 200m
+                    if ((e.GetPosition() - pos).sqrMagnitude < 200f*200f) bots++;
+                    total++;
+                }
+                ctx.IntA = bots;
+                ctx.Detail = $"nearby_zombies={bots} total_alive={total}";
+                return bots >= 1;
+            }, assert: ctx => ctx.IntA >= 1, timeout: 30f, fail: "no bot zombie visible within 200m (BotMod not installed or no spawn)", pause: 0.4f));
+
+            q.Add(Live(suite, "bot_moves", new[] { "bot", "locomotion" }, ctx =>
+            {
+                var b = Helpers.FindNearestOtherAlive(ctx.World, ctx.Player.GetPosition(), 120f);
+                if (b == null) { ctx.Detail = "no bot to track"; return; }
+                ctx.IntA = b.entityId;
+                ctx.StartPos = b.GetPosition();
+                ctx.Detail = $"track bot {b.entityId} at {ctx.StartPos}";
+            }, wait: ctx =>
+            {
+                var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
+                if (e == null) { ctx.Detail = "tracked bot gone"; return true; }
+                float d = (e.GetPosition() - ctx.StartPos).magnitude;
+                ctx.FloatA = d;
+                float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
+                ctx.Detail = $"bot {ctx.IntA} moved {d:0.00}m t={elapsed:0.0}";
+                // Movement proves nav (AAS-like) is ticking; 1.5m in 12s.
+                return d >= 1.5f;
+            }, assert: ctx => ctx.FloatA >= 1.0f, timeout: 14f, fail: "bot did not move >=1m in 14s (AAS/pathfinding stalled)", pause: 0.3f));
+
+            q.Add(Live(suite, "bot_physics_parity", new[] { "bot", "physics" }, ctx =>
+            {
+                var b = Helpers.FindNearestOtherAlive(ctx.World, ctx.Player.GetPosition(), 120f);
+                if (b == null) { ctx.Detail = "no bot for physics check"; ctx.IntA = -1; return; }
+                ctx.IntA = b.entityId;
+                ctx.StartPos = b.GetPosition();
+                // Ground height under player and bot should both be near world height; check bot isn't noclipping through terrain
+                float botY = b.GetPosition().y;
+                float groundY = ctx.World.GetHeightAt(b.GetPosition().x, b.GetPosition().z);
+                ctx.FloatA = botY - groundY; // feet offset
+                ctx.Detail = $"bot {b.entityId} y={botY:0.0} ground={groundY:0.0} feet={ctx.FloatA:0.0}";
+            }, wait: ctx =>
+            {
+                if (ctx.IntA < 0) return true;
+                var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
+                if (e == null) return true;
+                float groundY = ctx.World.GetHeightAt(e.GetPosition().x, e.GetPosition().z);
+                float feet = e.GetPosition().y - groundY;
+                ctx.FloatA = feet;
+                ctx.Detail = $"bot {ctx.IntA} feet={feet:0.0} (must stay 0..4m, not flying/noclip)";
+                // Even if not perfectly on ground due to terrain sample, must be within sane bounds
+                return elapsedCheck(ctx, 3f);
+            }, assert: ctx =>
+            {
+                // After 3s warmup, bot must have stayed between 0 and 4m above ground (no godmode fly/no-clip through void)
+                if (ctx.IntA < 0) return false;
+                var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
+                if (e == null) return true; // gone is not a physics fail; other bot cases cover spawn
+                float groundY = ctx.World.GetHeightAt(e.GetPosition().x, e.GetPosition().z);
+                float feet = e.GetPosition().y - groundY;
+                ctx.Detail = $"bot {e.entityId} feet={feet:0.0} (want 0..6)";
+                return feet >= 0f && feet <= 6f;
+            }, timeout: 8f, fail: "bot feet off ground >6m (noclip/fly)", pause: 0.2f));
+
+            q.Add(Live(suite, "bot_player_near", new[] { "bot", "demo" }, ctx =>
+            {
+                // Request a bot via telnet to spawn near this player, then client observes it.
+                Report.Barrier("bot_player_near");
+                ctx.IntA = 0;
+                // Snapshot player pos before.
+                ctx.StartPos = ctx.Player.GetPosition();
+                ctx.Detail = $"request bot near {ctx.StartPos}";
+            }, wait: ctx =>
+            {
+                // After host spawns `bot player <name>`, a fresh bot should appear within 12-42m ring
+                float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
+                EntityAlive best = null; float bestD = float.MaxValue;
+                for (int i = 0; i < ctx.World.Entities.list.Count; i++)
+                {
+                    var e = ctx.World.Entities.list[i] as EntityAlive;
+                    if (e == null || e is EntityPlayer || e.IsDead()) continue;
+                    float d = (e.GetPosition() - ctx.StartPos).sqrMagnitude;
+                    if (d < bestD) { bestD = d; best = e; }
+                }
+                if (best != null)
+                {
+                    float d = Mathf.Sqrt(bestD);
+                    ctx.IntA = best.entityId;
+                    ctx.FloatA = d;
+                    ctx.Detail = $"nearest bot {best.entityId} dist={d:0.0}m t={elapsed:0.0}";
+                    return d >= 10f && d <= 55f;
+                }
+                ctx.Detail = $"no bot near t={elapsed:0.0}";
+                return false;
+            }, assert: ctx => ctx.FloatA >= 10f && ctx.FloatA <= 55f, timeout: 22f, fail: "no bot spawned in 12-42m ring near player (bot player)", pause: 0.4f));
+        }
+
+        static bool elapsedCheck(CaseCtx ctx, float want)
+        {
+            return Time.unscaledTime - ctx.CaseStartUnscaled >= want;
+        }
 
         static void AddSoak(List<CaseDef> q, string suite)
         {

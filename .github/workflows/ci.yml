@@ -1,0 +1,46 @@
+name: ci
+
+on: [push, pull_request]
+
+# One run per ref: a force-push on a PR cancels the superseded run instead of
+# racing it for the same cache.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Checkout is read-only here; the gates never touch the GitHub API. Least
+# privilege up front so a repo-default write-all token can never leak into
+# this run.
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    # Pinned image: ubuntu-latest floats (currently 24.04, was 22.04) and a
+    # runner bump changes the toolchain under the gates without any commit.
+    runs-on: ubuntu-24.04
+    # The whole check is virtual time (~seconds locally); this only caps a
+    # hung step (stuck download, waiting gate) at minutes instead of GitHub's
+    # 6-hour default.
+    timeout-minutes: 15
+    steps:
+      # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      # setup-uv caches uv's wheel/install store automatically on GitHub-hosted
+      # runners (enable-cache defaults to auto), keyed off the uv.lock file.
+      # `make test` = ruff lint + mypy typecheck (both pinned in the dev
+      # dependency-group, configured in pyproject.toml) plus the offline
+      # suites: catalog<->SCENARIOS surface (live rows + counts total), mod
+      # version/changelog sync, the scenario-provider env surface, the
+      # stock-peer orchestration surface, the host lock, the deterministic
+      # simulation, the orchestrator local-init order gate, the orchestrator
+      # report/log surface, the orchestrator pure-logic units, and the
+      # compare diff (pytest via uv). The mod build itself is not
+      # CI-able (references game DLLs), but these gates catch the doc/catalog
+      # drift that used to ship silently.
+      - run: make test
+      # Wider seed sweep than the gate inside `make test`. Cheap: the whole
+      # thing is virtual time, so 200 seeds is ~200 simulated hours in
+      # seconds of wall clock.
+      - run: make dst DST_SEEDS=200

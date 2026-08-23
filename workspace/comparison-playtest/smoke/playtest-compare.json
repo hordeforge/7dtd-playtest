@@ -1,0 +1,77 @@
+{
+ "cases": [
+  {
+   "case": "smoke/cgo_ready",
+   "stock": {
+    "detail": "cgo=64 need=26 fixedSize=False",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "cgo=81 need=39 fixedSize=False",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/day_clock",
+   "stock": {
+    "detail": "day=1 07:02 raw=7042",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "day=1 07:15 raw=7264",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/ground",
+   "stock": {
+    "detail": "block=7 at 919, 60, 878",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "block=7 at -273, 60, 449",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/join_ready",
+   "stock": {
+    "detail": "pos=(919.00, 61.08, 878.00) hp=99 id=177 spawned=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pos=(-273.00, 61.08, 449.00) hp=100 id=112 spawned=True",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "smoke/stats",
+   "stock": {
+    "detail": "hp=99/99 stam=99",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "hp=100/100 stam=99",
+    "status": "PASS"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [],
+ "stock": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 5,
+   "skip": 0
+  }
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 5,
+   "skip": 0
+  }
+ }
+}

@@ -1,0 +1,141 @@
+{
+ "cases": [
+  {
+   "case": "combat/alive_flags_self",
+   "stock": {
+    "detail": "alive=True dead=False hp=99",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "alive=True dead=False hp=100",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/blood_moon_music",
+   "stock": {
+    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=7228 rawNow=8000",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "nightDay=1 nightHour=22 nowDay=1 now=08:00 t0=9269 rawNow=8000",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/explosion_client",
+   "stock": {
+    "detail": "type0=20304 now=0 dmg0=0 dmg=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=13",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/held_item_type",
+   "stock": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/melee_damage_out",
+   "stock": {
+    "detail": "targetId=174 hp0=258 hp=249 min=249 dead=False swings=2",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "targetId=112 gone after melee",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/ranged_shot",
+   "stock": {
+    "detail": "meta0=6 meta=4 hp0=249 hp=193 pulses=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "meta0=6 meta=4 hp0=100000 hp=100000 pulses=0",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/sleeper_wake",
+   "stock": {
+    "detail": "sleeper pose/wake sequence failed after 22.0s | no AI t=22.0",
+    "status": "FAIL"
+   },
+   "zdtd": {
+    "detail": "phase=2 sleptObs=True alive=True sleeping=False id=114",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/zombie_death_loot",
+   "stock": {
+    "detail": "items0=0 items=1 sample=EntityBackpack#180 dead=True",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "fixture not dead after kill barrier after 18.0s | items0=0 items=1 sample=EntityLootContainer#116 dead=False t=18.0",
+    "status": "FAIL"
+   }
+  },
+  {
+   "case": "combat/zombie_or_npc_nearby",
+   "stock": {
+    "detail": "alive_other=1 total=2 players=1",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "alive_other=3 total=4 players=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "combat/zombie_target_has_health",
+   "stock": {
+    "detail": "entityId=174 hp=258/258 class=zombieSoldier",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "entityId=112 hp=200/200 class=zombieBoe",
+    "status": "PASS"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [
+  "combat/sleeper_wake: status differs (FAIL vs PASS)",
+  "combat/zombie_death_loot: status differs (PASS vs FAIL)"
+ ],
+ "stock": {
+  "nreLike": 0,
+  "ranAtUtc": "2026-08-18T05:18Z",
+  "server": "stock",
+  "summary": {
+   "fail": 1,
+   "pass": 9,
+   "skip": 0
+  },
+  "wall": 208.1
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "ranAtUtc": "2026-08-18T05:20Z",
+  "server": "zdtd",
+  "summary": {
+   "fail": 1,
+   "pass": 9,
+   "skip": 0
+  },
+  "wall": 105.3
+ }
+}

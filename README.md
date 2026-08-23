@@ -1,23 +1,32 @@
-# 7dtd-playtest
+# 🛡️ Vanguard (7DTD Playtest Runner)
 
-Stock-client **gameplay automation** for 7 Days to Die servers (EAC off).
-Works against the **stock dedicated server** (the default) and against
-**zdtd** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs,
-waits for server-visible state where it matters, and emits structured
-`[7dtd-playtest]` results for a host orchestrator.
+> **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
 
-Join/auto-connect is **not** here: install [`../7dtd-connect/`](../7dtd-connect/)
-as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).
+Stock-client **gameplay automation** for 7 Days to Die servers (EAC off). Works against the **stock dedicated server** (the default) and against **zdtd-server** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs, waits for server-visible state where it matters, and emits structured scenario test results for a host orchestrator.
+
+Host-side concurrency (the exclusivity lock) is covered by deterministic
+simulation: `make dst`, documented in **[DST.md](DST.md)**.
+
+Join/auto-connect is **not** here: install [`../7dtd-fastconnect/`](../7dtd-fastconnect/)
+as well. Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server-server/docs/CLIENT_PLAYTEST.md).
 
 ## Requirements
 
+- Host OS: **Linux** on x86_64. Host scripts assume bash, procps (`pkill`),
+  GNU coreutils, and PulseAudio/PipeWire; the client runs through
+  Steam/Proton and the dedicated server is the Linux build.
 - Stock client V3.x, EAC off (`-noeac`)
 - `0_TFP_Harmony`
-- `7dtd-connect` installed
+- `7dtd-fastconnect` installed
 - Game: `~/.local/share/Steam/steamapps/common/7 Days To Die` (`GAME=`)
 - Only for zdtd-target runs (`playtest-zdtd`, `playtest-apm`): built `zdtd`
-  at `../zdtd/zig-out/bin/zdtd`
-- Host Python 3.11+ via **`uv`**
+  at `../zdtd-server-server/zig-out/bin/zdtd`
+- Only for the `bot` suite: server-side `BotMod` in the dedicated's `Mods/`
+  (provides the `bot` telnet commands the orchestrator drives)
+- Host Python via **`uv`**, pinned to CPython 3.13 by `.python-version`
+  (uv fetches it automatically; gates must not rely on a newer interpreter)
+- dotnet SDK 8.0.x for the mod build (pinned by `global.json`; found on
+  `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`)
 
 ## Install
 
@@ -36,7 +45,7 @@ make playtest-demo           # attract-mode + combat wait (telnet spawn)
 make playtest-demo-fresh     # wipe save first (clean dig pad)
 make playtest-gate           # PR gate: live smoke+core only
 make playtest-bench LAPS=3   # timed repeats of bench path
-make playtest-full           # all demo domains + soak (long)
+make playtest-full           # demo domains + soak (no persist/mp/apm/bot)
 make playtest-smoke          # boot only
 make playtest SUITE=combat
 make playtest-zdtd           # demo against zdtd on 27025
@@ -45,7 +54,16 @@ make playtest-mp             # loadgen multi-peer
 make playtest-apm            # zdtd APM dump attach (SERVER=zdtd)
 make playtest-soak-long      # ≥15 min host soak
 make playtest-residual       # persist + mp + apm + soak_long
+make playtest-compare        # same suite vs stock AND zdtd, diffed per case
+                             # (SUITE=smoke; report in
+                             # workspace/comparison-playtest/<suite>/)
+make playtest-repeat LAPS=3  # flake detection: N fresh-server laps, all must pass
 ```
+
+`playtest-compare` diffs per case into `playtest-compare.{md,json}` and also
+reports a wall-time axis (server session seconds, from the orchestrator
+reports) - a cost observation, never a per-case finding (zdtd being faster is
+a known divergence, not a mismatch).
 
 v0.7.1 gameplay surface (stock motor / stock attack / real C2S, **not** tele-fakes):
 - locomotion + jump + stamina; entity/block melee; **ranged** (pipe pistol Meta)
@@ -89,10 +107,32 @@ Orchestrator exit codes:
 
 Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
 
+### Host orchestrator environment
+
+`scripts/playtest_run.py` reads these environment variables as defaults for
+the matching CLI flags; a flag always overrides its env var. Every run logs
+one effective `config:` line at startup (values only; the telnet password is
+reported as set/unset, never its value), so a misread environment is visible
+in the log without rerunning with `--help`.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `PLAYTEST_SERVER` | `stock` | Server backend, `stock` or `zdtd` (`--server`) |
+| `ZDTD` | `../zdtd-server-server/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
+| `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
+| `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |
+| `PLAYTEST_TIMEOUT_SEC` | `900` | Harness wall-clock timeout in seconds > 0 (`--timeout`). Invalid values are a harness error (exit 2) naming the variable |
+| `PLAYTEST_TELNET_PASSWORD` | `retest` | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings) |
+| `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
+
+Invalid numeric values in `PLAYTEST_LOCK_STALE_SEC` /
+`PLAYTEST_LOCK_HEARTBEAT_SEC` fall back to their defaults (120 / 30) with a
+warning on stderr instead of silently changing lock takeover timing.
+
 ### Client audio mute (default on)
 
 Automated client launches **mute the game process at the OS audio layer by
-default** (PipeWire/Pulse sink-input via `7dtd-connect` `launch_client.sh` +
+default** (PipeWire/Pulse sink-input via `7dtd-fastconnect` `launch_client.sh` +
 orchestrator helper). This does **not** change game client settings (no
 GamePrefs / in-game audio sliders). Independent of master volume. Requires
 `pactl` and `jq`.
@@ -136,17 +176,52 @@ Another client mod can add a suite without forking this harness by referencing
 `IScenarioProvider`. Install that mod **alongside** `7dtd-playtest`, then set
 the suite env (see below) to your provider suite id.
 
+### Minimal provider
+
+Discovery scans loaded mod assemblies for public `IScenarioProvider`
+implementations with a public parameterless constructor:
+
+```csharp
+using System.Collections.Generic;
+using ZdtdPlaytest;
+
+public sealed class MyProvider : IScenarioProvider
+{
+    // Suite ids are matched case-insensitively. Ids that collide with
+    // built-in suites run the built-in instead; an id no provider owns and
+    // that produces zero cases fails the run (FAIL row + DONE exit_hint=1),
+    // so typos and uninstalled providers are never silent.
+    public IEnumerable<string> SuiteIds
+    {
+        get { yield return "my_wave_suite"; }
+    }
+
+    public void AppendSuite(List<CaseDef> queue, string suite, int lap)
+    {
+        // lap > 0 means a benchmark-style repeat: suffix case ids with "@lap"
+        // so per-lap results stay distinct in reports.
+        string label = lap > 0 ? suite + "@" + lap : suite;
+        queue.Add(CaseDef.Live(label, "my_case", new[] { "provider" },
+            act: ctx => Report.Barrier("my_provider_ready"),
+            assert: ctx => ctx.World != null && ctx.Player != null));
+    }
+}
+```
+
+Arm it with `PLAYTEST_SUITE=my_wave_suite` (`make playtest SUITE=my_wave_suite`).
+
 ### Build cases (public factories + helpers)
 
 Do **not** assign `CaseDef` fields by hand. Use:
 
 ```csharp
 // Live case with long wait (e.g. propagation / fallout wave).
+// tags (3rd arg) is informational only and may be omitted.
 queue.Add(CaseDef.Live(suite, "my_wave", new[] { "bench" },
     act: ctx => { /* setup */ },
     wait: ctx => /* server-visible predicate */,
     assert: ctx => /* ok? */,
-    timeout: 120f,   // case Wait budget (seconds); default 8
+    timeout: 120f,   // case Wait budget (seconds; must be > 0); default 8
     fail: "wave did not finish",
     pause: 0.5f));
 
@@ -154,6 +229,10 @@ queue.Add(CaseDef.Defer(suite, "later", new[] { "todo" }, "needs admin fixture")
 
 // Host orchestration barriers (grep'd by scripts/playtest_run.py).
 Report.Barrier("my_provider_ready");
+// Host-owned vehicle of a given class (bare "spawn_vehicle" = bicycle). A
+// vehicle the client creates itself is unknown to the dedicated server and
+// never moves there, so ask the host and then find the replicated entity.
+Report.Barrier("spawn_vehicle:vehicleGyrocopter");
 
 // Stock-API glue shared with the built-in catalog (no invented S2C).
 Helpers.TryGiveItem(ctx.Player, stack);
@@ -162,8 +241,59 @@ Helpers.PlayerInVehicle(ctx.Player, vehicle);
 Helpers.TryEnterVehicle(ctx.Player, vehicle, out var detail);
 ```
 
+### Provider error behavior
+
+- Exceptions thrown from `act` / `wait` / `assert` fail that case only
+  (FAIL row, then the suite continues); the detail names stage and
+  exception type (`act exception NullReferenceException: …`). They never
+  take down the runner or the game.
+- A provider whose constructor, `SuiteIds`, or `AppendSuite` throws is
+  skipped with a `[7dtd-playtest] scenario provider …` log line. A suite
+  that then produces zero cases is recorded FAIL (`unknown or empty
+  suite`) with `DONE exit_hint=1`, never a silent green run.
+- `CaseDef.Live` validates at call time (fail-fast): a case with no
+  `act`, `wait`, or `assert` at all would record a pass while running
+  nothing, and `timeout <= 0` has no meaning; both throw immediately.
+- Diagnostics: `Report.Info("…")` emits a `[7dtd-playtest]` human line
+  plus a JSON `"t":"log"` event under the stable prefix.
+
+#### Barriers the stock host answers
+
+`scripts/playtest_run.py` greps client log for `barrier <name>` and performs
+telnet/admin setup. Barrier names it already handles (safe to emit from
+provider cases):
+
+| Barrier | Host action |
+|---|---|
+| `spawn_zombie` | Spawn a fixture zombie near the player |
+| `kill_fixture_zombie` | Kill non-player AI (fixture cleanup) |
+| `spawn_trader` | Spawn a trader fixture |
+| `kill_player` | Kill the player entity (death / respawn cases) |
+| `settime_day` / `settime_bloodmoon` | Set world time via telnet |
+| `spawn_vehicle:<entityClass>` | Host-owned vehicle of that class (bare `spawn_vehicle` = bicycle) |
+| `chat_echo:<token>` | Server chat `say <token>` (once per token) |
+| `spawn_loadgen_peer` / `spawn_loadgen_bots` | Start loadgen peers/bots |
+| `bot_spawn` / `bot_player_near` | Server-side `BotMod` commands |
+| `teleport_persist_pad` | Teleport players to the persist pad |
+| `apm_dump` | zdtd APM dump write (zdtd targets only) |
+
+Any other name is inert on this host (third-party hosts may grep their own).
+Repeated identical lines are separate requests; handlers count hits.
+
 Public surface for providers: `CaseDef.Live` / `CaseDef.Defer`, `CaseCtx`,
 `IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`).
+
+#### CaseCtx members (fresh instance per case)
+
+| Member | Meaning |
+|---|---|
+| `Gm`, `World`, `Player` | Live game objects, refreshed every tick; `Player` can go null/dead mid-case (the runner rescues or fails the case) |
+| `StartPos` | Player position when the case started |
+| `Detail` | Optional scratch string; appended to FAIL detail on timeout/failure |
+| `TargetEntityId` | Entity id for combat fixtures (ranged target etc.) |
+| `BenchmarkLap` | Lap number parsed from the `suite@N` label (0 outside laps) |
+| `CaseStartUnscaled` | `Time.unscaledTime` when the case started; use for elapsed budgets in `wait` predicates (`Time.unscaledTime - ctx.CaseStartUnscaled`) |
+| `WasBlockType`, `PlaceBlockType`, `IntA`, `IntB`, `IntC`, `FloatA`, `FloatB`, `TargetBlock`, `WorldTime0` | Built-in catalog scratch fields; providers may reuse them or capture closure locals instead |
 
 ### Suite environment (stock dedicated + connect)
 
@@ -178,7 +308,7 @@ The runner arms from the **first non-empty** of:
 
 `make playtest` / `scripts/playtest_run.py` set `PLAYTEST_SUITE`. Hosts that
 only set `ZDTD_PLAYTEST_SUITE` (e.g. Atomic `playtest-run.sh` via connect
-Proton) also arm correctly. Prefer **7dtd-connect** `launch_client.sh` so the
+Proton) also arm correctly. Prefer **7dtd-fastconnect** `launch_client.sh` so the
 variable reaches the game process (`steam -applaunch` often drops it).
 
 ### Fresh / disposable world (no OCR New Game)
@@ -188,11 +318,40 @@ Wipe the orchestrator save before launch so dig pads and fixtures start clean:
 ```bash
 make playtest SUITE=your_suite FRESH=1          # default FRESH=1
 # or
-uv run --project . python scripts/playtest_run.py --suite your_suite --fresh-save ...
+uv run --locked --project . python scripts/playtest_run.py --suite your_suite --fresh-save ...
 ```
 
 `FRESH=0` keeps the existing save when you deliberately inspect one. Providers
 do not need Atomic’s OCR `create-smoke-world.py` when using this host path.
+
+### State, backups, and recovery
+
+Durable state this system owns, and what an incident costs:
+
+| State | Location | Survives instance loss? |
+|---|---|---|
+| Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
+| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run | No |
+| Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/` | No |
+| Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
+
+Recovery facts:
+
+- **RPO/RTO:** run artifacts are reproducible output, not records of record.
+  Losing them costs a suite re-run (RTO = suite wall time). The compare
+  baselines are the only long-lived results, and git carries those. Nothing
+  here backs up sibling projects (`zdtd`, `7dtd-fastconnect`) or game installs.
+- **Restore a wiped save:** `--fresh-save` no longer hard-deletes. The named
+  stock save, zdtd `players.zsv`/`containers.zct`/`blockmeta.zbm`, chunk
+  overlays, and the previous client log move into
+  `<logdir>/quarantine/`; the newest `QUARANTINE_KEEP = 5` entries are kept
+  (oldest pruned). Copy an entry's contents back to its original path to
+  restore. If the quarantine itself is unwritable, data stays in place and
+  the run warns about stale reuse instead of destroying anything.
+- **Interrupted run:** kill leftovers with the orchestrator's own clean pass,
+  then clear the lock per the [Live-client exclusivity lock](#live-client-exclusivity-lock)
+  rules (fresh heartbeat means another holder is alive; stale plus no live
+  client process may take over).
 
 ### Multi-phase rejoin (persist) for provider cases
 
@@ -232,8 +391,11 @@ For one passive **stock** peer, provide both a distinct Local-platform player
 name and an already initialized, separate Proton compat profile. The runner
 starts that client without `PLAYTEST_*`, so it joins and remains in the world
 without executing a duplicate scenario suite. The connect mod reads the peer
-name from `ZDTD_PLAYER_NAME`; use a current `7dtd-connect` install that
+name from `7DTD_PLAYER_NAME`; use a current `7dtd-fastconnect` install that
 supports that variable. This is a genuine second client, not a loadgen bot.
+The runner leaves one second between the two launches because the stock V3.1
+server has a 500 ms same-IP connection limiter; without that spacing the
+second localhost client is rejected before authentication.
 
 Run a suite with an isolated peer profile:
 
@@ -280,8 +442,8 @@ reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 ```bash
 # terminal 1: stock dedicated or zdtd
 # terminal 2 (connect preserves env into the game process):
-ZDTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
-  ../7dtd-connect/scripts/launch_client.sh
+7DTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
+  ../7dtd-fastconnect/scripts/launch_client.sh
 # also accepted:
 # ZDTD_PLAYTEST_SUITE=smoke,core ...
 ```
@@ -290,12 +452,12 @@ Legacy: `PLAYTEST=1` or `ZDTD_PLAYTEST=1` arms `demo`.
 
 ## Suites (catalog summary)
 
-Full tables: **[SCENARIOS.md](SCENARIOS.md)** (every Live case id). Approximate
-built-in counts from `Catalog.cs` (104 Live, 0 Defer):
+Full tables: **[SCENARIOS.md](SCENARIOS.md)** (every Live case id). Built-in
+counts from `Catalog.cs` (108 Live, 0 Defer):
 
-| Suite | Live cases (approx) |
+| Suite | Live cases |
 |---|---:|
-| `smoke` | 5 (`join_ready`, `cgo_ready`, `ground`, `stats`, `day_clock`, …) |
+| `smoke` | 5 (`join_ready`, `cgo_ready`, `ground`, `stats`, `day_clock`) |
 | `core` | 18 (look / motors / dig / place / inventory / …) |
 | `world` / `ui` / `combat` / … | see SCENARIOS |
 | `persist_setup` / `persist` | 6 setup + 5 verify |
@@ -315,3 +477,24 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 - Server gaps are fixed server-side (**zdtd** for zdtd targets), not papered
   over in this mod.
 - See [AGENTS.md](AGENTS.md).
+
+## CI
+
+`.github/workflows/ci.yml` runs `make test` (the offline gates: catalog<->SCENARIOS
+surface incl. live rows + counts total, mod version/changelog sync, scenario-provider
+env surface, stock-peer orchestration surface, host lock, deterministic simulation,
+orchestrator local-init order, report/log surface, orchestrator pure-logic units,
+compare diff)
+plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
+runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
+build itself is not CI-able (references game DLLs), so the offline gates are
+the push-time guard for catalog/doc drift.
+
+### Host orchestrator secrets
+
+The stock dedicated telnet password is local-only and defaults to `retest`;
+override with `PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`). The same
+value is written into the generated server config and used by the
+orchestrator's telnet client, so the two can never diverge. It is not a
+production secret: the server binds localhost in playtest runs
+(`ServerVisibility=0`, Steam+LAN only).

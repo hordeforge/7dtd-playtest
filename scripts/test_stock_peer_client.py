@@ -20,8 +20,15 @@ checks = [
         and "must be provided together" in RUNNER,
     ),
     require(
-        "peer gets a distinct stock Local identity", 
-        '"ZDTD_PLAYER_NAME": peer_client_name' in RUNNER,
+        "peer gets a distinct stock Local identity",
+        '"7DTD_PLAYER_NAME": peer_client_name' in RUNNER,
+    ),
+    require(
+        "same-IP stock clients are spaced past the engine rate limit",
+        "LiteNetLibAuthWrapperServer" in RUNNER
+        and "time.sleep(1.0)" in RUNNER
+        and RUNNER.index("time.sleep(1.0)")
+        < RUNNER.index('"7DTD_PLAYER_NAME": peer_client_name'),
     ),
     require(
         "peer can run an explicit provider setup suite",
@@ -60,7 +67,8 @@ checks = [
         "README distinguishes stock peer from loadgen",
         "passive **stock** peer" in README
         and "not a loadgen bot" in README
-        and "--peer-client-suite" in README,
+        and "--peer-client-suite" in README
+        and "500 ms same-IP connection limiter" in README,
     ),
 ]
 

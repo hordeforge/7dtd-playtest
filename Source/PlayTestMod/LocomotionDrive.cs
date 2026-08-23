@@ -27,6 +27,7 @@ namespace ZdtdPlaytest
         static float _yaw;
         static bool _setYaw;
         static int _lastCcFrame = -1; // apply CC.Move at most once per Unity frame
+        static int _lastStamFrame = -1; // drain stamina at most once per Unity frame
 
         static FieldInfo _isAutorunField;
         static FieldInfo _isAutorunInvalidField;
@@ -181,6 +182,7 @@ namespace ZdtdPlaytest
             _sneak = false;
             _jumpPulse = false;
             _setYaw = false;
+            _lastStamFrame = -1;
             ApplyControllerFlags(false);
             try
             {
@@ -295,8 +297,11 @@ namespace ZdtdPlaytest
                 // Sprint stamina: stock drain only runs on full motor path; when we
                 // drive CharacterController directly, apply proportional use so the
                 // stamina_drains_sprint case still observes real Stam change.
-                if (_running && !_sneak)
+                // Prefix, Postfix, and Runner.Tick all reach this in one Unity
+                // frame, so guard by frame or the 14/s rate triples.
+                if (_running && !_sneak && Time.frameCount != _lastStamFrame)
                 {
+                    _lastStamFrame = Time.frameCount;
                     float dt = Time.unscaledDeltaTime;
                     if (dt <= 0f || dt > 0.1f) dt = 0.033f;
                     try

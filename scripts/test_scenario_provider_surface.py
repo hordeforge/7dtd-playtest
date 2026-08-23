@@ -6,6 +6,8 @@ import re
 import sys
 from pathlib import Path
 
+from playtest_log import barrier_hits_prefix
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
@@ -44,6 +46,20 @@ def main() -> int:
     catalog = CATALOG.read_text(encoding="utf-8")
     provider = PROVIDER.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
+
+    parameterized_log = "\n".join(
+        (
+            "[7dtd-playtest] barrier spawn_vehicle:vehicleGyrocopter",
+            '[7dtd-playtest] {"v":1,"t":"barrier","name":"spawn_vehicle:vehicleGyrocopter"}',
+            "[7dtd-playtest] barrier spawn_vehicle:vehicleGyrocopter",
+            "[7dtd-playtest] barrier spawn_vehicle:vehicleBicycle",
+        )
+    )
+    assert barrier_hits_prefix(parameterized_log, "spawn_vehicle:") == [
+        "spawn_vehicle:vehicleGyrocopter",
+        "spawn_vehicle:vehicleGyrocopter",
+        "spawn_vehicle:vehicleBicycle",
+    ], "repeated parameterized barriers must remain separate fixture requests"
 
     assert "public sealed class CaseDef" in runner
     assert "public sealed class CaseCtx" in runner
@@ -155,6 +171,17 @@ def main() -> int:
     )
     assert "ZDTD_PLAYTEST_LAPS" in arm or "PLAYTEST_LAPS" in arm
 
+    # A suite that appends nothing (typo'd id, uninstalled provider) must be a
+    # recorded failure, never a silent green run with zero cases.
+    build_body = method_body(runner, r"static\s+void\s+BuildQueue\s*\(\s*\)")
+    assert '"(unknown)"' in build_body and "Report.Result(" in build_body, (
+        "BuildQueue must record a FAIL row for every suite that produced no cases"
+    )
+    assert "_queue.Count == 0" in arm and "Report.Done()" in arm, (
+        "an entirely empty queue must finish at arm time (DONE exit_hint=1), "
+        "not wait out the join for an empty pass"
+    )
+
     # Residual client alias stays light; Make residual is multi-target.
     m_res = re.search(
         r'case\s+"residual"\s*:(.*?)break\s*;',
@@ -200,6 +227,21 @@ def main() -> int:
     # Long-timeout Live factory parameter still present.
     assert "timeout" in live_body or "TimeoutSec = timeout" in live_body
 
+    # Fail-fast construction: a case with no callback would record a green
+    # pass while running nothing, and a non-positive timeout has no meaning.
+    assert "throw new ArgumentException" in live_body, (
+        "CaseDef.Live must reject a case with no act/wait/assert"
+    )
+    assert "throw new ArgumentOutOfRangeException" in live_body, (
+        "CaseDef.Live must reject timeout <= 0"
+    )
+
+    # Provider error-surface docs: exception behavior + diagnostics helper.
+    for needle in ("CaseStartUnscaled", "Report.Info", "Provider error behavior"):
+        assert needle in readme, (
+            f"README must document provider surface detail: {needle}"
+        )
+
     print("OK external scenario-provider surface")
     print("OK public CaseDef.Live / CaseDef.Defer factories")
     print("OK Live is non-deferred; Defer sets Deferred+reason")
@@ -207,6 +249,7 @@ def main() -> int:
     print("OK README documents CaseDef.Live/Defer")
     print("OK public Helpers + Report.Barrier for providers")
     print("OK dual PLAYTEST_SUITE / ZDTD_PLAYTEST_SUITE arming")
+    print("OK unknown/empty suite is a recorded failure, not a green pass")
     print("OK residual client alias vs make playtest-residual split")
     print("OK provider fresh-save / barrier / long-timeout docs")
 

@@ -4,25 +4,51 @@ version = "0.1.0"
 description = "Host orchestrator for stock-client zdtd playtest suites"
 requires-python = ">=3.11"
 dependencies = []
-
-[project.scripts]
-playtest = "playtest_run:main"
+[dependency-groups]
+# Only third-party packages in the repo. Declared here (not `uv run --with`)
+# so uv.lock pins the exact version with sha256 hashes instead of resolving
+# unpinned from PyPI on every `make test`.
+dev = [
+    "pytest>=8",
+    "ruff==0.16.4",
+    "mypy==2.1.0",
+]
 
 [tool.uv]
 package = false
 
+# Lint gate (make lint): defect-oriented rules only. E/W/F/I/B/SIM/UP/RUF plus
+# the free strictness of C4/RET/A/DTZ/FA (all zero findings today). Style
+# suites that would fight the hand-rolled gate scripts (D, ANN, S, TRY) are
+# deliberately not selected. Lines hard-capped at 100 so two copies fit
+# side-by-side.
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+src = ["scripts"]
 
 [tool.ruff.lint]
-# Gate set = ruff's own default selection for the pinned version in uv.lock
-# (pycodestyle error subset, pyflakes, import sorting, simplify/blind-except
-# picks). Do not restate the list here: a hand-copied select can silently
-# drop rules. Extend via extend-select only once the whole tree passes the
-# group clean; never silence a firing rule repo-wide.
-
-[dependency-groups]
-dev = [
-    "ruff>=0.16.4",
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import order
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "UP",  # pyupgrade
+    "RUF", # ruff-specific (unused noqa, pairwise, ...)
+    "RET", # return simplification
+    "A",   # builtin shadowing
+    "DTZ", # naive datetime
+    "FA",  # future annotations
 ]
+
+# Type gate (make typecheck). Baseline strictness the tree passes today;
+# ratchet up as annotations spread.
+[tool.mypy]
+python_version = "3.11"
+files = ["scripts"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true

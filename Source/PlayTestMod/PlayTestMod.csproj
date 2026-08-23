@@ -2,20 +2,48 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <WarningLevel>5</WarningLevel>
-    <!-- Annotations-only nullability: catches #nullable-context and
-         attribute misuse now; flow-analysis warnings are the later ratchet
-         step (full enable is ~156 findings today). -->
+    <!-- Nullable analysis is on for annotation checks; full `enable` is the
+          next step once the ~72 remaining CS86xx findings are worked off. -->
     <Nullable>annotations</Nullable>
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- net48 does not get the Roslyn analyzers by default (they default on
+         only for net5+). Every warning below is a build break, so a new
+         diagnostic cannot slip into the dll unnoticed. -->
+    <WarningLevel>5</WarningLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <AssemblyName>7dtd-playtest</AssemblyName>
     <RootNamespace>ZdtdPlaytest</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>$(MSBuildThisFileDirectory)../../dist/7dtd-playtest/</OutputPath>
+    <!-- Only Release lands in the shippable dist/ directory; a Debug build
+         (IDE default) goes to bin/Debug instead of overwriting the artifact
+         that `make install` ships. -->
+    <OutputPath Condition="'$(Configuration)' == 'Release'">$(MSBuildThisFileDirectory)../../dist/7dtd-playtest/</OutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Reproducible artifact: identical bytes regardless of checkout path.
+         Without PathMap the compiler bakes absolute source paths into the
+         dll/pdb (verified: two checkouts hash differently). -->
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildThisFileDirectory)=/src/7dtd-playtest/</PathMap>
+    <!-- The SDK otherwise queries git while building and bakes the absolute
+         checkout path and remote URL into the pdb, so a tarball export and a
+         git clone of the same tree do not build identically. -->
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Pin the net48 reference assemblies explicitly instead of letting each
+         SDK inject its own version at restore time (network on first build).
+         Build-only, never shipped. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+  <PropertyGroup>
+    <!-- Record resolved packages (with content hashes) in a committed lock so
+         restore cannot drift with the feed. `make build` restores in locked
+         mode and fails if this file is missing or stale; after changing the
+         references above, regenerate it with `dotnet restore` (no flags) and
+         commit the updated packages.lock.json. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <PropertyGroup>
     <GameRoot Condition="'$(GameRoot)' == ''">$(HOME)/.local/share/Steam/steamapps/common/7 Days To Die</GameRoot>

@@ -3,7 +3,7 @@
 Built-in **demo mode** and **benchmark** style suites for the stock client
 against a real server (default: stock dedicated Navezgane).
 
-Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md)  
+Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server-server/docs/CLIENT_PLAYTEST.md)  
 Code: `Source/PlayTestMod/Catalog.cs`
 
 ## How to think about this
@@ -12,7 +12,7 @@ Code: `Source/PlayTestMod/Catalog.cs`
 |---|---|---|
 | **smoke** | boot check | Join + mesh + ground + stats |
 | **demo** | game demo / attract mode | Fixed cinematic: look → walk → dig/place → UI tour → world probes |
-| **benchmark** | built-in bench | Same path as demo smoke+core+world+ui, timed; repeat with `PLAYTEST_LAPS` |
+| **benchmark** | built-in bench | Same path as demo core/world, timed; repeat with `PLAYTEST_LAPS` |
 | **gate** | CI / PR | Live smoke+core only (no deferred skip noise) |
 | **full** | major catalog | Demo domains + soak (not persist/mp; those need host orch) |
 | **catalog** | list only | Log every case id and exit (no join required if armed at menu… still needs mod load) |
@@ -28,7 +28,7 @@ Results always end with `SUMMARY` + `DONE exit_hint=0|1`. Deferred cases are
 | `demo_min` | `smoke,core,world,ui` (no combat wait) |
 | `benchmark` / `bench` | smoke+core+world+ui; multiply by `PLAYTEST_LAPS` |
 | `gate` / `ci` | `smoke,core` |
-| `live` | smoke…finale + soak (same expansion as `full` / `all`) |
+| `live` | same as `full` / `all` |
 | `full` / `all` | smoke…finale + soak (not persist/mp/apm/soak_long) |
 | `residual` / `residual_light` | **client only:** `mp` + short `soak` (not Make residual gate) |
 | `catalog` / `list` | dump case list to log |
@@ -50,7 +50,7 @@ Make:
 make playtest-demo
 make playtest-bench LAPS=3
 make playtest-gate
-make playtest-full            # long; all demo domains + soak
+make playtest-full            # long (85 cases); no persist/mp/apm/bot
 make playtest SUITE=combat
 ```
 
@@ -63,7 +63,7 @@ make playtest SUITE=combat
 
 ---
 
-## smoke — boot / join gate
+## smoke: boot / join gate
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -75,7 +75,7 @@ make playtest SUITE=combat
 
 ---
 
-## core — play loop (demo spine)
+## core: play loop (demo spine)
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -100,7 +100,7 @@ make playtest SUITE=combat
 
 ---
 
-## world — world / mesh / content probes
+## world: world / mesh / content probes
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -111,13 +111,13 @@ make playtest SUITE=combat
 | `world_time_advances` | live | world, demo, bench | `worldTime` increases while waiting |
 | `biome_id` | live | world | Biome id ≥ 0 at player |
 | `poi_textures_non_terrain` | live | world, poi | Tele to POI; block id ≥ 256 |
-| `weather_array` | live | world, weather | WeatherManager global type + biome weather entry |
-| `deco_trees` | live | world, deco | Plant/tree/deco blocks present around player |
+| `weather_array` | live | world, weather | S2C weather residual |
+| `deco_trees` | live | world, deco | AssignIds match |
 | `water_plane` | live | world, water | WaterSet + mass/isWater/block sample (not package-only) |
 
 ---
 
-## ui — window tour (demo-style)
+## ui: window tour (demo-style)
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -149,7 +149,19 @@ make playtest SUITE=combat
 
 ---
 
-## economy — craft / TE / trade
+## finale: death / respawn (runs last in demo)
+
+Suite id `finale`. Death and respawn close the attract path so earlier
+suites stay healthy.
+
+| Case | Status | Tags | Notes |
+|---|---|---|---|
+| `player_death_screen` | live | combat, player, admin | Admin kill player |
+| `player_respawn` | live | combat, player | After death |
+
+---
+
+## economy: craft / TE / trade
 
 | Case | Status | Tags | Notes |
 |---|---|---|---|
@@ -166,8 +178,6 @@ make playtest SUITE=combat
 | `trader_stock_ui` | live | economy, trader | EntityTrader in range (+ TraderData) |
 | `trader_buy` | live | economy, trader | Coins spent + stock/goods change |
 
-The mp-suite case `lock_contention` also exercises a TE under load; see [mp](#mp--multiplayer).
-
 ---
 
 ## quest
@@ -182,7 +192,8 @@ The mp-suite case `lock_contention` also exercises a TE under load; see [mp](#mp
 | `quest_turn_in` | live | quest, trader | CompleteQuest → Completed state |
 | `quest_nav_marker` | live | quest, ui | NavObjectManager register |
 
-The mp-suite case `shared_quest` also seeds a quest with a loadgen peer; see [mp](#mp--multiplayer).
+(`shared_quest` is documented under `mp`; it needs a peer fixture and the
+catalog registers it there.)
 
 ---
 
@@ -211,18 +222,7 @@ The mp-suite case `shared_quest` also seeds a quest with a loadgen peer; see [mp
 
 ---
 
-## finale — death + respawn (demo close)
-
-| Case | Status | Notes |
-|---|---|---|
-| `player_death_screen` | live | Admin kill player |
-| `player_respawn` | live | After death |
-
-Runs last in the demo path; the runner recovers from death mid-suite.
-
----
-
-## persist_setup — host multi-phase setup (orchestrator phase A)
+## persist_setup: host multi-phase setup (orchestrator phase A)
 
 Suite id `persist_setup`. Prepares world/player state, then emits the
 `persist_setup_done` barrier so the host can save and rejoin.
@@ -236,7 +236,7 @@ Suite id `persist_setup`. Prepares world/player state, then emits the
 | `persist_setup_blockmeta` | live | Seed block and apply damage meta |
 | `persist_setup_done` | live | Emit checkpoint barrier for host |
 
-## persist — host multi-phase verify (orchestrator phase B)
+## persist: host multi-phase verify (orchestrator phase B)
 
 Suite id `persist`. Asserts setup state after save + client rejoin.
 
@@ -252,7 +252,7 @@ These need orchestrator phases (restart pair mid-suite), not only in-mod steps.
 
 ---
 
-## mp — multiplayer
+## mp: multiplayer
 
 | Case | Status | Notes |
 |---|---|---|
@@ -280,6 +280,21 @@ Make targets: `make playtest-soak-long`, `make playtest-apm`, `make playtest-res
 
 ---
 
+## bot: BotManager visibility / parity
+
+Cases that observe the dedicated server's `BotMod` bots (BotManager auto-spawn
+plus orchestrator telnet spawn requests) from the playtest client's point of
+view. Requires `BotMod` in the dedicated server's `Mods/`.
+
+| Case | Status | Tags | Assert |
+|---|---|---|---|
+| `bot_spawn_visible` | live | bot, demo | BotManager auto-spawned TargetBotCount + explicit spawn near player; client sees a bot |
+| `bot_moves` | live | bot, locomotion | Nearest living bot within 120 m tracked across ticks (position delta) |
+| `bot_physics_parity` | live | bot, physics | Nearest living bot within 120 m has a sane physics/position state |
+| `bot_player_near` | live | bot, demo | Telnet-requested bot spawns near this player; client observes it |
+
+---
+
 ## Demo sequence (fixed order)
 
 When `SUITE=demo`, the client runs this attract-mode path:
@@ -297,7 +312,7 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 
 `SUITE=benchmark` with `PLAYTEST_LAPS=N`:
 
-- Repeats smoke+core+world+ui **N** times (suite labels `benchmark@1` …)
+- Repeats smoke+core+world **N** times (suite labels `benchmark@1` …)
 - Each case reports `ms` in JSON result lines
 - Host report can rank slowest cases (orchestrator already stores `ms`)
 
@@ -323,7 +338,8 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 | soak | 2 | 0 |
 | soak_long | 1 | 0 |
 | apm | 1 | 0 |
-| **catalog total** | **104** | **0** |
+| bot | 4 | 0 |
+| **catalog total** | **108** | **0** |
 
 Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
 (smoke…finale attract path; residual suites separate). Residual promotion gate:

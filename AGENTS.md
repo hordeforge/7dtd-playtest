@@ -1,12 +1,14 @@
 # AGENTS.md - 7dtd-playtest
 
 Stock-client **gameplay automation** against real servers: the **stock
-dedicated** (default target) and **zdtd**. Drive stock APIs and assert
+dedicated** (default target) and **zdtd-server**. Drive stock APIs and assert
 observable state. Prefer missing over fakes.
 
+Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)
+
 Workspace: [`../AGENTS.md`](../AGENTS.md).  
-Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).  
-Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
+Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server-server/docs/CLIENT_PLAYTEST.md).  
+Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
 
 ## Owns
 
@@ -16,7 +18,7 @@ Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
 
 ## Does not own
 
-- IP connect / intro skip (that is **7dtd-connect**)
+- IP connect / intro skip (that is **7dtd-fastconnect**)
 - Server implementation (zdtd)
 - Load volume bots (7dtd-loadgen)
 - Inventing world/chunk/sign/inventory S2C to keep tests green
@@ -33,7 +35,7 @@ Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
 6. Host Python via **`uv`** only. Secrets via env.
 7. No em dashes. No AI attribution.
 8. Name for what it does (suite ids, case ids, env vars).
-9. **Exclusive live client** — see below. Only one orchestrated playtest (or
+9. **Exclusive live client** (see below). Only one orchestrated playtest (or
    other exclusive client drive) at a time on this machine.
 
 ## Playtest / live-client exclusivity
@@ -89,7 +91,8 @@ When free: `running=no` (omit session / timestamps).
   also **no** live client process. If a client is still up, do not clear the
   lock; stop and record the mismatch (`stale_but_live`).
 
-Inspect: `cat` the lock file, or `python3 -c "import playtest_lock as p; print(p.read_lock())"`.
+Inspect: `cat` the lock file, or from the repo root
+`PYTHONPATH=scripts python3 -c "import playtest_lock as p; print(p.read_lock())"`.
 
 ### Acquire / release / process check
 
@@ -114,16 +117,26 @@ heartbeat (or release promptly). This is **client exclusivity only**, not task
 ownership in a project TODO.
 
 Shipped module: `scripts/playtest_lock.py` (unit-tested; flock-serialized
-acquire + heartbeat).
+acquire + heartbeat). Its concurrency, crash, and corruption behaviour is
+covered by deterministic simulation - see [DST.md](DST.md) and `make dst`.
+Everything the lock cannot reproduce (clock, entropy, pid, disk, the
+cross-process mutex) is injected through `playtest_lock.LockEnv`; do not
+reintroduce a direct `time.time()`, `secrets`, or `Path.write_text` call in
+that module, or the simulation stops covering it.
 
 ## Commands
 
 ```bash
+make test                 # offline gates (lint + typecheck + suites), no game install needed
+make lint                 # ruff over scripts/ ([tool.ruff])
+make typecheck            # mypy over scripts/ ([tool.mypy])
+make test-one GATE=test_dst.py   # run one gate while iterating
+make check                # exactly what CI runs: test + dst DST_SEEDS=200
 make install              # build + install playtest mod
 make install-pair         # playtest + connect
 make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
-make playtest-core        # stock dedicated + smoke,core
-make playtest-zdtd        # same against zdtd
+make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
+make playtest-zdtd        # demo suite against zdtd (port 27025)
 make playtest SUITE=core SERVER=stock
 ```
 
@@ -135,11 +148,12 @@ make playtest SUITE=core SERVER=stock
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
 | `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
-| `ZDTD_CONNECT` | Set by orchestrator / connect |
+| `7DTD_CONNECT` | Set by orchestrator / connect |
 | `PLAYTEST_LOCK_FILE` | Override exclusivity lock path (default under `~/.cache/7dtd-playtest/`) |
 | `PLAYTEST_SESSION_ID` | Lock holder session id (or `--session`; auto-generated if empty) |
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
 | `PLAYTEST_LOCK_HEARTBEAT_SEC` | How often the orchestrator refreshes heartbeat (default 30) |
+| `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (default `retest`; written to the generated server config and used by the orchestrator's telnet client) |
 
 `residual` expands to `mp,soak` only. `make playtest-residual` is a **different**
 multi-target host gate (persist + mp + apm + soak_long). See README.
@@ -149,8 +163,48 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 **Stable** lines prefixed `[7dtd-playtest]` (do not rename tokens):
 
 - Human: `PASS|FAIL|SKIP suite/case detail`
-- Barrier: `barrier <name>` (host greps for telnet/admin phases)
+- Barrier: `barrier <name>` (host greps for telnet/admin phases).
+  `spawn_vehicle:<entityClass>` asks the host for one vehicle of that class
+  (the bare `spawn_vehicle` spawns a bicycle); client-created vehicles are
+  unknown to a dedicated server and cannot be driven there.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
 Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
+
+## Offline gates (no game install)
+
+`make test` runs lint + typecheck plus the ten offline suites on every push
+(CI: `.github/workflows/ci.yml`). The analysis gates come first and are
+blocking:
+
+0. ruff over `scripts/` (`make lint`, `[tool.ruff]` in pyproject.toml) and
+   mypy over `scripts/` (`make typecheck`, `[tool.mypy]`); both tools are
+   pinned in the dev dependency-group so local and CI versions match uv.lock.
+
+Then the ten suites:
+
+1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
+   + counts total must equal Catalog.cs. A catalog addition that skips
+   SCENARIOS.md fails CI.
+2. mod version surface (`scripts/test_version_surface.py`): ModInfo.xml ==
+   ModApi.Version == dist manifest, and CHANGELOG.md must carry an
+   [Unreleased] section plus the current release entry.
+3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
+4. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
+5. host lock (`scripts/test_playtest_lock.py`)
+6. deterministic simulation (`scripts/test_dst.py`)
+7. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
+   catches the read-before-assignment crash class that once shipped in
+   `playtest_run.py` main(); only fires with real game binaries present.
+8. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
+   and serverconfig XML attribute escaping plus parser survival on malformed
+   JSON events.
+9. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
+   fresh-save removes only every world's copy of the named game save
+   (quarantined under `<logdir>/quarantine`, newest 5 kept, never
+   hard-deleted).
+10. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
+
+CI also runs a wider seed sweep with `make dst`. The mod build itself is not
+CI-able (game DLLs).

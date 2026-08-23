@@ -20,7 +20,6 @@ namespace ZdtdPlaytest
 
     enum Phase
     {
-        Idle,
         WaitReady,
         RunCase,
         Waiting,
@@ -51,19 +50,39 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// Build a live case (Act → optional Wait → optional Assert). Used by the
-        /// built-in catalog and by external scenario providers.
+        /// built-in catalog and by external scenario providers. <paramref name="tags"/>
+        /// is informational only (catalog listing) and may be omitted.
         /// </summary>
+        /// <remarks>
+        /// Fail-fast at queue build: a case without <paramref name="act"/>,
+        /// <paramref name="wait"/>, or <paramref name="assert"/> would record a
+        /// green pass while running nothing, so that combination throws
+        /// <see cref="ArgumentException"/> naming the case. Exceptions thrown
+        /// from the callbacks fail the case (detail names stage + exception
+        /// type); they never take down the runner.
+        /// </remarks>
+        /// <exception cref="ArgumentException">No callback supplied.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> ≤ 0.</exception>
         public static CaseDef Live(
             string suite,
             string id,
-            string[] tags,
-            Action<CaseCtx> act,
+            string[] tags = null,
+            Action<CaseCtx> act = null,
             Func<CaseCtx, bool> wait = null,
             Func<CaseCtx, bool> assert = null,
             float timeout = 8f,
             string fail = "timeout",
             float pause = 0.5f)
         {
+            if (act == null && wait == null && assert == null)
+                throw new ArgumentException(
+                    "CaseDef.Live(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") has no act, wait, or assert callback; it would "
+                    + "record a pass while running nothing");
+            if (!(timeout > 0f))
+                throw new ArgumentOutOfRangeException(nameof(timeout), timeout,
+                    "CaseDef.Live(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") timeout must be > 0 seconds");
             return new CaseDef
             {
                 Suite = suite,
@@ -108,6 +127,7 @@ namespace ZdtdPlaytest
         public int PlaceBlockType = -1;
         public int IntA;
         public int IntB;
+        public int IntC;
         public float FloatA;
         public float FloatB;
         /// <summary>Optional entity id for combat fixtures (ranged target, etc.).</summary>
@@ -122,13 +142,15 @@ namespace ZdtdPlaytest
     {
         static bool _armed;
         static string[] _suites = Array.Empty<string>();
-        static Phase _phase = Phase.Idle;
+        static Phase _phase = Phase.Finished;
         static readonly List<CaseDef> _queue = new List<CaseDef>();
         static int _caseIndex = -1;
         static CaseCtx _ctx;
         static float _waitUntil;
         static float _readySince = -1f;
         static bool _readyLogged;
+        /// <summary>One-shot guard so a throwing LocomotionDrive.Tick warns once, not per frame.</summary>
+        static bool _locomotionFaultLogged;
         static int _benchmarkLaps = 1;
         /// <summary>When player is null/dead mid-suite, count unscaled time to avoid hang.</summary>
         static float _playerMissingSince = -1f;
@@ -181,7 +203,7 @@ namespace ZdtdPlaytest
 
             Report.Reset();
             Report.Info("armed suites=" + string.Join(",", _suites)
-                + " laps=" + _benchmarkLaps + " v" + ModIdentity.Version);
+                + " laps=" + _benchmarkLaps + " v" + ModApi.Version);
             if (string.Equals(suiteEnv, "list", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(suiteEnv, "catalog", StringComparison.OrdinalIgnoreCase))
             {
@@ -194,6 +216,17 @@ namespace ZdtdPlaytest
             }
 
             BuildQueue();
+            if (_queue.Count == 0)
+            {
+                // Every requested suite failed to produce cases (unknown id or
+                // uninstalled provider). Finish now with the recorded failures
+                // instead of waiting out the join for an empty green pass.
+                Report.Summary(_suites);
+                Report.Done();
+                _armed = false;
+                _phase = Phase.Finished;
+                return;
+            }
             _phase = Phase.WaitReady;
             _caseIndex = -1;
             _readySince = -1f;
@@ -203,12 +236,8 @@ namespace ZdtdPlaytest
         static void BuildQueue()
         {
             _queue.Clear();
-            int laps = 1;
-            foreach (var s in _suites)
-            {
-                if (s == "benchmark")
-                    laps = _benchmarkLaps;
-            }
+            int laps = Array.IndexOf(_suites, "benchmark") >= 0 ? _benchmarkLaps : 1;
+            var produced = new HashSet<string>();
 
             for (int lap = 0; lap < laps; lap++)
             {
@@ -216,16 +245,26 @@ namespace ZdtdPlaytest
                 {
                     int before = _queue.Count;
                     Catalog.AppendSuite(_queue, s, lap);
-                    if (_queue.Count == before && s != "benchmark")
-                        Report.Info("unknown or empty suite: " + s);
+                    if (_queue.Count > before) produced.Add(s);
                 }
+            }
+
+            // A requested suite that appended nothing is a harness failure, not
+            // a green run: typo'd ids and uninstalled providers must stay
+            // visible in SUMMARY / DONE exit_hint so hosts can detect them
+            // programmatically instead of reading exit 0 for zero work.
+            foreach (var s in _suites)
+            {
+                if (produced.Contains(s)) continue;
+                Report.Info("unknown or empty suite: " + s);
+                Report.Result(s, "(unknown)", "fail", 0f, "unknown or empty suite");
             }
             Report.Info("queue cases=" + _queue.Count);
         }
 
         public static void Tick()
         {
-            if (!_armed || _phase == Phase.Idle || _phase == Phase.Finished) return;
+            if (!_armed || _phase == Phase.Finished) return;
 
             var gm = GameManager.Instance;
             if (gm == null) return;
@@ -233,7 +272,18 @@ namespace ZdtdPlaytest
             if (world == null) return;
 
             // Keep locomotion applied on every gmUpdate while drive is active.
-            try { LocomotionDrive.Tick(); } catch { /* */ }
+            // A throwing Tick must not take down the runner, but it also must
+            // not vanish: every walk-driven case would then fail with an
+            // opaque "position never reached" and no cause. Warn once.
+            try { LocomotionDrive.Tick(); }
+            catch (Exception ex)
+            {
+                if (!_locomotionFaultLogged)
+                {
+                    _locomotionFaultLogged = true;
+                    Log.Warning("[7dtd-playtest] locomotion tick failed (further failures silent): " + ex.Message);
+                }
+            }
 
             if (_phase == Phase.WaitReady)
             {
@@ -383,7 +433,7 @@ namespace ZdtdPlaytest
                 }
                 catch (Exception ex)
                 {
-                    FinishCase(def, "fail", 0f, "exception " + ex.Message);
+                    FinishCase(def, "fail", 0f, DescribeException("act", ex));
                     return;
                 }
 
@@ -393,7 +443,7 @@ namespace ZdtdPlaytest
                     return;
                 }
 
-                bool ok = EvaluateAssert(def, _ctx, out string detail);
+                bool ok = RunCaseAssert(def, out string detail);
                 FinishCase(def, ok ? "pass" : "fail", 0f, detail);
                 return;
             }
@@ -406,13 +456,13 @@ namespace ZdtdPlaytest
                 try { done = def.Wait(_ctx); }
                 catch (Exception ex)
                 {
-                    FinishCase(def, "fail", elapsed, "wait exception " + ex.Message);
+                    FinishCase(def, "fail", elapsed, DescribeException("wait", ex));
                     return;
                 }
 
                 if (done)
                 {
-                    bool ok = EvaluateAssert(def, _ctx, out string detail);
+                    bool ok = RunCaseAssert(def, out string detail);
                     FinishCase(def, ok ? "pass" : "fail", elapsed, detail);
                     return;
                 }
@@ -425,6 +475,39 @@ namespace ZdtdPlaytest
                     FinishCase(def, "fail", elapsed, d);
                 }
             }
+        }
+
+        /// <summary>
+        /// Invoke the case assert against the live ctx; exceptions fail the case.
+        /// </summary>
+        static bool RunCaseAssert(CaseDef def, out string detail)
+        {
+            bool ok = true;
+            detail = _ctx.Detail ?? "";
+            if (def.Assert == null) return ok;
+            try
+            {
+                ok = def.Assert(_ctx);
+                detail = _ctx.Detail ?? detail;
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                detail = DescribeException("assert", ex);
+            }
+            return ok;
+        }
+
+        /// <summary>
+        /// Case-failure detail for a thrown exception. The type name is the
+        /// triage signal: an NRE's Message alone is just "Object reference not
+        /// set…", which names neither member nor cause.
+        /// </summary>
+        static string DescribeException(string stage, Exception ex)
+        {
+            string msg = ex.Message ?? "";
+            return stage + " exception " + ex.GetType().Name
+                + (msg.Length > 0 ? ": " + msg : "");
         }
 
         static void EnsurePlayerHealthy(EntityPlayerLocal p)
@@ -540,8 +623,11 @@ namespace ZdtdPlaytest
             }
 
             player = ResolveLocalPlayer(world) ?? player;
-            EnsurePlayerHealthy(player);
+            // Heal between cases, except the death-screen act: leave HP as-is so
+            // the host kill barrier drops a mortal player.
             var def = _queue[_caseIndex];
+            if (def.Id != "player_death_screen")
+                EnsurePlayerHealthy(player);
 
             _ctx = new CaseCtx
             {
@@ -560,27 +646,6 @@ namespace ZdtdPlaytest
                     _ctx.BenchmarkLap = lap;
             }
             _phase = Phase.RunCase;
-        }
-
-        /// <summary>
-        /// Evaluate def.Assert once against ctx. Null Assert passes; a thrown
-        /// assertion fails with the exception message as detail.
-        /// </summary>
-        static bool EvaluateAssert(CaseDef def, CaseCtx ctx, out string detail)
-        {
-            detail = ctx.Detail ?? "";
-            if (def.Assert == null) return true;
-            try
-            {
-                bool ok = def.Assert(ctx);
-                detail = ctx.Detail ?? detail;
-                return ok;
-            }
-            catch (Exception ex)
-            {
-                detail = "assert exception " + ex.Message;
-                return false;
-            }
         }
 
         static void FinishCase(CaseDef def, string status, float elapsedSec, string detail)

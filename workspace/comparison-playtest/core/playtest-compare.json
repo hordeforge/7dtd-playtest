@@ -1,0 +1,220 @@
+{
+ "cases": [
+  {
+   "case": "core/bag_present",
+   "stock": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "bag_slots=45",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/block_damage_melee",
+   "stock": {
+    "detail": "type0=20304 now=0 dmg0=0 dmg=0 pulses=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "type0=20304 now=20304 dmg0=0 dmg=5 pulses=2",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/buffs",
+   "stock": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "buff mgr live",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/dig_confirm",
+   "stock": {
+    "detail": "was=7 now=0 at -117, 45, 886",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "was=7 now=0 at -269, 62, 461",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/held_slot_report",
+   "stock": {
+    "detail": "slot=0 type=65537 quality=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "slot=0 type=65537 quality=5",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/inventory",
+   "stock": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "holding_type=65603",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/jump_motor",
+   "stock": {
+    "detail": "y0=42.83 peak=44.87 rise=2.04",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "y0=61.08 peak=63.10 rise=2.02",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/look",
+   "stock": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "rot set yaw=90",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/look_pitch",
+   "stock": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "pitch_level",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/look_yaw_sweep",
+   "stock": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "yaw_step=3",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/place_confirm",
+   "stock": {
+    "detail": "want=7 now=7 at -117, 45, 886",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "want=7 now=7 at -269, 62, 461",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/quests_journal",
+   "stock": {
+    "detail": "journal_quests=0",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "journal_quests=1",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/sneak_motor",
+   "stock": {
+    "detail": "horiz=3.17 hopMax=0.06 motionTicks=171",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=3.15 hopMax=0.02 motionTicks=194",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/sprint_motor",
+   "stock": {
+    "detail": "horiz=9.11 m/s~=4.55 hopMax=0.08 motionTicks=193",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=8.37 m/s~=4.19 hopMax=0.25 motionTicks=202",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/stamina_drains_sprint",
+   "stock": {
+    "detail": "stam0=100.0 min=98.2 drain=1.8",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "stam0=100.0 min=98.3 drain=1.7",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/walk_lateral",
+   "stock": {
+    "detail": "horiz=1.63 dx=1.52 dz=0.58 hopMax=0.14 motionTicks=22",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.51 dx=1.51 dz=0.00 hopMax=0.03 motionTicks=62",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/walk_motor",
+   "stock": {
+    "detail": "horiz=1.55 hopMax=0.10 motionTicks=37",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "horiz=1.53 hopMax=0.05 motionTicks=48",
+    "status": "PASS"
+   }
+  },
+  {
+   "case": "core/walk_ring",
+   "stock": {
+    "detail": "path~=13.41 motionTicks=403 legs=3",
+    "status": "PASS"
+   },
+   "zdtd": {
+    "detail": "path~=13.54 motionTicks=436 legs=3",
+    "status": "PASS"
+   }
+  }
+ ],
+ "compared": true,
+ "findings": [],
+ "stock": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 18,
+   "skip": 0
+  }
+ },
+ "zdtd": {
+  "nreLike": 0,
+  "summary": {
+   "fail": 0,
+   "pass": 18,
+   "skip": 0
+  }
+ }
+}

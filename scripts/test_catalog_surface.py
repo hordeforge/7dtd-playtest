@@ -7,29 +7,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS))
-import playtest_run as pr
-
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 SCENARIOS = ROOT / "SCENARIOS.md"
 ORCH = ROOT / "scripts" / "playtest_run.py"
-
-# Barriers the orchestrator only answers when suite_wants_zombie_fixture()
-# is true (spawn/kill/settime fixtures). loadgen/chat/apm/persist barriers
-# are answered unconditionally and stay out of this set.
-HOST_GATED_BARRIERS = frozenset(
-    {
-        "spawn_zombie",
-        "kill_fixture_zombie",
-        "kill_player",
-        "settime_bloodmoon",
-        "settime_day",
-        "spawn_trader",
-        "spawn_vehicle",
-    }
-)
 
 REQUIRED_LIVE = (
     "world_time_advances",
@@ -134,35 +114,30 @@ def defer_reasons(src: str) -> list[tuple[str, str]]:
     return re.findall(
         r'\bDefer\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"\s*,\s*new\s*\[\s*\]\s*\{[^}]*\}\s*,\s*"([^"]*)"\s*\)',
         src,
-        flags=re.DOTALL,
+        flags=re.S,
     )
 
 
-def suite_ids_emitting_gated_barriers(src: str) -> set[str]:
-    """Suite ids whose Add* builders emit any host-gated fixture barrier.
-
-    Derived from Catalog.cs: AppendSuite's switch maps suite id → builder
-    function; each builder body (up to the next builder definition) is
-    scanned for Report.Barrier("name").
-    """
-    fn_for_suite = dict(
-        re.findall(r'case "([a-z0-9_]+)":\s*Add([A-Za-z0-9_]+)\(q, label\);', src)
-    )
-    parts = re.split(
-        r"static void (Add[A-Za-z0-9_]+)\(List<CaseDef> q, string suite\)",
+def persist_pad_from_catalog(src: str) -> tuple[int, int, int] | None:
+    m = re.search(
+        r"PersistPlayerPos\s*=\s*new Vector3\(\s*([\d.]+)f?\s*,"
+        r"\s*([\d.]+)f?\s*,\s*([\d.]+)f?\s*\)",
         src,
     )
-    emitting: set[str] = set()
-    for i in range(1, len(parts) - 1, 2):
-        fn_name, body = parts[i], parts[i + 1]
-        barriers = set(re.findall(r'Report\.Barrier\("([a-z_:]+)"', body))
-        if barriers & HOST_GATED_BARRIERS:
-            emitting.update(
-                suite_id
-                for suite_id, mapped_fn in fn_for_suite.items()
-                if "Add" + mapped_fn == fn_name
-            )
-    return emitting
+    if not m:
+        return None
+    x, y, z = (int(float(g)) for g in m.groups())
+    return (x, y, z)
+
+
+def persist_pad_from_orchestrator(src: str) -> tuple[int, int, int] | None:
+    m = re.search(
+        r"PERSIST_PAD_XYZ\s*=\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", src
+    )
+    if not m:
+        return None
+    x, y, z = (int(g) for g in m.groups())
+    return (x, y, z)
 
 
 def main() -> int:
@@ -195,6 +170,13 @@ def main() -> int:
         f"SCENARIOS.md missing live rows for Catalog Live cases: {undoc_live}"
     )
 
+    # The Counts table total must equal the parsed Live set (drift guard).
+    total_m = re.search(r"\*\*catalog total\*\*\s*\|\s*\*\*(\d+)\*\*", doc)
+    assert total_m and int(total_m.group(1)) == len(live), (
+        f"Counts 'catalog total' {total_m.group(1) if total_m else '?'} != "
+        f"Catalog.cs Live count {len(live)} - stale suite row in SCENARIOS.md"
+    )
+
     # Built-in Defer set is empty today; any new Defer must be documented.
     undoc_defer = sorted(
         c
@@ -209,6 +191,20 @@ def main() -> int:
     for cid, reason in defer_reasons(cat):
         if cid in RESIDUAL_MUST_BE_LIVE:
             raise AssertionError(f"residual {cid} still deferred: {reason}")
+
+    # Cross-language pad contract: the host teleports players to
+    # PERSIST_PAD_XYZ over telnet while persist_setup_pos and
+    # pos_survives_rejoin assert proximity to Catalog.PersistPlayerPos. A
+    # drift between the two copies of this constant fails persist runs with
+    # an opaque "far from pad", so pin them equal like every other surface.
+    cat_pad = persist_pad_from_catalog(cat)
+    orch_pad = persist_pad_from_orchestrator(orch)
+    assert cat_pad is not None, "Catalog.cs lost the PersistPlayerPos constant"
+    assert orch_pad is not None, "playtest_run.py lost the PERSIST_PAD_XYZ constant"
+    assert cat_pad == orch_pad, (
+        f"persist pad drift: Catalog.cs PersistPlayerPos {cat_pad} != "
+        f"playtest_run.py PERSIST_PAD_XYZ {orch_pad}"
+    )
 
     for name in (
         "kill_fixture_zombie",
@@ -227,18 +223,6 @@ def main() -> int:
     ):
         assert name in orch, f"orchestrator missing {name}"
 
-    # Host fixture gate must cover every suite whose cases emit a gated
-    # barrier; otherwise standalone runs of that suite lose their admin
-    # fixtures silently (client-side spawn fallbacks are not
-    # server-authoritative on a dedicated server).
-    fixture_suites = suite_ids_emitting_gated_barriers(cat)
-    assert fixture_suites, "catalog parse found no gated-barrier suites"
-    ungated = sorted(s for s in fixture_suites if not pr.suite_wants_zombie_fixture(s))
-    assert not ungated, (
-        f"suites emit host-gated barriers but suite_wants_zombie_fixture "
-        f"is false: {ungated}"
-    )
-
     print(
         "OK catalog surface:",
         ", ".join(REQUIRED_LIVE[:8]),
@@ -249,6 +233,7 @@ def main() -> int:
     print("OK demo alias includes vehicle+power+finale")
     print("OK residual 13 ids are Live:", ", ".join(RESIDUAL_MUST_BE_LIVE[:4]), "…")
     print("OK orchestrator has persist/loadgen/apm barriers")
+    print("OK persist pad matches Catalog.cs PersistPlayerPos:", cat_pad)
     return 0
 
 

@@ -1,6 +1,6 @@
 """Exclusive playtest runtime lock (host-side, no game I/O).
 
-Covers the shared **client and dedicated/zdtd server** on one machine — not
+Covers the shared **client and dedicated/zdtd server** on one machine, not
 only the client. Deterministic, parseable lock shared across agents and
 orchestrators. Compatible with the 7dtd-mods monorepo convention:
 
@@ -26,23 +26,26 @@ alive; agents should wait.
 from __future__ import annotations
 
 import fcntl
+import math
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_LOCK_REL = Path(".cache") / "7dtd-playtest" / "playtest_running"
 SESSION_RE = re.compile(r"^[a-z][a-z0-9]*-[0-9]{8}-[0-9]{6}-[0-9a-f]+$")
-# Lock-file field safety: session ids are written verbatim into a line-oriented
-# key=value file that every agent on the host parses. A session id must never
-# carry newlines (field injection) or '=' / leading '#' (key spoofing). This is
-# deliberately looser than SESSION_RE so conforming external holder ids still
-# pass while injection stays impossible.
+# Lock-file field safety: a session id is written verbatim into a
+# line-oriented key=value file every agent on the host parses, so it must
+# never carry newlines (field injection) or '=' / a leading '#' (key
+# spoofing). Deliberately looser than SESSION_RE so a conforming external
+# holder id still passes while injection stays impossible.
 SESSION_FIELD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 DEFAULT_STALE_SEC = 120
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 30
@@ -52,6 +55,108 @@ STOCK_CLIENT_EXECUTABLES = ("7DaysToDie.exe", "DaysToDie.exe")
 STOCK_SERVER_EXECUTABLES = ("7DaysToDieServer.x86_64", "zdtd")
 WINE_PRELOADERS = ("wine-preloader", "wine64-preloader")
 GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# Nondeterminism seams (deterministic simulation testing)
+#
+# Everything this module cannot reproduce on its own - wall clock, OS entropy,
+# pid, the filesystem, and the cross-process mutex - goes through one injected
+# ``LockEnv``. Production uses :data:`SYSTEM_ENV`; the simulator in
+# ``dst_sim.py`` substitutes a virtual clock, a seeded RNG, and an in-memory
+# filesystem so a whole multi-agent run is a pure function of one seed.
+# ---------------------------------------------------------------------------
+
+
+class LockStorage:
+    """Filesystem port. Only these calls may touch durable state."""
+
+    def is_file(self, path: Path) -> bool:
+        return path.is_file()
+
+    def read_text(self, path: Path) -> str | None:
+        try:
+            # Foreign helpers share this file through plain shell redirects;
+            # nothing forces their bytes to be valid UTF-8. Decode with
+            # replacement like every other reader of externally written
+            # bytes: U+FFFD never matches a key or session, so a mangled
+            # record degrades exactly like the truncated-corruption case
+            # instead of raising UnicodeDecodeError out of acquire/release.
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+    def write_text(self, path: Path, text: str) -> None:
+        path.write_text(text, encoding="utf-8")
+
+    def replace(self, src: Path, dst: Path) -> None:
+        os.replace(src, dst)
+
+    def exists(self, path: Path) -> bool:
+        return path.exists()
+
+    def unlink(self, path: Path) -> None:
+        path.unlink()
+
+    def mkdir_parents(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    def exclusive(self, path: Path, fn: Callable[[], None]) -> None:
+        """Run ``fn`` while holding the cross-process lock for ``path``."""
+        self.mkdir_parents(path)
+        flock_path = flock_path_for(path)
+        with open(flock_path, "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                fn()
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+class LockEnv:
+    """Injected clock / entropy / storage. Default binds to the real host."""
+
+    def __init__(self, storage: LockStorage | None = None) -> None:
+        self.storage = storage or LockStorage()
+
+    def now(self) -> float:
+        """Epoch seconds. Virtual in simulation."""
+        return time.time()
+
+    def token_hex(self, nbytes: int) -> str:
+        return secrets.token_hex(nbytes)
+
+    def pid(self) -> int:
+        return os.getpid()
+
+    def stale_sec(self) -> float:
+        return _stale_sec_from_environ()
+
+    def heartbeat_interval_sec(self) -> float:
+        return _heartbeat_interval_from_environ()
+
+
+SYSTEM_ENV = LockEnv()
+_ENV: LockEnv = SYSTEM_ENV
+
+
+def current_env() -> LockEnv:
+    return _ENV
+
+
+def set_env(env: LockEnv | None) -> LockEnv:
+    """Swap the process-wide default env (simulation entry point).
+
+    Returns the previous env so callers can restore it.
+    """
+    global _ENV
+    previous = _ENV
+    _ENV = env or SYSTEM_ENV
+    return previous
+
+
+def _env(env: LockEnv | None) -> LockEnv:
+    return env if env is not None else _ENV
 
 
 class PlaytestLockError(RuntimeError):
@@ -69,11 +174,28 @@ class PlaytestLockError(RuntimeError):
         self.reason = reason
 
 
+def _require_session(session: str) -> str:
+    """Strip and validate a caller-supplied session id, or refuse.
+
+    Single gate for acquire/heartbeat/release so none of them can write a
+    field-breaking id into the lock file.
+    """
+    if not session or not str(session).strip():
+        raise PlaytestLockError("session id is required", reason="bad_session")
+    session = str(session).strip()
+    if not SESSION_FIELD_RE.fullmatch(session):
+        raise PlaytestLockError(
+            "session id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127} "
+            f"(single line, no '=' or control chars); got {session!r}",
+            reason="bad_session",
+        )
+    return session
+
+
 @dataclass(frozen=True)
 class LockState:
     running: bool
     session: str | None
-    path: Path
     acquired: str | None = None
     heartbeat: str | None = None
 
@@ -81,12 +203,13 @@ class LockState:
     def heartbeat_epoch(self) -> float | None:
         return parse_utc_timestamp(self.heartbeat) if self.heartbeat else None
 
-    @property
-    def heartbeat_age_sec(self) -> float | None:
+    def heartbeat_age_sec_at(self, now: float) -> float | None:
+        """Age against an explicit clock read (simulation-safe)."""
         ep = self.heartbeat_epoch
         if ep is None:
             return None
-        return max(0.0, time.time() - ep)
+        return max(0.0, now - ep)
+
 
 
 def default_lock_path() -> Path:
@@ -96,34 +219,60 @@ def default_lock_path() -> Path:
     return Path.home() / DEFAULT_LOCK_REL
 
 
-def stale_sec() -> float:
-    raw = os.environ.get("PLAYTEST_LOCK_STALE_SEC", "").strip()
-    if raw:
-        try:
-            return max(1.0, float(raw))
-        except ValueError:
-            pass
-    return float(DEFAULT_STALE_SEC)
+def _warn_invalid_env(name: str, raw: str, fallback: float) -> None:
+    """A set-but-unparseable override must not silently change behaviour."""
+    print(
+        f"playtest-lock warn: invalid {name}={raw!r}; using default {fallback:g}s",
+        file=sys.stderr,
+    )
 
 
-def heartbeat_interval_sec() -> float:
-    raw = os.environ.get("PLAYTEST_LOCK_HEARTBEAT_SEC", "").strip()
+def _seconds_from_environ(name: str, fallback: float) -> float:
+    """Read a seconds override; unparseable or non-finite values warn+default.
+
+    ``float("nan")`` would collapse to a 1s clamp through ``max`` and make a
+    fresh live holder look stale instantly; ``inf`` makes the lock never stale
+    (or freezes the heartbeat wait). Both silently corrupt exclusivity, so
+    they are rejected like unparseable text.
+    """
+    raw = os.environ.get(name, "").strip()
     if raw:
         try:
-            return max(1.0, float(raw))
+            val = float(raw)
         except ValueError:
-            pass
-    return float(DEFAULT_HEARTBEAT_INTERVAL_SEC)
+            _warn_invalid_env(name, raw, fallback)
+        else:
+            if math.isfinite(val):
+                return max(1.0, val)
+            _warn_invalid_env(name, raw, fallback)
+    return float(fallback)
+
+
+def _stale_sec_from_environ() -> float:
+    return _seconds_from_environ("PLAYTEST_LOCK_STALE_SEC", DEFAULT_STALE_SEC)
+
+
+def _heartbeat_interval_from_environ() -> float:
+    return _seconds_from_environ(
+        "PLAYTEST_LOCK_HEARTBEAT_SEC", DEFAULT_HEARTBEAT_INTERVAL_SEC
+    )
 
 
 def flock_path_for(lock_path: Path) -> Path:
     return Path(str(lock_path) + ".flock")
 
 
-def utc_now_iso() -> str:
-    """UTC timestamp with second precision, always Z-suffixed."""
+def utc_now_iso(env: LockEnv | None = None) -> str:
+    """UTC timestamp with second precision, always Z-suffixed.
+
+    Reads the injected clock, so a simulated run stamps virtual time.
+    """
+    return format_utc(_env(env).now())
+
+
+def format_utc(epoch: float) -> str:
     return (
-        datetime.now(UTC)
+        datetime.fromtimestamp(epoch, UTC)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z")
@@ -131,7 +280,12 @@ def utc_now_iso() -> str:
 
 
 def parse_utc_timestamp(value: str | None) -> float | None:
-    """Parse ISO-8601 (…Z or offset) or unix epoch seconds → epoch float."""
+    """Parse ISO-8601 (…Z or offset) or unix epoch seconds → epoch float.
+
+    An offset-less stamp violates the documented ``<UTC ISO8601 Z>`` format,
+    but must not flip meaning with the host timezone: it is read as UTC so
+    staleness stays deterministic across hosts and containers.
+    """
     if value is None:
         return None
     s = value.strip()
@@ -145,45 +299,35 @@ def parse_utc_timestamp(value: str | None) -> float | None:
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(s).timestamp()
+        dt = datetime.fromisoformat(s)
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.timestamp()
 
 
-def new_session_id(prefix: str = "playtest") -> str:
+def new_session_id(prefix: str = "playtest", *, env: LockEnv | None = None) -> str:
     """Same shape as Atomic scripts/new-session-id.sh: prefix-UTC-hex."""
     if not re.fullmatch(r"[a-z][a-z0-9]*", prefix):
         raise ValueError(
             "prefix must start with a lowercase letter and contain only "
             "lowercase letters and digits"
         )
-    ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    suffix = secrets.token_hex(6)
+    e = _env(env)
+    ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime(e.now()))
+    suffix = e.token_hex(6)
     return f"{prefix}-{ts}-{suffix}"
 
 
-def validate_session_field(session: str) -> str:
-    """Reject session ids that could inject or spoof lock-file fields.
-
-    Raises ValueError; acquire/heartbeat/release translate this into
-    PlaytestLockError(reason="bad_session").
-    """
-    if not SESSION_FIELD_RE.fullmatch(session):
-        raise ValueError(
-            "session id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127} "
-            f"(single line, no '=' or control chars); got {session!r}"
-        )
-    return session
-
-
-def read_lock(path: Path | None = None) -> LockState:
+def read_lock(path: Path | None = None, *, env: LockEnv | None = None) -> LockState:
     path = path or default_lock_path()
-    if not path.is_file():
-        return LockState(running=False, session=None, path=path)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return LockState(running=False, session=None, path=path)
+    store = _env(env).storage
+    if not store.is_file(path):
+        return LockState(running=False, session=None)
+    text = store.read_text(path)
+    if text is None:
+        return LockState(running=False, session=None)
     running = False
     session: str | None = None
     acquired: str | None = None
@@ -212,7 +356,6 @@ def read_lock(path: Path | None = None) -> LockState:
     return LockState(
         running=running,
         session=session,
-        path=path,
         acquired=acquired,
         heartbeat=heartbeat,
     )
@@ -225,13 +368,17 @@ def write_lock(
     session: str | None = None,
     acquired: str | None = None,
     heartbeat: str | None = None,
+    env: LockEnv | None = None,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    e = _env(env)
+    store = e.storage
+    store.mkdir_parents(path)
     if running:
         if not session:
             raise ValueError("session is required when running=yes")
-        validate_session_field(session)
-        now = utc_now_iso()
+        if not SESSION_FIELD_RE.fullmatch(session):
+            raise ValueError(f"session id breaks lock-file fields: {session!r}")
+        now = utc_now_iso(e)
         acq = acquired or now
         hb = heartbeat or now
         body = (
@@ -242,16 +389,17 @@ def write_lock(
         )
     else:
         body = "running=no\n"
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}")
+    tmp = path.with_name(f".{path.name}.tmp.{e.pid()}.{e.token_hex(4)}")
     try:
-        tmp.write_text(body, encoding="utf-8")
-        os.replace(tmp, path)
+        # Atomic publish: a crash between these two calls must leave the old
+        # payload intact, never a half-written one. The simulator injects a
+        # crash here on purpose.
+        store.write_text(tmp, body)
+        store.replace(tmp, path)
     finally:
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+        if store.exists(tmp):
+            with suppress(OSError):
+                store.unlink(tmp)
 
 
 def is_stale(
@@ -260,17 +408,19 @@ def is_stale(
     path: Path | None = None,
     max_age_sec: float | None = None,
     now: float | None = None,
+    env: LockEnv | None = None,
 ) -> bool:
     """True when running=yes but heartbeat is missing or older than max age.
 
     Free locks are not stale. Used by agents to see if a holder is still
     refreshing, and by acquire to reclaim crashed holders (with process check).
     """
-    state = state if state is not None else read_lock(path)
+    e = _env(env)
+    state = state if state is not None else read_lock(path, env=e)
     if not state.running:
         return False
-    limit = stale_sec() if max_age_sec is None else max_age_sec
-    now_t = time.time() if now is None else now
+    limit = e.stale_sec() if max_age_sec is None else max_age_sec
+    now_t = e.now() if now is None else now
     ep = state.heartbeat_epoch
     if ep is None:
         # Legacy / corrupt: no heartbeat while claimed → treat as stale.
@@ -322,27 +472,19 @@ def _any_preloader_running_game(
     return False
 
 
-def default_live_client_running() -> bool:
-    """True when a stock/Proton **client** process is present."""
-    return _any_executable_running(STOCK_CLIENT_EXECUTABLES) or _any_preloader_running_game()
-
-
-def default_live_server_running() -> bool:
-    """True when stock dedicated or zdtd server process is present.
+def default_live_runtime_running() -> bool:
+    """True when a stock/Proton client or dedicated/zdtd server is present.
 
     Inspect the executable each process is running. A shell, terminal history,
     or agent prompt may mention these names, but cannot satisfy this check.
-    """
-    return _any_executable_running(STOCK_SERVER_EXECUTABLES)
-
-
-def default_live_runtime_running() -> bool:
-    """True when client **or** dedicated/zdtd server is present.
-
     Used as the default acquire gate: playtest_run starts both, and a second
     run must not double-bind ports or kill the first holder's processes.
     """
-    return default_live_client_running() or default_live_server_running()
+    return (
+        _any_executable_running(STOCK_CLIENT_EXECUTABLES)
+        or _any_preloader_running_game()
+        or _any_executable_running(STOCK_SERVER_EXECUTABLES)
+    )
 
 
 def tcp_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -356,41 +498,8 @@ def tcp_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
         return False
 
 
-def _with_flock(path: Path, fn: Callable[[], None]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    flock_path = flock_path_for(path)
-    with open(flock_path, "a+", encoding="utf-8") as lf:
-        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-        try:
-            fn()
-        finally:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
-
-
-def _start_blocker(
-    state: LockState,
-    session: str,
-    *,
-    live: bool,
-    max_age_sec: float | None = None,
-) -> tuple[str, str | None] | None:
-    """Single source of truth for the start policy.
-
-    Returns ``(reason, held_by)`` for the first rule that refuses
-    ``session``, or None when starting is allowed. Used by both
-    :func:`acquire` (raises) and :func:`can_start` (dry run) so the two
-    cannot drift.
-    """
-    if state.running and state.session and state.session != session:
-        if is_stale(state, max_age_sec=max_age_sec):
-            # Documented reclaim when the holder died without releasing;
-            # a live runtime still blocks takeover (stale_but_live).
-            return ("stale_but_live", state.session) if live else None
-        return ("foreign_holder", state.session)
-    if live and not (state.running and state.session == session):
-        # Free lock (or corrupt payload) but client/server already up.
-        return ("live_runtime", state.session)
-    return None
+def _with_flock(path: Path, fn: Callable[[], None], *, env: LockEnv | None = None) -> None:
+    _env(env).storage.exclusive(path, fn)
 
 
 def can_start(
@@ -399,15 +508,20 @@ def can_start(
     path: Path | None = None,
     live_probe: Callable[[], bool] | None = None,
     max_age_sec: float | None = None,
+    env: LockEnv | None = None,
 ) -> bool:
     """Dry-run of acquire rules without writing."""
     if not session:
         return False
+    e = _env(env)
     path = path or default_lock_path()
     # Default: client OR dedicated/zdtd (full playtest runtime).
     probe = live_probe if live_probe is not None else default_live_runtime_running
-    state = read_lock(path)
-    return _start_blocker(state, session, live=probe(), max_age_sec=max_age_sec) is None
+    state = read_lock(path, env=e)
+    if state.running and state.session and state.session != session:
+        # A foreign claim only frees up once stale AND no runtime is alive.
+        return is_stale(state, max_age_sec=max_age_sec, env=e) and not probe()
+    return not (probe() and not (state.running and state.session == session))
 
 
 def acquire(
@@ -416,6 +530,7 @@ def acquire(
     path: Path | None = None,
     live_probe: Callable[[], bool] | None = None,
     max_age_sec: float | None = None,
+    env: LockEnv | None = None,
 ) -> LockState:
     """Acquire the lock for ``session``. Re-entrant for the same session.
 
@@ -424,64 +539,72 @@ def acquire(
     foreign lock (old/missing heartbeat) may be taken over only when no live
     runtime process is present.
     """
-    if not session or not str(session).strip():
-        raise PlaytestLockError("session id is required", reason="bad_session")
-    session = str(session).strip()
-    try:
-        validate_session_field(session)
-    except ValueError as ex:
-        raise PlaytestLockError(str(ex), reason="bad_session") from ex
+    session = _require_session(session)
+    e = _env(env)
     path = path or default_lock_path()
     probe = live_probe if live_probe is not None else default_live_runtime_running
     result: dict[str, LockState | None] = {"state": None}
 
     def _body() -> None:
-        state = read_lock(path)
+        state = read_lock(path, env=e)
         live = probe()
-        blocker = _start_blocker(state, session, live=live, max_age_sec=max_age_sec)
-        if blocker is not None:
-            reason, held_by = blocker
-            if reason == "stale_but_live":
+        if state.running and state.session and state.session != session:
+            stale = is_stale(state, max_age_sec=max_age_sec, env=e)
+            if stale and not live:
+                # Documented reclaim: holder died without releasing.
+                pass
+            elif stale and live:
                 raise PlaytestLockError(
-                    f"playtest lock stale for session={held_by} but live "
+                    f"playtest lock stale for session={state.session} but live "
                     f"client/server still present (file {path}, "
                     f"heartbeat={state.heartbeat})",
-                    held_by=held_by,
-                    reason=reason,
+                    held_by=state.session,
+                    reason="stale_but_live",
                 )
-            if reason == "foreign_holder":
-                age = state.heartbeat_age_sec
+            else:
+                age = state.heartbeat_age_sec_at(e.now())
                 age_s = f"{age:.0f}s" if age is not None else "unknown"
                 raise PlaytestLockError(
-                    f"playtest lock held by session={held_by} "
-                    f"(file {path}, heartbeat_age={age_s}, "
-                    f"stale={is_stale(state, max_age_sec=max_age_sec)})",
-                    held_by=held_by,
-                    reason=reason,
+                    f"playtest lock held by session={state.session} "
+                    f"(file {path}, heartbeat_age={age_s}, stale={stale})",
+                    held_by=state.session,
+                    reason="foreign_holder",
                 )
+        # Free lock but client and/or dedicated already up: refuse unless the
+        # file also carries a stale foreign claim, which the block above
+        # already rejected as stale_but_live.
+        if live and not (state.running and state.session == session) and not (
+            state.running
+            and state.session
+            and state.session != session
+            and is_stale(state, max_age_sec=max_age_sec, env=e)
+        ):
             raise PlaytestLockError(
                 f"live playtest runtime (DaysToDie client and/or dedicated/"
                 f"zdtd server) present; refusing start (file {path}"
-                + (
-                    f", lock session={held_by}"
-                    if held_by
-                    else ", lock free"
-                )
+                + (f", lock session={state.session}" if state.session else ", lock free")
                 + ")",
-                held_by=held_by,
-                reason=reason,
+                held_by=state.session,
+                reason="live_runtime",
             )
-        now = utc_now_iso()
+        now = utc_now_iso(e)
         # Preserve original acquired time on re-entrant refresh by same session.
         acq = (
             state.acquired
             if state.running and state.session == session and state.acquired
             else now
         )
-        write_lock(path, running=True, session=session, acquired=acq, heartbeat=now)
-        result["state"] = read_lock(path)
+        write_lock(
+            path,
+            running=True,
+            session=session,
+            acquired=acq,
+            heartbeat=now,
+            env=e,
+        )
+        result["state"] = read_lock(path, env=e)
 
-    _with_flock(path, _body)
+    _with_flock(path, _body, env=e)
     assert result["state"] is not None
     return result["state"]
 
@@ -490,20 +613,16 @@ def heartbeat(
     session: str,
     *,
     path: Path | None = None,
+    env: LockEnv | None = None,
 ) -> LockState:
     """Refresh heartbeat for the owning session. No-op fail if not owner."""
-    if not session or not str(session).strip():
-        raise PlaytestLockError("session id is required", reason="bad_session")
-    session = str(session).strip()
-    try:
-        validate_session_field(session)
-    except ValueError as ex:
-        raise PlaytestLockError(str(ex), reason="bad_session") from ex
+    session = _require_session(session)
+    e = _env(env)
     path = path or default_lock_path()
     result: dict[str, LockState | None] = {"state": None}
 
     def _body() -> None:
-        state = read_lock(path)
+        state = read_lock(path, env=e)
         if not state.running or state.session != session:
             raise PlaytestLockError(
                 f"cannot heartbeat: lock not owned by session={session} "
@@ -511,17 +630,18 @@ def heartbeat(
                 held_by=state.session,
                 reason="foreign_holder",
             )
-        now = utc_now_iso()
+        now = utc_now_iso(e)
         write_lock(
             path,
             running=True,
             session=session,
             acquired=state.acquired or now,
             heartbeat=now,
+            env=e,
         )
-        result["state"] = read_lock(path)
+        result["state"] = read_lock(path, env=e)
 
-    _with_flock(path, _body)
+    _with_flock(path, _body, env=e)
     assert result["state"] is not None
     return result["state"]
 
@@ -530,20 +650,26 @@ def release(
     session: str,
     *,
     path: Path | None = None,
+    env: LockEnv | None = None,
 ) -> LockState:
-    """Release only if we own the lock (or it is already free)."""
-    if not session or not str(session).strip():
-        raise PlaytestLockError("session id is required", reason="bad_session")
-    session = str(session).strip()
-    try:
-        validate_session_field(session)
-    except ValueError as ex:
-        raise PlaytestLockError(str(ex), reason="bad_session") from ex
+    """Release only if the file actually names us.
+
+    A release that does not name the current holder writes nothing. Writing
+    ``running=no`` whenever the record merely fails to name someone *else*
+    turns a late or duplicated release into a claim wipe: deterministic
+    simulation reaches this by corrupting the shared file (it is documented
+    as shared with the Atomic / 7dtd-mods helpers) so it momentarily reads
+    free, then letting a stale exit handler publish ``running=no`` over a
+    live holder. Refusing to write unless we are the recorded holder removes
+    that window and keeps release idempotent.
+    """
+    session = _require_session(session)
+    e = _env(env)
     path = path or default_lock_path()
     result: dict[str, LockState | None] = {"state": None}
 
     def _body() -> None:
-        state = read_lock(path)
+        state = read_lock(path, env=e)
         if state.running and state.session and state.session != session:
             raise PlaytestLockError(
                 f"playtest lock owned by session={state.session}; not releasing "
@@ -551,12 +677,80 @@ def release(
                 held_by=state.session,
                 reason="foreign_holder",
             )
-        write_lock(path, running=False, session=None)
-        result["state"] = read_lock(path)
+        if not (state.running and state.session == session):
+            # Free, unparseable, or claimed by a record that does not name
+            # us. Nothing of ours to clear, so write nothing: publishing
+            # running=no here would erase a live holder's claim.
+            result["state"] = state
+            return
+        write_lock(path, running=False, session=None, env=e)
+        result["state"] = read_lock(path, env=e)
 
-    _with_flock(path, _body)
+    _with_flock(path, _body, env=e)
     assert result["state"] is not None
     return result["state"]
+
+
+class HeartbeatLoop:
+    """Heartbeat refresh policy, driven by whoever owns the clock.
+
+    Production drives this from :class:`HeartbeatThread`; the deterministic
+    simulator drives the very same object by stepping virtual time. Only the
+    *when* differs between the two, so a bug in the refresh policy is
+    reachable from simulation.
+    """
+
+    def __init__(
+        self,
+        session: str,
+        *,
+        path: Path | None = None,
+        interval_sec: float | None = None,
+        on_error: Callable[[BaseException], None] | None = None,
+        env: LockEnv | None = None,
+    ) -> None:
+        self.session = session
+        self.env = env
+        e = _env(env)
+        self.path = path or default_lock_path()
+        self.interval_sec = (
+            e.heartbeat_interval_sec() if interval_sec is None else interval_sec
+        )
+        self.on_error = on_error
+        self.last_touch: float | None = None
+        self.touches = 0
+        self.errors = 0
+        # Set when the record stopped naming us while we still believe we
+        # hold it (someone else took over, or the shared file was clobbered).
+        # Exclusivity is no longer guaranteed once this is true; the policy
+        # decision of what a run does about it belongs to the orchestrator.
+        self.lost_claim = False
+
+    def due(self, now: float | None = None) -> bool:
+        t = _env(self.env).now() if now is None else now
+        if self.last_touch is None:
+            return True
+        return (t - self.last_touch) >= self.interval_sec
+
+    def tick(self, now: float | None = None, *, force: bool = False) -> bool:
+        """Refresh if due. Returns True when a refresh was attempted."""
+        e = _env(self.env)
+        t = e.now() if now is None else now
+        if not force and not self.due(t):
+            return False
+        self.last_touch = t
+        try:
+            heartbeat(self.session, path=self.path, env=self.env)
+            self.touches += 1
+        except BaseException as ex:
+            self.errors += 1
+            if isinstance(ex, PlaytestLockError) and ex.reason == "foreign_holder":
+                self.lost_claim = True
+            if self.on_error is not None:
+                # A misbehaving callback must not break the heartbeat loop.
+                with suppress(Exception):
+                    self.on_error(ex)
+        return True
 
 
 class HeartbeatThread:
@@ -569,13 +763,15 @@ class HeartbeatThread:
         path: Path | None = None,
         interval_sec: float | None = None,
         on_error: Callable[[BaseException], None] | None = None,
+        env: LockEnv | None = None,
     ) -> None:
-        self.session = session
-        self.path = path or default_lock_path()
-        self.interval_sec = (
-            heartbeat_interval_sec() if interval_sec is None else interval_sec
+        self.loop = HeartbeatLoop(
+            session,
+            path=path,
+            interval_sec=interval_sec,
+            on_error=on_error,
+            env=env,
         )
-        self.on_error = on_error
         self._stop = threading.Event()
         self._started = False
         self._thread = threading.Thread(
@@ -590,23 +786,15 @@ class HeartbeatThread:
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
-        if self._started:
-            # join raises RuntimeError on a never-started thread; stop() runs in
-            # orchestrator finally blocks where that would skip lock release.
-            self._thread.join(timeout=timeout)
+        # Cleanup paths call stop() unconditionally; if start() itself failed
+        # (thread resource exhaustion) join would raise and abort whatever
+        # cleanup follows, e.g. the lock release in playtest_run's finally.
+        if not self._started:
+            return
+        self._thread.join(timeout=timeout)
 
     def _run(self) -> None:
         # Immediate first touch so age stays low even if interval is long.
-        self._touch()
-        while not self._stop.wait(self.interval_sec):
-            self._touch()
-
-    def _touch(self) -> None:
-        try:
-            heartbeat(self.session, path=self.path)
-        except BaseException as ex:  # noqa: BLE001 — report and keep trying
-            if self.on_error is not None:
-                try:
-                    self.on_error(ex)
-                except Exception:  # noqa: BLE001, S110 — heartbeat must never die from its own callback
-                    pass
+        self.loop.tick(force=True)
+        while not self._stop.wait(self.loop.interval_sec):
+            self.loop.tick(force=True)
