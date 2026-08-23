@@ -563,15 +563,26 @@ def ensure_loadgen_built() -> Path | None:
         warn(f"loadgen project missing: {proj}")
         return None
     log("building loadgen…")
-    r = subprocess.run(
-        ["dotnet", "build", str(proj), "-c", "Release", "-v", "q"],
-        cwd=str(LOADGEN),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        r = subprocess.run(
+            ["dotnet", "build", str(proj), "-c", "Release", "-v", "q"],
+            cwd=str(LOADGEN),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=_LOADGEN_BUILD_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        warn(
+            f"loadgen build timed out after {_LOADGEN_BUILD_TIMEOUT_SEC:g}s; "
+            "skipping loadgen barriers this run"
+        )
+        return None
+    except OSError as ex:
+        warn(f"loadgen build could not start: {ex}")
+        return None
     if r.returncode != 0:
         warn(f"loadgen build failed: {r.stderr[-400:]}")
         return None
@@ -680,6 +691,11 @@ def write_zdtd_apm_dump(
 _STOP_TERM_WAIT_SEC = 8.0
 _STOP_KILL_WAIT_SEC = 8.0
 
+# A cold dotnet build is minutes, not tens of minutes. Without a timeout a
+# hung compiler would block the poll loop forever: the wall-clock deadline
+# only fires between polls, so the run would never reach it.
+_LOADGEN_BUILD_TIMEOUT_SEC = 600.0
+
 
 def stop_proc(proc: subprocess.Popen | None) -> None:
     if proc is None:
@@ -716,8 +732,14 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
 
 
 def write_report(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as ex:
+        # A full disk must not erase the run's verdict: the caller keeps
+        # going so SUMMARY/exit still reflect the playtest result.
+        err(f"could not write report {path}: {ex}")
+        return
     log(f"report → {path}")
 
 
@@ -767,8 +789,12 @@ def write_junit(
             lines.append(f'    <skipped message="{detail}"/>')
         lines.append("  </testcase>")
     lines.append("</testsuite>")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError as ex:
+        err(f"could not write junit {path}: {ex}")
+        return
     log(f"junit → {path}")
 
 
@@ -819,7 +845,11 @@ class TelnetAdmin:
             # zdtd admin is polled on the 20 Hz tick; allow a few frames.
             return self._recv(1.2)
         except OSError as ex:
+            # The session is broken (reset pipe, server gone). Close now so
+            # later execs fail fast as "no socket" instead of re-raising on a
+            # dead fd, and replies stay distinguishable from silence.
             warn(f"telnet exec fail: {ex}")
+            self.close()
             return ""
 
     def _ai_entity_ids(self, out: str) -> list[str]:
@@ -1014,7 +1044,8 @@ def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
     """Keep only the newest `keep` quarantine entries (dirs or files)."""
     try:
         entries = sorted(qroot.iterdir())
-    except OSError:
+    except OSError as ex:
+        warn(f"quarantine prune skipped ({ex}); old entries will accumulate")
         return
     for old in entries[:-keep]:
         if old.is_dir():
@@ -2324,7 +2355,7 @@ def main(argv: list[str] | None = None) -> int:
                     break
             time.sleep(0.5)
         else:
-            log(f"timeout after {args.timeout}s waiting for DONE")
+            log(f"timeout after {time.monotonic() - t0:.0f}s waiting for DONE")
 
         # Final parse from everything drained so far, plus any bytes appended
         # between the last poll and here.
@@ -2382,6 +2413,8 @@ def main(argv: list[str] | None = None) -> int:
             "nre_like_sample": nre[:10],
             "peer_nre_like_count": len(peer_nre),
             "peer_nre_like_sample": peer_nre[:10],
+            "malformed_client_events": parsed.get("malformed_events", 0),
+            "peer_malformed_client_events": peer_parsed.get("malformed_events", 0),
             "client_log": str(args.client_log),
             "peer_client_log": str(peer_client_log) if peer_client_log else None,
             "peer_client_suite": peer_client_suite or None,
@@ -2446,6 +2479,14 @@ def main(argv: list[str] | None = None) -> int:
                     "warn: "
                     f"primary={len(nre)} peer={len(peer_nre)} "
                     "NRE/underrun-like client lines (see report)"
+                )
+            malformed = int(parsed.get("malformed_events") or 0) + int(
+                peer_parsed.get("malformed_events") or 0
+            )
+            if malformed:
+                warn(
+                    f"{malformed} client event line(s) looked like JSON but did "
+                    "not parse; skipped (count in report)"
                 )
             fails = int(summary["fail"]) if summary else None
             if fails is None and done.get("exit_hint") is not None:

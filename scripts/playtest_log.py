@@ -63,6 +63,9 @@ class ClientLogScan:
         self.human_done: dict | None = None
         self.nre_hits: list[str] = []
         self.nre_total = 0
+        # Lines that looked like events but failed to parse. Skipped on
+        # purpose; the count is the only trace they leave.
+        self.malformed_events = 0
 
     def feed_line(self, line: str) -> None:
         m = JSON_RE.search(line)
@@ -104,8 +107,9 @@ class ClientLogScan:
                 # or exit_hint raises it too. A JSON null (or list) where a
                 # number belongs raises TypeError, and int(inf) from a 1e999
                 # or bare Infinity token raises OverflowError. Skip the bad
-                # event, keep the rest.
-                pass
+                # event, keep the rest; count it so discarded evidence is
+                # visible in the report instead of vanishing.
+                self.malformed_events += 1
             return
 
         m = RESULT_RE.search(line)
@@ -162,6 +166,7 @@ class ClientLogScan:
             "json_events": self.json_events,
             "nre_like": self.nre_hits[:NRE_SAMPLE_CAP],
             "nre_like_total": self.nre_total,
+            "malformed_events": self.malformed_events,
         }
 
 

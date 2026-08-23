@@ -415,7 +415,7 @@ namespace ZdtdPlaytest
                 }
                 catch (Exception ex)
                 {
-                    FinishCase(def, "fail", 0f, "exception " + ex.Message);
+                    FinishCase(def, "fail", 0f, DescribeException("act", ex));
                     return;
                 }
 
@@ -438,7 +438,7 @@ namespace ZdtdPlaytest
                 try { done = def.Wait(_ctx); }
                 catch (Exception ex)
                 {
-                    FinishCase(def, "fail", elapsed, "wait exception " + ex.Message);
+                    FinishCase(def, "fail", elapsed, DescribeException("wait", ex));
                     return;
                 }
 
@@ -459,7 +459,9 @@ namespace ZdtdPlaytest
             }
         }
 
-        /// <summary>Invoke the case assert against the live ctx; exceptions fail the case.</summary>
+        /// <summary>
+        /// Invoke the case assert against the live ctx; exceptions fail the case.
+        /// </summary>
         static bool RunCaseAssert(CaseDef def, out string detail)
         {
             bool ok = true;
@@ -473,9 +475,21 @@ namespace ZdtdPlaytest
             catch (Exception ex)
             {
                 ok = false;
-                detail = "assert exception " + ex.Message;
+                detail = DescribeException("assert", ex);
             }
             return ok;
+        }
+
+        /// <summary>
+        /// Case-failure detail for a thrown exception. The type name is the
+        /// triage signal: an NRE's Message alone is just "Object reference not
+        /// set…", which names neither member nor cause.
+        /// </summary>
+        static string DescribeException(string stage, Exception ex)
+        {
+            string msg = ex.Message ?? "";
+            return stage + " exception " + ex.GetType().Name
+                + (msg.Length > 0 ? ": " + msg : "");
         }
 
         static void EnsurePlayerHealthy(EntityPlayerLocal p)

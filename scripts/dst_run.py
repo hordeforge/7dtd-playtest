@@ -38,11 +38,19 @@ def load_regression_seeds(path: Path = SEEDS_FILE) -> list[int]:
     seeds: list[int] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].strip()
-        if line:
-            try:
-                seeds.append(int(line))
-            except ValueError:
-                continue
+        if not line:
+            continue
+        try:
+            seeds.append(int(line))
+        except ValueError:
+            # A typo here silently removes a regression from replay forever;
+            # say so instead of skipping the line quietly.
+            print(
+                f"[dst] warn: {path.name}: ignoring non-integer seed line: "
+                f"{raw.strip()!r}",
+                file=sys.stderr,
+            )
+            continue
     return seeds
 
 

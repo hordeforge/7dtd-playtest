@@ -73,6 +73,9 @@ def test_parse_client_log_survives_null_numbers() -> None:
     assert parsed["results"] == [
         {"status": "PASS", "case": "s/c", "detail": "ok"}
     ], f"valid sibling event lost or mangled: {parsed['results']}"
+    assert parsed["malformed_events"] == 2, (
+        f"dropped events must be counted, got {parsed['malformed_events']}"
+    )
     print("PASS log_parse_bad_json no TypeError on null/array counts")
 
 
@@ -101,6 +104,9 @@ def test_parse_client_log_survives_inf_and_type_garbage() -> None:
     assert parsed["results"] == [
         {"status": "['PASS']", "case": "s/c", "detail": "12"}
     ], f"coerced results wrong: {parsed['results']}"
+    assert parsed["malformed_events"] == 2, (
+        f"inf events must be counted as malformed, got {parsed['malformed_events']}"
+    )
     print("PASS log_parse_inf_garbage OverflowError and non-string fields contained")
 
 
@@ -232,6 +238,7 @@ def _assert_parsed_shape(parsed: dict, seed: int) -> None:
         "json_events",
         "nre_like",
         "nre_like_total",
+        "malformed_events",
     }, f"seed {seed}: unexpected parse keys {sorted(parsed)}"
     for r in parsed["results"]:
         assert set(r) == {"status", "case", "detail"}, f"seed {seed}: result keys {r}"
@@ -256,6 +263,12 @@ def _assert_parsed_shape(parsed: dict, seed: int) -> None:
     ), f"seed {seed}: nre_like_total type {parsed['nre_like_total']}"
     assert parsed["nre_like_total"] >= len(parsed["nre_like"]), (
         f"seed {seed}: nre total below sample count"
+    )
+    assert isinstance(parsed["malformed_events"], int) and not isinstance(
+        parsed["malformed_events"], bool
+    ), f"seed {seed}: malformed_events type {parsed['malformed_events']}"
+    assert parsed["malformed_events"] >= 0, (
+        f"seed {seed}: malformed_events negative"
     )
 
 
