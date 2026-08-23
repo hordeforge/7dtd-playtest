@@ -38,16 +38,28 @@ def load_results(path: Path) -> dict:
     """Return {"results": [...], "summary": {...}, "wall": s|None, "server": str|None}
     from a report JSON or a log. wall is the orchestrator's wall_sec (server
     session wall time), reported as a cost axis, never a per-case finding."""
+    # One read feeds both decoders: a second read after the JSON attempt can
+    # fail (file replaced/removed between reads) and crash the diff on input
+    # the first read already saw.
     try:
-        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        if isinstance(payload, dict) and "results" in payload:
-            return {"results": payload["results"], "summary": payload.get("summary"),
-                    "wall": payload.get("wall_sec"),
-                    "server": payload.get("server"),
-                    "ran_epoch": payload.get("ran_epoch")}
-    except (ValueError, OSError):
-        pass
-    parsed = parse_client_log(path.read_text(encoding="utf-8", errors="replace"))
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as ex:
+        print(f"ERROR: cannot read {path}: {ex}", file=sys.stderr)
+        text = ""
+    payload = None
+    if text:
+        try:
+            loaded = json.loads(text)
+        except ValueError:
+            loaded = None
+        if isinstance(loaded, dict) and "results" in loaded:
+            payload = loaded
+    if payload is not None:
+        return {"results": payload["results"], "summary": payload.get("summary"),
+                "wall": payload.get("wall_sec"),
+                "server": payload.get("server"),
+                "ran_epoch": payload.get("ran_epoch")}
+    parsed = parse_client_log(text)
     return {"results": parsed["results"], "summary": parsed["summary"],
             "nre_like": parsed["nre_like"], "wall": None, "server": None,
             "ran_epoch": None}

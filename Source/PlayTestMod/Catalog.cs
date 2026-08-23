@@ -1851,6 +1851,28 @@ namespace ZdtdPlaytest
 
         // ── economy / TE / craft ─────────────────────────────────────────
 
+        /// <summary>True when the entity id recorded in IntC is absent from the
+        /// world list (EntityItem is not EntityAlive, so FindAliveById cannot
+        /// answer this). IntC &lt;= 0 means "no tracked entity": false.</summary>
+        static bool TrackedEntityGone(CaseCtx ctx)
+        {
+            if (ctx.IntC <= 0) return false;
+            try
+            {
+                var list = ctx.World.Entities.list;
+                if (list != null)
+                {
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        if (list[i] != null && list[i].entityId == ctx.IntC)
+                            return false;
+                    }
+                }
+            }
+            catch { return false; }
+            return true;
+        }
+
         static void AddEconomy(List<CaseDef> q, string suite)
         {
             q.Add(Live(suite, "craft_window_recipes", new[] { "economy", "craft", "ui", "demo" }, ctx =>
@@ -2140,27 +2162,7 @@ namespace ZdtdPlaytest
                 bool gone = n < ctx.IntA || (ctx.IntC > 0 && Helpers.FindAliveById(ctx.World, ctx.IntC) == null
                     && Helpers.FindNearestEntityItem(ctx.World, ctx.Player.GetPosition(), 32f) == null);
                 // EntityItem is not EntityAlive; re-check by entity id in list.
-                bool entityGone = false;
-                if (ctx.IntC > 0)
-                {
-                    entityGone = true;
-                    try
-                    {
-                        var list = ctx.World.Entities.list;
-                        if (list != null)
-                        {
-                            for (int i = 0; i < list.Count; i++)
-                            {
-                                if (list[i] != null && list[i].entityId == ctx.IntC)
-                                {
-                                    entityGone = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    catch { entityGone = false; }
-                }
+                bool entityGone = TrackedEntityGone(ctx);
                 bool bagUp = bagNow > ctx.IntB;
                 ctx.Detail = "items0=" + ctx.IntA + " items=" + n + " bag0=" + ctx.IntB
                     + " bag=" + bagNow + " eid=" + ctx.IntC
@@ -2177,27 +2179,7 @@ namespace ZdtdPlaytest
                 int n = Helpers.CountNearbyEntityItems(ctx.World, ctx.Player.GetPosition(), 32f, out sample);
                 int totalSlots;
                 int bagNow = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
-                bool entityGone = false;
-                if (ctx.IntC > 0)
-                {
-                    entityGone = true;
-                    try
-                    {
-                        var list = ctx.World.Entities.list;
-                        if (list != null)
-                        {
-                            for (int i = 0; i < list.Count; i++)
-                            {
-                                if (list[i] != null && list[i].entityId == ctx.IntC)
-                                {
-                                    entityGone = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    catch { entityGone = false; }
-                }
+                bool entityGone = TrackedEntityGone(ctx);
                 bool ok = entityGone || bagNow > ctx.IntB || n < ctx.IntA;
                 ctx.Detail = "items0=" + ctx.IntA + " items=" + n + " bag0=" + ctx.IntB
                     + " bag=" + bagNow + " eid=" + ctx.IntC + " gone=" + entityGone;
@@ -2320,21 +2302,7 @@ namespace ZdtdPlaytest
                     ctx.Detail = "no target to kill";
                     return true; // assert: no AI is success
                 }
-                // Resolve entity by id across world list.
-                EntityAlive found = null;
-                try
-                {
-                    var list = ctx.World.Entities.list;
-                    if (list != null)
-                    {
-                        for (int i = 0; i < list.Count; i++)
-                        {
-                            var e = list[i] as EntityAlive;
-                            if (e != null && e.entityId == ctx.IntA) { found = e; break; }
-                        }
-                    }
-                }
-                catch { /* */ }
+                var found = Helpers.FindAliveById(ctx.World, ctx.IntA);
                 if (found == null)
                 {
                     ctx.Detail = "targetId=" + ctx.IntA + " gone";
@@ -2346,20 +2314,7 @@ namespace ZdtdPlaytest
             }, assert: ctx =>
             {
                 if (ctx.IntA < 0) { ctx.Detail = "no target (clear)"; return true; }
-                EntityAlive found = null;
-                try
-                {
-                    var list = ctx.World.Entities.list;
-                    if (list != null)
-                    {
-                        for (int i = 0; i < list.Count; i++)
-                        {
-                            var e = list[i] as EntityAlive;
-                            if (e != null && e.entityId == ctx.IntA) { found = e; break; }
-                        }
-                    }
-                }
-                catch { /* */ }
+                var found = Helpers.FindAliveById(ctx.World, ctx.IntA);
                 if (found == null) { ctx.Detail = "targetId=" + ctx.IntA + " gone"; return true; }
                 ctx.Detail = "targetId=" + ctx.IntA + " hp=" + found.Health + " dead=" + found.IsDead();
                 return found.IsDead() || found.Health <= 0;
@@ -4373,7 +4328,7 @@ namespace ZdtdPlaytest
                 ctx.FloatA = feet;
                 ctx.Detail = $"bot {ctx.IntA} feet={feet:0.0} (must stay 0..4m, not flying/noclip)";
                 // Even if not perfectly on ground due to terrain sample, must be within sane bounds
-                return elapsedCheck(ctx, 3f);
+                return ElapsedCheck(ctx, 3f);
             }, assert: ctx =>
             {
                 // After 3s warmup, bot must have stayed between 0 and 4m above ground (no godmode fly/no-clip through void)
@@ -4419,7 +4374,7 @@ namespace ZdtdPlaytest
             }, assert: ctx => ctx.FloatA >= 10f && ctx.FloatA <= 55f, timeout: 22f, fail: "no bot spawned in 10-55m ring near player (bot player)", pause: 0.4f));
         }
 
-        static bool elapsedCheck(CaseCtx ctx, float want)
+        static bool ElapsedCheck(CaseCtx ctx, float want)
         {
             return Time.unscaledTime - ctx.CaseStartUnscaled >= want;
         }

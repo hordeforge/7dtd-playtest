@@ -247,14 +247,27 @@ def err(msg: str) -> None:
     print(f"[playtest-orch] {msg}", file=sys.stderr, flush=True)
 
 
+# Bound on each pkill escalation step. These run in the finally teardown
+# ahead of the lock release; a wedged pkill must not hold the exclusivity
+# lock forever.
+_PKILL_TIMEOUT_SEC = 30.0
+
+
 def pkill_patterns(patterns: list[str], sig: str = "-9") -> None:
     for pat in patterns:
-        subprocess.run(
-            ["pkill", sig, "-f", pat],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        try:
+            subprocess.run(
+                ["pkill", sig, "-f", pat],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=_PKILL_TIMEOUT_SEC,
+            )
+        except subprocess.TimeoutExpired:
+            # Skip the stuck pattern so teardown reaches the remaining steps
+            # (stop_proc, lock release) instead of hanging while holding the
+            # exclusivity lock.
+            warn(f"pkill {sig} -f {pat!r} timed out; continuing teardown")
 
 
 def clean_processes(*, kill_wine: bool = False) -> None:
@@ -434,6 +447,40 @@ def _popen_to_logfile(
     return proc
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Publish ``data`` at ``path`` via temp+os.replace.
+
+    A failure mid-write then leaves the previous content intact instead of a
+    truncated file that later runs would treat as good.
+    """
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def _rewrite_platform_cfg(pcfg: Path) -> None:
+    """Back up once, then force the local-auth platform surface, atomically.
+
+    The backup is the only copy of the user's original config: writing it
+    in place means a disk-full mid-write silently destroys it (the next run
+    sees the backup exists and never retries), and a torn platform.cfg
+    breaks every later dedicated start.
+    """
+    bak = pcfg.with_name(pcfg.name + ".playtest-bak")
+    if not bak.is_file():
+        _atomic_write_bytes(bak, pcfg.read_bytes())
+    _atomic_write_bytes(
+        pcfg,
+        b"platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n",
+    )
+
+
 def start_stock_dedicated(
     game_srv: Path,
     userdata: Path,
@@ -456,13 +503,12 @@ def start_stock_dedicated(
     # Local auth surface (same as loadgen): Steam + LAN only.
     pcfg = game_srv / "platform.cfg"
     if pcfg.is_file():
-        bak = game_srv / "platform.cfg.playtest-bak"
-        if not bak.is_file():
-            bak.write_bytes(pcfg.read_bytes())
-        pcfg.write_text(
-            "platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n",
-            encoding="utf-8",
-        )
+        try:
+            _rewrite_platform_cfg(pcfg)
+        except OSError as ex:
+            # Not fatal: the dedicated still runs, but the auth surface may
+            # keep the user's defaults and reject LAN/local logins.
+            warn(f"platform.cfg rewrite failed ({ex}); auth surface may keep user defaults")
 
     # Quarantine RealEarth if present (stock playtest).
     re_mod = game_srv / "Mods" / "RealEarth"
@@ -478,6 +524,14 @@ def start_stock_dedicated(
     cfg_src = LOADGEN / "scripts" / "serverconfig_loadgen.xml"
     if not cfg_src.is_file():
         cfg_src = game_srv / "serverconfig.xml"
+    if not cfg_src.is_file():
+        # Named failure instead of a read_text traceback after the save wipe:
+        # the operator needs to know both paths that were tried.
+        raise FileNotFoundError(
+            f"no serverconfig template: tried "
+            f"{LOADGEN / 'scripts' / 'serverconfig_loadgen.xml'} and "
+            f"{game_srv / 'serverconfig.xml'}"
+        )
     cfg_out = userdata / "serverconfig_playtest.xml"
     write_stock_config(
         cfg_src,
@@ -750,24 +804,31 @@ def write_zdtd_apm_dump(
     out = (r.stdout or "") + (r.stderr or "")
     # Fail closed: do not invent markers. Client would soft-pass a synthetic dump.
     has_marker = "zdtd-apm" in out or "wall_ns" in out or "tick_total" in out
+
+    def _write_dump(text: str) -> bool:
+        """Write the dump file; False leaves the retry-next-poll path armed."""
+        try:
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            dump_path.write_text(text, encoding="utf-8")
+        except OSError as ex:
+            warn(f"apm dump: could not write {dump_path}: {ex}")
+            return False
+        return True
+
     if not has_marker or not out.strip():
         warn(f"apm dump: no live markers in output (len={len(out)} rc={r.returncode})")
-        dump_path.parent.mkdir(parents=True, exist_ok=True)
-        dump_path.write_text(
-            "APM_DUMP_FAILED no markers from zdtd --ticks\n",
-            encoding="utf-8",
-        )
+        _write_dump("APM_DUMP_FAILED no markers from zdtd --ticks\n")
         return False
-    dump_path.parent.mkdir(parents=True, exist_ok=True)
     body = out
     if run_id:
         # Prefix for correlation only; markers must already exist in body.
         body = f"run_id={run_id}\n" + body
-    dump_path.write_text(body, encoding="utf-8")
+    if not _write_dump(body):
+        return False
     log(
         f"apm dump → {dump_path} bytes={dump_path.stat().st_size} run_id={run_id or '-'}"
     )
-    return dump_path.is_file() and dump_path.stat().st_size > 0
+    return True
 
 
 # Bounded waits around each escalation step of stop_proc. Module-level so the
@@ -1190,12 +1251,17 @@ def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
     saves = userdata / "Saves"
     if not saves.is_dir():
         return
+    try:
+        world_dirs = [d for d in saves.iterdir() if d.is_dir()]
+    except OSError as ex:
+        # Same fail-open as an unusable quarantine below: a stale save reused
+        # is diagnosable from the run, a crash here is not better than it.
+        warn(f"fresh-save: could not scan {saves}: {ex}; stale save will be reused")
+        return
     entry = _quarantine_entry(quarantine, "stock-save")
     removed = 0
     failed = 0
-    for world_dir in saves.iterdir():
-        if not world_dir.is_dir():
-            continue
+    for world_dir in world_dirs:
         target = world_dir / game_name
         if target.is_dir():
             moved = (
@@ -1710,6 +1776,11 @@ def main(argv: list[str] | None = None) -> int:
                 "set PLAYTEST_LOCK_FILE / PLAYTEST_SESSION_ID to coordinate"
             )
             return 2
+        except OSError as ex:
+            # Unwritable lock dir/sidecar is an environment failure, not a
+            # holder: name it like a refusal instead of a traceback.
+            err(f"refusing start: lock storage unavailable at {lock_path}: {ex}")
+            return 2
         lock_held = True
         log(
             f"playtest lock acquired session={lock_session} file={lock_path} "
@@ -1893,12 +1964,18 @@ def main(argv: list[str] | None = None) -> int:
             client_extra_env["ZDTD_APM_DUMP"] = str(apm_dump_path)
             client_extra_env["ZDTD_APM_RUN_ID"] = apm_run_id
             # Preseed is explicitly NOT a valid live dump (client rejects APM_PRESEED).
-            apm_dump_path.parent.mkdir(parents=True, exist_ok=True)
-            apm_dump_path.write_text(
-                "APM_PRESEED placeholder; waiting for barrier dump\n",
-                encoding="utf-8",
-            )
-            log(f"apm preseed placeholder → {apm_dump_path} run_id={apm_run_id}")
+            try:
+                apm_dump_path.parent.mkdir(parents=True, exist_ok=True)
+                apm_dump_path.write_text(
+                    "APM_PRESEED placeholder; waiting for barrier dump\n",
+                    encoding="utf-8",
+                )
+                log(f"apm preseed placeholder → {apm_dump_path} run_id={apm_run_id}")
+            except OSError as ex:
+                # The client's apm case will fail on the stale/missing dump;
+                # losing the whole run to this write would hide every other
+                # result behind a traceback.
+                warn(f"could not write apm preseed {apm_dump_path}: {ex}")
 
         # Rejoin flows start their setup client below; other suites start now.
         if rejoin_flow:
@@ -2080,6 +2157,13 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(1.0)
                 tn.exec("kickall")
                 tn.close()
+            else:
+                # Silent would look like a clean save when nothing was saved;
+                # say why the setup state may not be durable before teardown.
+                warn(
+                    f"{rejoin_label}: post-setup saveworld/kickall skipped "
+                    "(telnet connect fail)"
+                )
             time.sleep(4)
             stop_proc(client_proc)
             client_proc = None
@@ -2193,15 +2277,21 @@ def main(argv: list[str] | None = None) -> int:
                 if ready_seen and not rejoin_teleport_done:
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     moved = 0
-                    if tn.connect():
+                    connected = tn.connect()
+                    if connected:
                         moved = tn.teleport_players_to(*args.rejoin_teleport)
                         tn.close()
                     if moved > 0:
                         rejoin_teleport_done = True
                         x, y, z = args.rejoin_teleport
                         log(f"provider rejoin teleport complete → {x:g} {y:g} {z:g}")
+                    elif connected:
+                        warn(
+                            "provider rejoin teleport: no player ids from "
+                            "listplayers; retry next poll"
+                        )
                     else:
-                        warn("provider rejoin teleport: no joined player yet; retry")
+                        warn("provider rejoin teleport: telnet connect fail; retry")
 
                 if want_fixtures:
                     # spawn_zombie may fire more than once: combat + sleeper_wake.
@@ -2493,15 +2583,21 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                 moved = 0
-                if tn.connect():
+                connected = tn.connect()
+                if connected:
                     moved = tn.teleport_players_to(*args.peer_client_teleport)
                     tn.close()
                 if moved >= 2:
                     peer_teleport_done = True
                     x, y, z = args.peer_client_teleport
                     log(f"stock peer teleport complete players={moved} → {x:g} {y:g} {z:g}")
+                elif connected:
+                    warn(
+                        f"stock peer teleport: only {moved} player(s) listed, "
+                        "need both joined; retry next poll"
+                    )
                 else:
-                    warn("stock peer teleport: waiting for both joined players")
+                    warn("stock peer teleport: telnet connect fail; retry next poll")
 
             if client_proc is not None and client_proc.poll() is not None:
                 time.sleep(2)
@@ -2677,6 +2773,12 @@ def main(argv: list[str] | None = None) -> int:
             stop_proc(peer_client_proc)
             stop_proc(loadgen_proc)
             stop_proc(server_proc)
+            # Poll loops reap mute helpers each iteration, but teardown paths
+            # (rejoin abort, exception unwind, post-DONE) skip them: without
+            # this reap an exited helper lingers as a zombie until interpreter
+            # exit. Helpers still alive here are detached and self-exit within
+            # their poll window, reparented to init once this process ends.
+            reap_finished_helpers()
             # Soft clean after: leave Steam alone
             pkill_patterns(
                 [
