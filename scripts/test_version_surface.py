@@ -53,7 +53,7 @@ def main() -> int:
         print("OK no dist build present; shipped-manifest check not applicable")
 
     changelog = CHANGELOG.read_text(encoding="utf-8")
-    headings = re.findall(r"^##\s+\[([^\]]+)\]", changelog, flags=re.M)
+    headings = re.findall(r"^##\s+\[([^\]]+)\]", changelog, flags=re.MULTILINE)
     assert "Unreleased" in headings, "CHANGELOG.md needs an [Unreleased] section"
     assert manifest in headings, (
         f"CHANGELOG.md has no ## [{manifest}] entry; every released version "

@@ -20,7 +20,7 @@ SUMMARY_RE = re.compile(
 )
 DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?:\s+exit_hint=(\d+))?")
 JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
-NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.I)
+NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
 NRE_SAMPLE_CAP = 50
 

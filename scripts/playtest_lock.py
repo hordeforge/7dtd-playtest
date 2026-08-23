@@ -47,7 +47,7 @@ PROC_ROOT = Path("/proc")
 STOCK_CLIENT_EXECUTABLES = ("7DaysToDie.exe", "DaysToDie.exe")
 STOCK_SERVER_EXECUTABLES = ("7DaysToDieServer.x86_64", "zdtd")
 WINE_PRELOADERS = ("wine-preloader", "wine64-preloader")
-GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.I)
+GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
