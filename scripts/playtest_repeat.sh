@@ -39,21 +39,33 @@ declare -a reports=()
 
 for lap in $(seq 1 "$LAPS"); do
   echo "=== lap $lap/$LAPS ==="
+  # Only reports written during this lap count; a lap that dies before scoring
+  # (lock refused, missing binary) must not inherit an older run's report.
+  lap_start="$(date +%s)"
   if ! python3 "$ORCH" --suite "$SUITE" "${ORCH_ARGS[@]}"; then
     echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)"
     continue
   fi
-  # Newest report for this lap (report-<epoch>.json).
-  latest="$(ls -t "$REPORT_DIR"/report-*.json 2>/dev/null | head -n 1 || true)"
+  # Newest report for this lap (report-<epoch>.json, mtime >= lap start).
+  # NUL-delimited so paths with spaces/newlines stay one argument.
+  latest="$(
+    find "$REPORT_DIR" -maxdepth 1 -name 'report-*.json' -newermt "@$lap_start" \
+      -print0 2>/dev/null | xargs -0 -r ls -t 2>/dev/null | head -n 1 || true
+  )"
   if [[ -z "$latest" ]]; then
     echo "playtest_repeat: lap $lap produced no report under $REPORT_DIR" >&2
     continue
   fi
   reports+=("$latest")
   laps_total+=1
-  p="$(python3 -c "import json,sys; s=json.load(open('$latest'))['summary']; print(s.get('pass',0))" 2>/dev/null || echo 0)"
-  f="$(python3 -c "import json,sys; s=json.load(open('$latest'))['summary']; print(s.get('fail',0))" 2>/dev/null || echo 0)"
-  sk="$(python3 -c "import json,sys; s=json.load(open('$latest'))['summary']; print(s.get('skip',0))" 2>/dev/null || echo 0)"
+  # One python launch reads pass/fail/skip together; path is passed as argv[1],
+  # never interpolated into the Python source (a quote in $latest must not
+  # become code execution).
+  summary_line="$(
+    python3 -c 'import json,sys; s=json.load(open(sys.argv[1]))["summary"]; print(s.get("pass",0), s.get("fail",0), s.get("skip",0))' "$latest" 2>/dev/null \
+      || echo "0 0 0"
+  )"
+  read -r p f sk <<<"$summary_line"
   sum_pass+=p; sum_fail+=f; sum_skip+=sk
   if [[ "$f" -eq 0 ]]; then laps_passed+=1; fi
   echo "lap $lap: pass=$p fail=$f skip=$sk report=$latest"

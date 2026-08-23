@@ -14,7 +14,7 @@ SCRIPTS = Path(__file__).resolve().parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import playtest_lock as pl  # noqa: E402
+import playtest_lock as pl
 
 
 def _assert(cond: bool, msg: str) -> None:
@@ -91,10 +91,27 @@ def test_runtime_patterns_include_server() -> None:
         "7DaysToDie.exe" in pl.STOCK_CLIENT_EXECUTABLES,
         "client in runtime probe",
     )
-    # Structural: tcp_port_in_use is real (binds ephemeral, expects free high port free)
+
+
+def test_tcp_port_in_use_tracks_listener() -> None:
+    """Bound loopback port reports in use; released port reports free."""
+    import socket
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        _assert(
+            pl.tcp_port_in_use(port) is True,
+            f"tcp_port_in_use must be True while {port} accepts",
+        )
+    finally:
+        srv.close()
     _assert(
-        pl.tcp_port_in_use(1) is False or isinstance(pl.tcp_port_in_use(65530), bool),
-        "tcp_port_in_use returns bool",
+        pl.tcp_port_in_use(port) is False,
+        f"tcp_port_in_use must be False after {port} closed",
     )
 
 
@@ -249,6 +266,153 @@ def test_heartbeat_and_stale_takeover(tmp: Path) -> None:
     pl.release(other, path=lock)
 
 
+def test_can_start_matches_acquire_matrix(tmp: Path) -> None:
+    """can_start must agree with acquire for every lock-state × liveness cell.
+
+    Both read the same policy (_start_blocker); this pins that agreement so
+    the dry-run can never drift from the real acquire.
+    """
+    owner = "owner-20260810-000000-aaaaaaaaaaaa"
+    other = "other-20260810-000001-bbbbbbbbbbbb"
+
+    def fresh_lock(name: str) -> Path:
+        lock = tmp / name / "playtest_running"
+        return lock
+
+    def foreign_state(stale: bool) -> tuple[Path, float]:
+        lock = fresh_lock(f"foreign-{stale}")
+        pl.acquire(owner, path=lock, live_probe=lambda: False)
+        if stale:
+            pl.write_lock(
+                lock,
+                running=True,
+                session=owner,
+                acquired="2020-01-01T00:00:00Z",
+                heartbeat="2020-01-01T00:00:00Z",
+            )
+        return lock, 60
+
+    cells = [
+        ("free-idle", fresh_lock("free-idle"), False),
+        ("free-live", fresh_lock("free-live"), True),
+        ("own-idle", None, False),  # filled in below
+        ("foreign-fresh-idle", *foreign_state(False)),
+        ("foreign-stale-idle", *foreign_state(True)),
+    ]
+
+    # own lock: holder may re-acquire even with a live runtime present.
+    lock = fresh_lock("own")
+    pl.acquire(other, path=lock, live_probe=lambda: False)
+    cells[2] = ("own-live", lock, True)
+    own_session = other
+
+    for label, lock, live in cells:
+        session = own_session if label.startswith("own") else "probe-20260810-000002-cccccccccccc"
+        allowed = pl.can_start(
+            session,
+            path=lock,
+            live_probe=lambda v=live: v,
+            max_age_sec=60,
+        )
+        try:
+            pl.acquire(session, path=lock, live_probe=lambda v=live: v, max_age_sec=60)
+            acquired = True
+        except pl.PlaytestLockError as e:
+            acquired = False
+            _assert(
+                e.reason
+                in ("foreign_holder", "stale_but_live", "live_runtime"),
+                f"{label}: unexpected reason {e.reason}",
+            )
+        _assert(
+            allowed == acquired,
+            f"{label}: can_start={allowed} but acquire "
+            f"{'succeeded' if acquired else 'refused'}",
+        )
+        if acquired:
+            pl.release(session, path=lock)
+
+
+def test_env_overrides_parse_and_clamp(tmp: Path) -> None:
+    """Bad numeric overrides fall back to defaults; zero clamps to 1s floor."""
+    specs = (
+        ("PLAYTEST_LOCK_STALE_SEC", pl.stale_sec, pl.DEFAULT_STALE_SEC),
+        (
+            "PLAYTEST_LOCK_HEARTBEAT_SEC",
+            pl.heartbeat_interval_sec,
+            pl.DEFAULT_HEARTBEAT_INTERVAL_SEC,
+        ),
+    )
+    for env_name, getter, default in specs:
+        old = os.environ.get(env_name)
+        try:
+            for raw, want in (
+                ("5", 5.0),
+                ("abc", default),
+                ("   ", default),
+                ("0", 1.0),
+                ("-3", 1.0),
+            ):
+                os.environ[env_name] = raw
+                got = getter()
+                _assert(
+                    got == want,
+                    f"{env_name}={raw!r}: want {want}, got {got}",
+                )
+        finally:
+            if old is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = old
+
+
+def test_new_session_id_shape_and_prefix_validation() -> None:
+    sid = pl.new_session_id("grok")
+    _assert(pl.SESSION_RE.match(sid) is not None, f"generated shape: {sid}")
+    for bad in ("", "9lead", "Has-Upper", "has-dash"):
+        try:
+            pl.new_session_id(bad)
+            raise AssertionError(f"prefix {bad!r} must be rejected")
+        except ValueError:
+            pass
+
+
+def test_parse_utc_timestamp_shapes() -> None:
+    now = time.time()
+    zulul = pl.parse_utc_timestamp(pl.utc_now_iso())
+    epoch = pl.parse_utc_timestamp(f"{now:.3f}")
+    _assert(zulul is not None and abs(zulul - now) < 1.5, "Z-suffixed ISO parses")
+    _assert(epoch is not None and abs(epoch - now) < 1.5, "epoch seconds parse")
+    _assert(
+        pl.parse_utc_timestamp(None) is None
+        and pl.parse_utc_timestamp("") is None
+        and pl.parse_utc_timestamp("not-a-time") is None,
+        "missing/garbage timestamps are None, not crashes",
+    )
+
+
+def test_heartbeat_foreign_or_free_refused(tmp: Path) -> None:
+    lock = tmp / "playtest_running"
+    owner = "owner-20260810-000000-aaaaaaaaaaaa"
+    other = "other-20260810-000001-bbbbbbbbbbbb"
+    pl.acquire(owner, path=lock, live_probe=lambda: False)
+    try:
+        pl.heartbeat(other, path=lock)
+        raise AssertionError("foreign heartbeat must refuse")
+    except pl.PlaytestLockError as e:
+        _assert(e.reason == "foreign_holder", f"reason={e.reason}")
+        _assert(e.held_by == owner, f"held_by={e.held_by}")
+    st = pl.read_lock(lock)
+    _assert(st.session == owner, "owner unchanged after refused heartbeat")
+    # Heartbeat on a free/absent lock refuses too (nothing to refresh).
+    pl.release(owner, path=lock)
+    try:
+        pl.heartbeat(owner, path=lock)
+        raise AssertionError("heartbeat without held lock must refuse")
+    except pl.PlaytestLockError as e:
+        _assert(e.reason == "foreign_holder", f"free-lock reason={e.reason}")
+
+
 def test_playtest_run_wiring() -> None:
     """Structural: orchestrator acquires before clean_processes and releases."""
     src = (SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
@@ -266,7 +430,7 @@ def test_playtest_run_wiring() -> None:
         f"(pos {clean_in_main}) in main",
     )
     finally_i = src.rfind("finally:")
-    rel_i = src.find("playtest_lock.release", finally_i if finally_i >= 0 else 0)
+    rel_i = src.find("playtest_lock.release", max(finally_i, 0))
     _assert(finally_i >= 0 and rel_i > finally_i, "release in finally block")
     # Foreign refuse must not pkill: process teardown is gated on lock_held
     fin_body = src[finally_i : rel_i + 80]
@@ -283,6 +447,109 @@ def test_playtest_run_wiring() -> None:
     )
 
 
+def test_playtest_run_child_bounds() -> None:
+    """Structural: spawned children have release paths and hold bounds.
+
+    - The synchronous loadgen build runs while the exclusivity lock is held
+      with a live heartbeat, so it must carry a timeout (a wedged build would
+      otherwise keep the lock fresh past stale takeover forever).
+    - The detached mute helper has no parent-side wait unless teardown reaps
+      it: stop_proc must handle the helper riding the client proc.
+    """
+    src = (SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
+    build_i = src.find("def ensure_loadgen_built(")
+    _assert(build_i >= 0, "ensure_loadgen_built defined")
+    build_end = src.find("\ndef ", build_i + 1)
+    build_body = src[build_i:build_end]
+    _assert(
+        "timeout=" in build_body,
+        "loadgen dotnet build must pass timeout= to subprocess.run",
+    )
+    _assert(
+        "TimeoutExpired" in build_body,
+        "loadgen build must catch subprocess.TimeoutExpired",
+    )
+    stop_i = src.find("def stop_proc(")
+    stop_end = src.find("\ndef ", stop_i + 1)
+    stop_body = src[stop_i:stop_end]
+    _assert(
+        "_mute_helper" in stop_body,
+        "stop_proc must reap/stop the client mute helper riding the proc",
+    )
+    start_client_i = src.find("def start_client(")
+    start_client_end = src.find("\ndef ", start_client_i + 1)
+    start_client_body = src[start_client_i:start_client_end]
+    _assert(
+        "proc._mute_helper=" in start_client_body.replace(" ", ""),
+        "start_client must attach the mute helper to the returned proc",
+    )
+
+
+def test_heartbeat_stop_before_start_is_safe(tmp: Path) -> None:
+    """stop() before/without start() must not raise: it runs in finally blocks
+    where a RuntimeError would skip process cleanup and lock release."""
+    hb = pl.HeartbeatThread(
+        "hb-20260810-000000-cccccccccccc",
+        path=tmp / "playtest_running",
+        interval_sec=0.05,
+    )
+    hb.stop()
+    hb.stop()  # idempotent
+
+    # Started thread still stops promptly and refreshes while alive.
+    lock = tmp / "live" / "playtest_running"
+    owner = "hblive-20260810-000000-dddddddddddd"
+    pl.acquire(owner, path=lock, live_probe=lambda: False)
+    hb2 = pl.HeartbeatThread(owner, path=lock, interval_sec=0.05)
+    hb2.start()
+    time.sleep(0.15)
+    hb2.stop()
+    state = pl.read_lock(lock)
+    _assert(state.running and state.session == owner, "heartbeat kept owner")
+    _assert(
+        (state.heartbeat_age_sec or 99) < 5,
+        f"heartbeat fresh after stop: age={state.heartbeat_age_sec}",
+    )
+    pl.release(owner, path=lock)
+
+
+def test_session_field_injection_rejected(tmp: Path) -> None:
+    """Session ids are written verbatim into a shared key=value file that
+    every agent parses; newlines or '=' must not be able to forge fields."""
+    lock = tmp / "playtest_running"
+    evil = "evil-20260810-000000-ffffff\nrunning=no"
+    try:
+        pl.acquire(evil, path=lock, live_probe=lambda: False)
+        raise AssertionError("newline-bearing session must be refused")
+    except pl.PlaytestLockError as e:
+        _assert(e.reason == "bad_session", f"reason={e.reason}")
+    _assert(
+        not lock.exists() or pl.read_lock(lock).running is False,
+        "lock payload not forged by injected fields",
+    )
+
+    # Sink-side guard also covers writers that bypass acquire().
+    try:
+        pl.write_lock(lock, running=True, session="x=y\nheartbeat=nope")
+        raise AssertionError("write_lock must refuse field-injecting sessions")
+    except ValueError:
+        pass
+    _assert(pl.read_lock(lock).running is False, "injected write produced no lock")
+
+    # Documented-shape ids keep working end to end.
+    sid = "grok-20260810-231500-a1b2c3d4e5f6"
+    pl.acquire(sid, path=lock, live_probe=lambda: False)
+    _assert(pl.read_lock(lock).session == sid, "conforming session recorded")
+    pl.release(sid, path=lock)
+
+    for fn in (pl.heartbeat, pl.release):
+        try:
+            fn("bad id\n", path=lock)
+            raise AssertionError(f"{fn.__name__} must refuse malformed session")
+        except pl.PlaytestLockError as e:
+            _assert(e.reason == "bad_session", f"{fn.__name__} reason={e.reason}")
+
+
 def main() -> int:
     fails = 0
     with tempfile.TemporaryDirectory(prefix="playtest-lock-") as td:
@@ -294,6 +561,7 @@ def main() -> int:
                 lambda: test_live_client_blocks_free_lock(tmp / "live"),
             ),
             ("runtime_patterns_include_server", test_runtime_patterns_include_server),
+            ("tcp_port_in_use_tracks_listener", test_tcp_port_in_use_tracks_listener),
             (
                 "runtime_detection_checks_executables_not_shell_text",
                 lambda: test_runtime_detection_checks_executables_not_shell_text(
@@ -310,11 +578,37 @@ def main() -> int:
                 "heartbeat_and_stale_takeover",
                 lambda: test_heartbeat_and_stale_takeover(tmp / "hb"),
             ),
+            (
+                "can_start_matches_acquire_matrix",
+                lambda: test_can_start_matches_acquire_matrix(tmp / "matrix"),
+            ),
+            (
+                "heartbeat_stop_before_start_is_safe",
+                lambda: test_heartbeat_stop_before_start_is_safe(tmp / "hbsafe"),
+            ),
             ("playtest_run_wiring", test_playtest_run_wiring),
+            ("playtest_run_child_bounds", test_playtest_run_child_bounds),
+            (
+                "env_overrides_parse_and_clamp",
+                lambda: test_env_overrides_parse_and_clamp(tmp / "envparse"),
+            ),
+            (
+                "new_session_id_shape_and_prefix_validation",
+                test_new_session_id_shape_and_prefix_validation,
+            ),
+            ("parse_utc_timestamp_shapes", test_parse_utc_timestamp_shapes),
+            (
+                "heartbeat_foreign_or_free_refused",
+                lambda: test_heartbeat_foreign_or_free_refused(tmp / "hbreject"),
+            ),
+            (
+                "session_field_injection_rejected",
+                lambda: test_session_field_injection_rejected(tmp / "injection"),
+            ),
         ]
         for name, fn in cases:
             try:
-                if name != "playtest_run_wiring":
+                if name not in ("playtest_run_wiring", "playtest_run_child_bounds"):
                     (tmp / name).mkdir(exist_ok=True)
                 fn()  # type: ignore[operator]
                 print(f"PASS {name}")

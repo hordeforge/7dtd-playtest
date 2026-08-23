@@ -181,7 +181,7 @@ namespace ZdtdPlaytest
 
             Report.Reset();
             Report.Info("armed suites=" + string.Join(",", _suites)
-                + " laps=" + _benchmarkLaps + " v" + ModApi.Version);
+                + " laps=" + _benchmarkLaps + " v" + ModIdentity.Version);
             if (string.Equals(suiteEnv, "list", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(suiteEnv, "catalog", StringComparison.OrdinalIgnoreCase))
             {
@@ -393,17 +393,7 @@ namespace ZdtdPlaytest
                     return;
                 }
 
-                bool ok = true;
-                string detail = _ctx.Detail ?? "";
-                if (def.Assert != null)
-                {
-                    try { ok = def.Assert(_ctx); detail = _ctx.Detail ?? detail; }
-                    catch (Exception ex)
-                    {
-                        ok = false;
-                        detail = "assert exception " + ex.Message;
-                    }
-                }
+                bool ok = EvaluateAssert(def, _ctx, out string detail);
                 FinishCase(def, ok ? "pass" : "fail", 0f, detail);
                 return;
             }
@@ -422,17 +412,7 @@ namespace ZdtdPlaytest
 
                 if (done)
                 {
-                    bool ok = true;
-                    string detail = _ctx.Detail ?? "";
-                    if (def.Assert != null)
-                    {
-                        try { ok = def.Assert(_ctx); detail = _ctx.Detail ?? detail; }
-                        catch (Exception ex)
-                        {
-                            ok = false;
-                            detail = "assert exception " + ex.Message;
-                        }
-                    }
+                    bool ok = EvaluateAssert(def, _ctx, out string detail);
                     FinishCase(def, ok ? "pass" : "fail", elapsed, detail);
                     return;
                 }
@@ -561,14 +541,7 @@ namespace ZdtdPlaytest
 
             player = ResolveLocalPlayer(world) ?? player;
             EnsurePlayerHealthy(player);
-            // Skip death case's auto-heal until after respawn case? Heal always except death screen act.
             var def = _queue[_caseIndex];
-            if (def.Id == "player_death_screen")
-            {
-                // Leave HP as-is; kill barrier will drop us.
-            }
-            else
-                EnsurePlayerHealthy(player);
 
             _ctx = new CaseCtx
             {
@@ -587,6 +560,27 @@ namespace ZdtdPlaytest
                     _ctx.BenchmarkLap = lap;
             }
             _phase = Phase.RunCase;
+        }
+
+        /// <summary>
+        /// Evaluate def.Assert once against ctx. Null Assert passes; a thrown
+        /// assertion fails with the exception message as detail.
+        /// </summary>
+        static bool EvaluateAssert(CaseDef def, CaseCtx ctx, out string detail)
+        {
+            detail = ctx.Detail ?? "";
+            if (def.Assert == null) return true;
+            try
+            {
+                bool ok = def.Assert(ctx);
+                detail = ctx.Detail ?? detail;
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                detail = "assert exception " + ex.Message;
+                return false;
+            }
         }
 
         static void FinishCase(CaseDef def, string status, float elapsedSec, string detail)

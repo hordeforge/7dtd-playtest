@@ -2,7 +2,6 @@
 """Structural regression checks for passive stock-peer orchestration."""
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = (ROOT / "scripts" / "playtest_run.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -43,7 +42,7 @@ checks = [
     ),
     require(
         "peer lifecycle is cleaned with the primary client",
-        'stop_proc(locals().get("peer_client_proc"))' in RUNNER,
+        "stop_proc(peer_client_proc)" in RUNNER,
     ),
     require(
         "a peer scenario suite must finish before the run is green",

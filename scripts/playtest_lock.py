@@ -33,11 +33,17 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_LOCK_REL = Path(".cache") / "7dtd-playtest" / "playtest_running"
 SESSION_RE = re.compile(r"^[a-z][a-z0-9]*-[0-9]{8}-[0-9]{6}-[0-9a-f]+$")
+# Lock-file field safety: session ids are written verbatim into a line-oriented
+# key=value file that every agent on the host parses. A session id must never
+# carry newlines (field injection) or '=' / leading '#' (key spoofing). This is
+# deliberately looser than SESSION_RE so conforming external holder ids still
+# pass while injection stays impossible.
+SESSION_FIELD_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 DEFAULT_STALE_SEC = 120
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 30
 
@@ -45,7 +51,7 @@ PROC_ROOT = Path("/proc")
 STOCK_CLIENT_EXECUTABLES = ("7DaysToDie.exe", "DaysToDie.exe")
 STOCK_SERVER_EXECUTABLES = ("7DaysToDieServer.x86_64", "zdtd")
 WINE_PRELOADERS = ("wine-preloader", "wine64-preloader")
-GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.I)
+GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.IGNORECASE)
 
 
 class PlaytestLockError(RuntimeError):
@@ -117,7 +123,7 @@ def flock_path_for(lock_path: Path) -> Path:
 def utc_now_iso() -> str:
     """UTC timestamp with second precision, always Z-suffixed."""
     return (
-        datetime.now(timezone.utc)
+        datetime.now(UTC)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z")
@@ -154,6 +160,20 @@ def new_session_id(prefix: str = "playtest") -> str:
     ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     suffix = secrets.token_hex(6)
     return f"{prefix}-{ts}-{suffix}"
+
+
+def validate_session_field(session: str) -> str:
+    """Reject session ids that could inject or spoof lock-file fields.
+
+    Raises ValueError; acquire/heartbeat/release translate this into
+    PlaytestLockError(reason="bad_session").
+    """
+    if not SESSION_FIELD_RE.fullmatch(session):
+        raise ValueError(
+            "session id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127} "
+            f"(single line, no '=' or control chars); got {session!r}"
+        )
+    return session
 
 
 def read_lock(path: Path | None = None) -> LockState:
@@ -210,6 +230,7 @@ def write_lock(
     if running:
         if not session:
             raise ValueError("session is required when running=yes")
+        validate_session_field(session)
         now = utc_now_iso()
         acq = acquired or now
         hb = heartbeat or now
@@ -346,6 +367,32 @@ def _with_flock(path: Path, fn: Callable[[], None]) -> None:
             fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
+def _start_blocker(
+    state: LockState,
+    session: str,
+    *,
+    live: bool,
+    max_age_sec: float | None = None,
+) -> tuple[str, str | None] | None:
+    """Single source of truth for the start policy.
+
+    Returns ``(reason, held_by)`` for the first rule that refuses
+    ``session``, or None when starting is allowed. Used by both
+    :func:`acquire` (raises) and :func:`can_start` (dry run) so the two
+    cannot drift.
+    """
+    if state.running and state.session and state.session != session:
+        if is_stale(state, max_age_sec=max_age_sec):
+            # Documented reclaim when the holder died without releasing;
+            # a live runtime still blocks takeover (stale_but_live).
+            return ("stale_but_live", state.session) if live else None
+        return ("foreign_holder", state.session)
+    if live and not (state.running and state.session == session):
+        # Free lock (or corrupt payload) but client/server already up.
+        return ("live_runtime", state.session)
+    return None
+
+
 def can_start(
     session: str,
     *,
@@ -360,13 +407,7 @@ def can_start(
     # Default: client OR dedicated/zdtd (full playtest runtime).
     probe = live_probe if live_probe is not None else default_live_runtime_running
     state = read_lock(path)
-    if state.running and state.session and state.session != session:
-        if is_stale(state, max_age_sec=max_age_sec) and not probe():
-            return True
-        return False
-    if probe() and not (state.running and state.session == session):
-        return False
-    return True
+    return _start_blocker(state, session, live=probe(), max_age_sec=max_age_sec) is None
 
 
 def acquire(
@@ -386,6 +427,10 @@ def acquire(
     if not session or not str(session).strip():
         raise PlaytestLockError("session id is required", reason="bad_session")
     session = str(session).strip()
+    try:
+        validate_session_field(session)
+    except ValueError as ex:
+        raise PlaytestLockError(str(ex), reason="bad_session") from ex
     path = path or default_lock_path()
     probe = live_probe if live_probe is not None else default_live_runtime_running
     result: dict[str, LockState | None] = {"state": None}
@@ -393,49 +438,39 @@ def acquire(
     def _body() -> None:
         state = read_lock(path)
         live = probe()
-        if state.running and state.session and state.session != session:
-            stale = is_stale(state, max_age_sec=max_age_sec)
-            if stale and not live:
-                # Documented reclaim: holder died without releasing.
-                pass
-            elif stale and live:
+        blocker = _start_blocker(state, session, live=live, max_age_sec=max_age_sec)
+        if blocker is not None:
+            reason, held_by = blocker
+            if reason == "stale_but_live":
                 raise PlaytestLockError(
-                    f"playtest lock stale for session={state.session} but live "
+                    f"playtest lock stale for session={held_by} but live "
                     f"client/server still present (file {path}, "
                     f"heartbeat={state.heartbeat})",
-                    held_by=state.session,
-                    reason="stale_but_live",
+                    held_by=held_by,
+                    reason=reason,
                 )
-            else:
+            if reason == "foreign_holder":
                 age = state.heartbeat_age_sec
                 age_s = f"{age:.0f}s" if age is not None else "unknown"
                 raise PlaytestLockError(
-                    f"playtest lock held by session={state.session} "
-                    f"(file {path}, heartbeat_age={age_s}, stale={stale})",
-                    held_by=state.session,
-                    reason="foreign_holder",
+                    f"playtest lock held by session={held_by} "
+                    f"(file {path}, heartbeat_age={age_s}, "
+                    f"stale={is_stale(state, max_age_sec=max_age_sec)})",
+                    held_by=held_by,
+                    reason=reason,
                 )
-        if live and not (state.running and state.session == session):
-            # Free lock but client and/or dedicated already up.
-            if not (
-                state.running
-                and state.session
-                and state.session != session
-                and is_stale(state, max_age_sec=max_age_sec)
-            ):
-                raise PlaytestLockError(
-                    f"live playtest runtime (DaysToDie client and/or dedicated/"
-                    f"zdtd server) present; refusing start (file {path}"
-                    + (
-                        f", lock session={state.session}"
-                        if state.session
-                        else ", lock free"
-                    )
-                    + ")",
-                    held_by=state.session,
-                    reason="live_runtime",
+            raise PlaytestLockError(
+                f"live playtest runtime (DaysToDie client and/or dedicated/"
+                f"zdtd server) present; refusing start (file {path}"
+                + (
+                    f", lock session={held_by}"
+                    if held_by
+                    else ", lock free"
                 )
-            # Stale foreign + live: already raised stale_but_live above.
+                + ")",
+                held_by=held_by,
+                reason=reason,
+            )
         now = utc_now_iso()
         # Preserve original acquired time on re-entrant refresh by same session.
         acq = (
@@ -460,6 +495,10 @@ def heartbeat(
     if not session or not str(session).strip():
         raise PlaytestLockError("session id is required", reason="bad_session")
     session = str(session).strip()
+    try:
+        validate_session_field(session)
+    except ValueError as ex:
+        raise PlaytestLockError(str(ex), reason="bad_session") from ex
     path = path or default_lock_path()
     result: dict[str, LockState | None] = {"state": None}
 
@@ -496,6 +535,10 @@ def release(
     if not session or not str(session).strip():
         raise PlaytestLockError("session id is required", reason="bad_session")
     session = str(session).strip()
+    try:
+        validate_session_field(session)
+    except ValueError as ex:
+        raise PlaytestLockError(str(ex), reason="bad_session") from ex
     path = path or default_lock_path()
     result: dict[str, LockState | None] = {"state": None}
 
@@ -534,6 +577,7 @@ class HeartbeatThread:
         )
         self.on_error = on_error
         self._stop = threading.Event()
+        self._started = False
         self._thread = threading.Thread(
             target=self._run,
             name="playtest-lock-heartbeat",
@@ -542,10 +586,14 @@ class HeartbeatThread:
 
     def start(self) -> None:
         self._thread.start()
+        self._started = True
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
-        self._thread.join(timeout=timeout)
+        if self._started:
+            # join raises RuntimeError on a never-started thread; stop() runs in
+            # orchestrator finally blocks where that would skip lock release.
+            self._thread.join(timeout=timeout)
 
     def _run(self) -> None:
         # Immediate first touch so age stays low even if interval is long.
@@ -560,5 +608,5 @@ class HeartbeatThread:
             if self.on_error is not None:
                 try:
                     self.on_error(ex)
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — heartbeat must never die from its own callback
                     pass

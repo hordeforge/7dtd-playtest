@@ -2,8 +2,15 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
-    <Nullable>disable</Nullable>
+    <WarningLevel>5</WarningLevel>
+    <!-- Annotations-only nullability: catches #nullable-context and
+         attribute misuse now; flow-analysis warnings are the later ratchet
+         step (full enable is ~156 findings today). -->
+    <Nullable>annotations</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
     <AssemblyName>7dtd-playtest</AssemblyName>
     <RootNamespace>ZdtdPlaytest</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

@@ -10,3 +10,19 @@ playtest = "playtest_run:main"
 
 [tool.uv]
 package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Gate set = ruff's own default selection for the pinned version in uv.lock
+# (pycodestyle error subset, pyflakes, import sorting, simplify/blind-except
+# picks). Do not restate the list here: a hand-copied select can silently
+# drop rules. Extend via extend-select only once the whole tree passes the
+# group clean; never silence a firing rule repo-wide.
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.4",
+]

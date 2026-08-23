@@ -7,9 +7,29 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+import playtest_run as pr
+
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 SCENARIOS = ROOT / "SCENARIOS.md"
 ORCH = ROOT / "scripts" / "playtest_run.py"
+
+# Barriers the orchestrator only answers when suite_wants_zombie_fixture()
+# is true (spawn/kill/settime fixtures). loadgen/chat/apm/persist barriers
+# are answered unconditionally and stay out of this set.
+HOST_GATED_BARRIERS = frozenset(
+    {
+        "spawn_zombie",
+        "kill_fixture_zombie",
+        "kill_player",
+        "settime_bloodmoon",
+        "settime_day",
+        "spawn_trader",
+        "spawn_vehicle",
+    }
+)
 
 REQUIRED_LIVE = (
     "world_time_advances",
@@ -114,8 +134,35 @@ def defer_reasons(src: str) -> list[tuple[str, str]]:
     return re.findall(
         r'\bDefer\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"\s*,\s*new\s*\[\s*\]\s*\{[^}]*\}\s*,\s*"([^"]*)"\s*\)',
         src,
-        flags=re.S,
+        flags=re.DOTALL,
     )
+
+
+def suite_ids_emitting_gated_barriers(src: str) -> set[str]:
+    """Suite ids whose Add* builders emit any host-gated fixture barrier.
+
+    Derived from Catalog.cs: AppendSuite's switch maps suite id → builder
+    function; each builder body (up to the next builder definition) is
+    scanned for Report.Barrier("name").
+    """
+    fn_for_suite = dict(
+        re.findall(r'case "([a-z0-9_]+)":\s*Add([A-Za-z0-9_]+)\(q, label\);', src)
+    )
+    parts = re.split(
+        r"static void (Add[A-Za-z0-9_]+)\(List<CaseDef> q, string suite\)",
+        src,
+    )
+    emitting: set[str] = set()
+    for i in range(1, len(parts) - 1, 2):
+        fn_name, body = parts[i], parts[i + 1]
+        barriers = set(re.findall(r'Report\.Barrier\("([a-z_:]+)"', body))
+        if barriers & HOST_GATED_BARRIERS:
+            emitting.update(
+                suite_id
+                for suite_id, mapped_fn in fn_for_suite.items()
+                if "Add" + mapped_fn == fn_name
+            )
+    return emitting
 
 
 def main() -> int:
@@ -179,6 +226,18 @@ def main() -> int:
         "start_loadgen",
     ):
         assert name in orch, f"orchestrator missing {name}"
+
+    # Host fixture gate must cover every suite whose cases emit a gated
+    # barrier; otherwise standalone runs of that suite lose their admin
+    # fixtures silently (client-side spawn fallbacks are not
+    # server-authoritative on a dedicated server).
+    fixture_suites = suite_ids_emitting_gated_barriers(cat)
+    assert fixture_suites, "catalog parse found no gated-barrier suites"
+    ungated = sorted(s for s in fixture_suites if not pr.suite_wants_zombie_fixture(s))
+    assert not ungated, (
+        f"suites emit host-gated barriers but suite_wants_zombie_fixture "
+        f"is false: {ungated}"
+    )
 
     print(
         "OK catalog surface:",

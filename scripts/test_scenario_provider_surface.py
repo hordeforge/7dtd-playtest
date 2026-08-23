@@ -144,7 +144,7 @@ def main() -> int:
         "TryEnterVehicle",
         "FindNearestVehicle",
     ):
-        assert f"public static" in helpers and name in helpers, (
+        assert "public static" in helpers and name in helpers, (
             f"Helpers must expose {name} for providers"
         )
 
@@ -159,7 +159,7 @@ def main() -> int:
     m_res = re.search(
         r'case\s+"residual"\s*:(.*?)break\s*;',
         catalog,
-        flags=re.S,
+        flags=re.DOTALL,
     )
     assert m_res, "Catalog ExpandSuites must have residual case"
     res_snip = m_res.group(1)

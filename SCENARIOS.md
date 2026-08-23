@@ -12,7 +12,7 @@ Code: `Source/PlayTestMod/Catalog.cs`
 |---|---|---|
 | **smoke** | boot check | Join + mesh + ground + stats |
 | **demo** | game demo / attract mode | Fixed cinematic: look → walk → dig/place → UI tour → world probes |
-| **benchmark** | built-in bench | Same path as demo core/world, timed; repeat with `PLAYTEST_LAPS` |
+| **benchmark** | built-in bench | Same path as demo smoke+core+world+ui, timed; repeat with `PLAYTEST_LAPS` |
 | **gate** | CI / PR | Live smoke+core only (no deferred skip noise) |
 | **full** | major catalog | Demo domains + soak (not persist/mp; those need host orch) |
 | **catalog** | list only | Log every case id and exit (no join required if armed at menu… still needs mod load) |
@@ -28,7 +28,7 @@ Results always end with `SUMMARY` + `DONE exit_hint=0|1`. Deferred cases are
 | `demo_min` | `smoke,core,world,ui` (no combat wait) |
 | `benchmark` / `bench` | smoke+core+world+ui; multiply by `PLAYTEST_LAPS` |
 | `gate` / `ci` | `smoke,core` |
-| `live` | major suites without vehicle/power/persist/mp bulk |
+| `live` | smoke…finale + soak (same expansion as `full` / `all`) |
 | `full` / `all` | smoke…finale + soak (not persist/mp/apm/soak_long) |
 | `residual` / `residual_light` | **client only:** `mp` + short `soak` (not Make residual gate) |
 | `catalog` / `list` | dump case list to log |
@@ -50,7 +50,7 @@ Make:
 make playtest-demo
 make playtest-bench LAPS=3
 make playtest-gate
-make playtest-full            # long; many SKIPs expected
+make playtest-full            # long; all demo domains + soak
 make playtest SUITE=combat
 ```
 
@@ -111,8 +111,8 @@ make playtest SUITE=combat
 | `world_time_advances` | live | world, demo, bench | `worldTime` increases while waiting |
 | `biome_id` | live | world | Biome id ≥ 0 at player |
 | `poi_textures_non_terrain` | live | world, poi | Tele to POI; block id ≥ 256 |
-| `weather_array` | live | world, weather | S2C weather residual |
-| `deco_trees` | live | world, deco | AssignIds match |
+| `weather_array` | live | world, weather | WeatherManager global type + biome weather entry |
+| `deco_trees` | live | world, deco | Plant/tree/deco blocks present around player |
 | `water_plane` | live | world, water | WaterSet + mass/isWater/block sample (not package-only) |
 
 ---
@@ -143,8 +143,6 @@ make playtest SUITE=combat
 | `melee_damage_out` | live | combat, c2s, demo, melee | Setup near target; stock `UseHoldingItem`/`Attack`; HP drops |
 | `ranged_shot` | live | combat, c2s, demo, ranged | Pipe pistol + mag Meta; fire; Meta drop and/or target HP |
 | `zombie_death_loot` | live | combat, loot | Kill → ECD loot bag (RNG); controlled drop is `loot_bag_pickup` |
-| `player_death_screen` | live | combat, player | Admin kill player |
-| `player_respawn` | live | combat, player | After death |
 | `explosion_client` | live | combat, c2s | Soft block seed + melee damage/break (no admin Air clear) |
 | `sleeper_wake` | live | combat, sleeper | TriggerSleeperPose then ConditionalTriggerSleeperWakeUp |
 | `blood_moon_music` | live | combat, bm | Host settime night (observed hour) then restore day |
@@ -167,7 +165,8 @@ make playtest SUITE=combat
 | `chest_open_loot` | live | economy, te, admin | TE lock + loot |
 | `trader_stock_ui` | live | economy, trader | EntityTrader in range (+ TraderData) |
 | `trader_buy` | live | economy, trader | Coins spent + stock/goods change |
-| `lock_contention` | live | economy, te, mp | TE lock under loadgen peer |
+
+The mp-suite case `lock_contention` also exercises a TE under load; see [mp](#mp--multiplayer).
 
 ---
 
@@ -182,7 +181,8 @@ make playtest SUITE=combat
 | `quest_kill_progress` | live | quest, combat | Phase/objective/state change after kill nudge |
 | `quest_turn_in` | live | quest, trader | CompleteQuest → Completed state |
 | `quest_nav_marker` | live | quest, ui | NavObjectManager register |
-| `shared_quest` | live | quest, mp | Quest active with loadgen peer |
+
+The mp-suite case `shared_quest` also seeds a quest with a loadgen peer; see [mp](#mp--multiplayer).
 
 ---
 
@@ -208,6 +208,17 @@ make playtest SUITE=combat
 | `turret_place` | live | autoTurret |
 | `generator_fuel` | live | Fuel/SoC depth |
 | `trigger_actuation` | live | Triggers/timers |
+
+---
+
+## finale — death + respawn (demo close)
+
+| Case | Status | Notes |
+|---|---|---|
+| `player_death_screen` | live | Admin kill player |
+| `player_respawn` | live | After death |
+
+Runs last in the demo path; the runner recovers from death mid-suite.
 
 ---
 
@@ -286,7 +297,7 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 
 `SUITE=benchmark` with `PLAYTEST_LAPS=N`:
 
-- Repeats smoke+core+world **N** times (suite labels `benchmark@1` …)
+- Repeats smoke+core+world+ui **N** times (suite labels `benchmark@1` …)
 - Each case reports `ms` in JSON result lines
 - Host report can rank slowest cases (orchestrator already stores `ms`)
 

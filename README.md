@@ -36,7 +36,7 @@ make playtest-demo           # attract-mode + combat wait (telnet spawn)
 make playtest-demo-fresh     # wipe save first (clean dig pad)
 make playtest-gate           # PR gate: live smoke+core only
 make playtest-bench LAPS=3   # timed repeats of bench path
-make playtest-full           # entire catalog (many intentional SKIPs)
+make playtest-full           # all demo domains + soak (long)
 make playtest-smoke          # boot only
 make playtest SUITE=combat
 make playtest-zdtd           # demo against zdtd on 27025

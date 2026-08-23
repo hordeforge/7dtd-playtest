@@ -56,9 +56,12 @@ clean:
 	rm -rf "$(ROOT)/dist" "$(ROOT)/Source/PlayTestMod/bin" "$(ROOT)/Source/PlayTestMod/obj"
 
 test:
+	uv run --project "$(ROOT)" ruff check "$(ROOT)/scripts"
 	python3 "$(ROOT)/scripts/test_catalog_surface.py"
 	python3 "$(ROOT)/scripts/test_scenario_provider_surface.py"
 	python3 "$(ROOT)/scripts/test_playtest_lock.py"
+	python3 "$(ROOT)/scripts/test_playtest_run_parsing.py"
+	python3 "$(ROOT)/scripts/test_stock_peer_client.py"
 
 # Full host orchestration: stock dedicated (default) + client, score logs.
 # SERVER=stock|zdtd  WORLD_NAME=Navezgane  PORT= (empty → backend default)

@@ -150,6 +150,11 @@ namespace ZdtdPlaytest
         const string PersistItemName = "resourceScrapIron";
         static string _chatToken = "";
 
+        // Cardinal yaw table shared by look_yaw_sweep / walk_ring waits; the
+        // wait lambdas run every gmUpdate frame, so the table must not be
+        // re-allocated per tick.
+        static readonly float[] CardinalYaws = { 0f, 90f, 180f, 270f };
+
         public static void AppendSuite(List<CaseDef> q, string suite, int lap)
         {
             string label = lap > 0 ? suite + "@" + lap : suite;
@@ -299,13 +304,12 @@ namespace ZdtdPlaytest
                 ctx.Detail = "sweep start";
             }, wait: ctx =>
             {
-                float[] yaws = { 0f, 90f, 180f, 270f };
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 int want = Math.Min(3, (int)(elapsed / 0.35f));
                 if (want != ctx.IntA && want <= 3)
                 {
                     ctx.IntA = want;
-                    ctx.Player.SetRotation(new Vector3(0, yaws[want], 0));
+                    ctx.Player.SetRotation(new Vector3(0, CardinalYaws[want], 0));
                 }
                 ctx.Detail = "yaw_step=" + ctx.IntA;
                 return elapsed >= 1.5f;
@@ -368,19 +372,17 @@ namespace ZdtdPlaytest
                 ctx.IntB = 0; // motion ticks
                 ctx.FloatA = 0f; // path length approx
                 ctx.PlaceBlockType = 0; // last distance mm from leg start
-                float[] yaws = { 0f, 90f, 180f, 270f };
-                LocomotionDrive.Start(1f, 0f, false, yaws[0]);
+                LocomotionDrive.Start(1f, 0f, false, CardinalYaws[0]);
                 ctx.Detail = "leg=0 yaw=0";
             }, wait: ctx =>
             {
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 // ~1.0s per leg
                 int leg = Math.Min(3, (int)(elapsed / 1.0f));
-                float[] yaws = { 0f, 90f, 180f, 270f };
                 if (leg != ctx.IntA)
                 {
                     ctx.IntA = leg;
-                    LocomotionDrive.SetYaw(yaws[leg]);
+                    LocomotionDrive.SetYaw(CardinalYaws[leg]);
                     LocomotionDrive.SetDirection(1f, 0f, false);
                 }
                 else
@@ -391,8 +393,7 @@ namespace ZdtdPlaytest
                 var pos = ctx.Player.GetPosition();
                 float d = LocomotionDrive.HorizDist(pos, ctx.StartPos);
                 // Path length from successive samples (never reset baseline on leg change).
-                int nowMm = (int)(pos.x * 100f) * 100000 + (int)(pos.z * 100f); // crude
-                // Better: store last pos components in unused fields.
+                // Last sample stored as cm in WasBlockType (x) / PlaceBlockType (z).
                 float lastX = ctx.WasBlockType / 100f;
                 float lastZ = ctx.PlaceBlockType / 100f;
                 if (ctx.WasBlockType != 0 || ctx.PlaceBlockType != 0)
@@ -1028,9 +1029,15 @@ namespace ZdtdPlaytest
                 // Chunk settle after tele.
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 if (elapsed < 1.2f) return false;
-                var pos = ctx.Player.GetPosition();
-                int m = Helpers.MaxBlockTypeInRadius(ctx.World, pos, 32);
-                if (m > ctx.IntA) ctx.IntA = m;
+                // Radius scan is O(radius^2 * height) block reads; resample at
+                // 2 Hz instead of every gmUpdate frame (FloatA holds last scan).
+                if (elapsed - ctx.FloatA >= 0.5f)
+                {
+                    ctx.FloatA = elapsed;
+                    var pos = ctx.Player.GetPosition();
+                    int m = Helpers.MaxBlockTypeInRadius(ctx.World, pos, 32);
+                    if (m > ctx.IntA) ctx.IntA = m;
+                }
                 ctx.Detail = "maxBlockType=" + ctx.IntA + " t=" + elapsed.ToString("0.0");
                 return ctx.IntA >= 256 || elapsed >= 4f;
             }, assert: ctx =>
@@ -1145,9 +1152,15 @@ namespace ZdtdPlaytest
                     string d;
                     Helpers.RequestWaterSet(ctx.Player, ctx.TargetBlock, out d);
                 }
-                int n = Helpers.CountWaterInRadius(ctx.World, ctx.Player.GetPosition(), 64);
+                // Radius walk is O(radius^2) block reads; resample at 2 Hz
+                // instead of every gmUpdate frame (FloatA holds last scan).
+                if (elapsed - ctx.FloatA >= 0.5f)
+                {
+                    ctx.FloatA = elapsed;
+                    int n = Helpers.CountWaterInRadius(ctx.World, ctx.Player.GetPosition(), 64);
+                    if (n > ctx.IntA) ctx.IntA = n;
+                }
                 bool mass = Helpers.CellHasWaterMass(ctx.World, ctx.TargetBlock);
-                if (n > ctx.IntA) ctx.IntA = n;
                 if (mass) ctx.IntA = Math.Max(ctx.IntA, 1);
                 ctx.Detail = "water=" + ctx.IntA + " mass=" + mass + " t=" + elapsed.ToString("0.0");
                 return ctx.IntA > 0 || mass || elapsed >= 5f;

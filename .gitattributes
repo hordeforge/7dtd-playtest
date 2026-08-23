@@ -1,0 +1,15 @@
+# Line-ending policy. Every host entry point is executed directly by bash,
+# GNU make, or python3; a CRLF checkout breaks them (bash: bad interpreter
+# '\r', make: recipes end with '\r'). Pin LF so any machine or agent that
+# lands this tree gets runnable scripts regardless of core.autocrlf.
+* text=auto
+
+*.sh   text eol=lf
+*.py   text eol=lf
+Makefile text eol=lf
+*.mk   text eol=lf
+*.cs   text eol=lf
+*.csproj text eol=lf
+*.xml  text eol=lf
+*.md   text eol=lf
+uv.lock text eol=lf
