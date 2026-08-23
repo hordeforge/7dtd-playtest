@@ -341,6 +341,37 @@ def test_sigterm_becomes_graceful_exit() -> None:
     _assert(rc == 128 + signal.SIGTERM, f"exit {rc}, expected {128 + signal.SIGTERM}")
 
 
+def test_parse_utc_timestamp_zones() -> None:
+    """Timestamps parse as instants regardless of host TZ or stamp style."""
+    z = pl.parse_utc_timestamp("2020-01-01T00:00:00Z")
+    offset = pl.parse_utc_timestamp("2020-01-01T02:00:00+02:00")
+    _assert(z is not None and offset is not None, "Z and offset stamps parse")
+    # Z and an explicit +02:00 naming the same instant must agree exactly.
+    _assert(z == offset, "Z equals the same instant with explicit offset")
+    # A naive stamp violates the documented <UTC ISO8601 Z> format; it must
+    # still be read as UTC, not host-local, so staleness does not shift when
+    # the lock file is shared across hosts with different TZ settings.
+    # Force a non-UTC zone so the pin fails against local-time interpretation
+    # even when the test machine runs UTC.
+    naive = None
+    old_tz = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "Asia/Tokyo"
+        time.tzset()
+        naive = pl.parse_utc_timestamp("2020-01-01T00:00:00")
+    finally:
+        if old_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old_tz
+        time.tzset()
+    _assert(naive == z, "naive stamp read as UTC, not host-local")
+    epoch = pl.parse_utc_timestamp("1577836800.5")
+    _assert(epoch == 1577836800.5, "epoch seconds pass through")
+    for bad in (None, "", "not-a-time", "2020-13-40T99:00:00Z"):
+        _assert(pl.parse_utc_timestamp(bad) is None, f"garbage {bad!r} → None")
+
+
 def main() -> int:
     fails = 0
     with tempfile.TemporaryDirectory(prefix="playtest-lock-") as td:
@@ -373,6 +404,7 @@ def main() -> int:
                 lambda: test_heartbeat_thread_stop_before_start(tmp / "hbstopped"),
             ),
             ("playtest_run_wiring", test_playtest_run_wiring),
+            ("parse_utc_timestamp_zones", test_parse_utc_timestamp_zones),
             ("sigterm_becomes_graceful_exit", test_sigterm_becomes_graceful_exit),
         ]
         for name, fn in cases:

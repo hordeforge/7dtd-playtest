@@ -122,8 +122,10 @@ def clean_processes(*, kill_wine: bool = False) -> None:
 
 
 def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    # Elapsed-time budget: monotonic so an NTP step or manual clock change
+    # cannot extend or cut the wait.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if path.is_file():
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -1218,7 +1220,9 @@ def main(argv: list[str] | None = None) -> int:
     install_signal_handlers()
 
     try:
-        t0 = time.time()
+        # Duration measurement on the monotonic clock; wall clock only for
+        # naming and recorded instants.
+        t0 = time.monotonic()
         # Exclusive live-client lock BEFORE clean_processes / launch so a second
         # orchestrator cannot wipe another agent's client. See AGENTS.md.
         try:
@@ -1364,13 +1368,15 @@ def main(argv: list[str] | None = None) -> int:
             and suite_wants_host_fixtures(args.suite)
         )
 
-        deadline = time.time() + args.timeout
+        # Poll budget on the monotonic clock so a wall-clock step (NTP or
+        # manual) during a long soak cannot hang or truncate the run.
+        deadline = time.monotonic() + args.timeout
         # soak_long needs ≥15 min wall + setup; bump default timeout.
         if "soak_long" in args.suite or args.suite.strip() == "soak_long":
-            deadline = time.time() + max(args.timeout, 1100.0)
-            log(f"soak_long timeout deadline wall_s>={int(deadline - time.time())}")
+            deadline = time.monotonic() + max(args.timeout, 1100.0)
+            log(f"soak_long timeout deadline wall_s>={int(deadline - time.monotonic())}")
         last_size = -1
-        last_progress = 0.0
+        last_progress = float("-inf")
         # Barrier fire counts (multi-fire: combat + sleeper + economy may re-spawn/kill).
         barrier_counts: dict[str, int] = {
             "spawn_zombie": 0,
@@ -1468,16 +1474,16 @@ def main(argv: list[str] | None = None) -> int:
                 client_launch_log,
                 extra_env=client_extra_env,
             )
-            setup_deadline = time.time() + min(args.timeout, 300)
-            last_setup_progress = 0.0
-            while time.time() < setup_deadline:
+            setup_deadline = time.monotonic() + min(args.timeout, 300)
+            last_setup_progress = float("-inf")
+            while time.monotonic() < setup_deadline:
                 reap_finished_helpers()
                 if args.client_log.is_file():
                     try:
                         text = args.client_log.read_text(encoding="utf-8", errors="replace")
                     except OSError:
                         text = ""
-                    now = time.time()
+                    now = time.monotonic()
                     if now - last_setup_progress > 8:
                         last_setup_progress = now
                         crumbs = [
@@ -1685,7 +1691,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             ready_seen = False
             rejoin_teleport_done = args.rejoin_teleport is None
-            deadline = time.time() + min(args.timeout, 400)
+            deadline = time.monotonic() + min(args.timeout, 400)
 
         # Always defined so timeout / missing client logs cannot UnboundLocalError.
         peer_parsed: dict = {}
@@ -1702,7 +1708,7 @@ def main(argv: list[str] | None = None) -> int:
         def peer_suite_done() -> bool:
             return not peer_client_suite or peer_parsed.get("done") is not None
 
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             reap_finished_helpers()
             text = ""
             if args.client_log.is_file():
@@ -1713,7 +1719,7 @@ def main(argv: list[str] | None = None) -> int:
             if text and len(text) != last_size:
                 last_size = len(text)
                 # Progress crumbs for long joins
-                now = time.time()
+                now = time.monotonic()
                 if now - last_progress > 8:
                     last_progress = now
                     crumbs = [
@@ -2060,7 +2066,7 @@ def main(argv: list[str] | None = None) -> int:
         peer_results = peer_parsed.get("results") or []
         peer_nre = peer_parsed.get("nre_like") or []
         combined_results = results + peer_results
-        wall_s = time.time() - t0
+        wall_s = time.monotonic() - t0
 
         # Slowest cases from results if ms present in JSON events. Event lines
         # come from the client log, so ms can be garbage or non-finite; either

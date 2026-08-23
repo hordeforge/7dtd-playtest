@@ -229,7 +229,12 @@ def format_utc(epoch: float) -> str:
 
 
 def parse_utc_timestamp(value: str | None) -> float | None:
-    """Parse ISO-8601 (…Z or offset) or unix epoch seconds → epoch float."""
+    """Parse ISO-8601 (…Z or offset) or unix epoch seconds → epoch float.
+
+    An offset-less stamp violates the documented ``<UTC ISO8601 Z>`` format,
+    but must not flip meaning with the host timezone: it is read as UTC so
+    staleness stays deterministic across hosts and containers.
+    """
     if value is None:
         return None
     s = value.strip()
@@ -243,9 +248,12 @@ def parse_utc_timestamp(value: str | None) -> float | None:
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(s).timestamp()
+        dt = datetime.fromisoformat(s)
     except ValueError:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 
 def new_session_id(prefix: str = "playtest", *, env: LockEnv | None = None) -> str:

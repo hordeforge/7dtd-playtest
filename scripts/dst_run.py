@@ -149,14 +149,16 @@ def main(argv: list[str] | None = None) -> int:
         seeds = [start + i for i in range(max(1, args.iterations))]
         print(f"[dst] start_seed={start} iterations={len(seeds)}")
 
-    started = time.time()
+    # Elapsed-time budget and wall measurement on the monotonic clock so a
+    # wall-clock step mid-soak cannot extend or truncate the soak window.
+    started = time.monotonic()
     ran = 0
     coverage: set[str] = set()
     failures: list[SimResult] = []
     index = 0
     while True:
         if index >= len(seeds):
-            if args.soak > 0 and (time.time() - started) < args.soak:
+            if args.soak > 0 and (time.monotonic() - started) < args.soak:
                 seeds.append(seeds[-1] + 1)
             else:
                 break
@@ -174,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.quiet and ran % 25 == 0:
             print(f"[dst] {ran} seeds ok (last={seed})")
 
-    wall = time.time() - started
+    wall = time.monotonic() - started
     summary = {
         "seeds_run": ran,
         "failures": len(failures),
