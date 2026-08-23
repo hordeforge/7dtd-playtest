@@ -214,14 +214,13 @@ def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
     # Elapsed-time budget: monotonic so an NTP step or manual clock change
     # cannot extend or cut the wait.
     deadline = time.monotonic() + timeout
+    # Incremental tail: O(new bytes) per poll instead of re-reading the whole
+    # log every 0.5s. This waits on server startup logs that reach tens of MB
+    # over a cold load, and the poll shares the machine with the game.
+    tail = LogTail(path)
     while time.monotonic() < deadline:
-        if path.is_file():
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                text = ""
-            if needle in text:
-                return True
+        if needle in tail.poll():
+            return True
         time.sleep(0.5)
     return False
 

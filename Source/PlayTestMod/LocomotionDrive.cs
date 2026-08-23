@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -32,6 +33,81 @@ namespace ZdtdPlaytest
         static FieldInfo _isAutorunInvalidField;
         static FieldInfo _runToggleActiveField;
         static bool _fieldsResolved;
+
+        // ApplyToPlayer runs up to three times per Unity frame while driving
+        // (Prefix + Postfix + Tick). AccessTools.Field is an uncached search,
+        // so the per-call lookups below are resolved once per concrete player
+        // type instead of every frame.
+        struct BoolAccess
+        {
+            public FieldInfo Field;
+            public bool Value;
+        }
+
+        const string FreezeNamesCsv = "canMove|bCanMove|IsMotionLocked";
+        static BoolAccess[] _freezeFields;
+        static Type _freezeFieldsFor;
+
+        const string SpawnedNamesCsv = "bSpawned|isSpawned|hasSpawned";
+        static FieldInfo _spawnedFlagField;
+        static Type _spawnedFlagFor;
+
+        static FieldInfo _remoteFlagField;
+        static bool _remoteFlagResolved;
+
+        /// <summary>First resolvable bool field among the freeze-clear names,
+        /// with the value each wants (canMove true, IsMotionLocked false).</summary>
+        static BoolAccess[] FreezeFieldsFor(Type playerType)
+        {
+            if (_freezeFieldsFor == playerType) return _freezeFields;
+            var found = new List<BoolAccess>(3);
+            foreach (var name in FreezeNamesCsv.Split('|'))
+            {
+                var fi = AccessTools.Field(playerType, name)
+                    ?? AccessTools.Field(typeof(EntityAlive), name)
+                    ?? AccessTools.Field(typeof(Entity), name);
+                if (fi == null || fi.FieldType != typeof(bool)) continue;
+                found.Add(new BoolAccess
+                {
+                    Field = fi,
+                    Value = name.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) < 0,
+                });
+            }
+            _freezeFields = found.ToArray();
+            _freezeFieldsFor = playerType;
+            return _freezeFields;
+        }
+
+        /// <summary>First resolvable local-spawn flag (Entity first, then the
+        /// concrete type). A miss is cached too: nothing appears later.</summary>
+        static FieldInfo SpawnedFlagFor(Type playerType)
+        {
+            if (_spawnedFlagFor == playerType) return _spawnedFlagField;
+            FieldInfo found = null;
+            foreach (var name in SpawnedNamesCsv.Split('|'))
+            {
+                var fi = AccessTools.Field(typeof(Entity), name)
+                    ?? AccessTools.Field(playerType, name);
+                if (fi == null || fi.FieldType != typeof(bool)) continue;
+                found = fi;
+                break;
+            }
+            _spawnedFlagField = found;
+            _spawnedFlagFor = playerType;
+            return found;
+        }
+
+        static FieldInfo RemoteFlagField()
+        {
+            if (!_remoteFlagResolved)
+            {
+                var fi = AccessTools.Field(typeof(Entity), "isEntityRemote");
+                if (fi != null && fi.FieldType == typeof(bool))
+                    _remoteFlagField = fi;
+                _remoteFlagResolved = true;
+            }
+            return _remoteFlagField;
+        }
 
         public static bool Active => _active;
 

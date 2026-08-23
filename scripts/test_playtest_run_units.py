@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -220,6 +221,38 @@ def test_snapshot_previous_log_copies_before_truncate() -> None:
         playtest_run.snapshot_previous_log(Path(td) / "absent.log", qroot, "x")
         assert len(list(qroot.iterdir())) == 1
         print("PASS snapshot_previous_log prior run preserved, noop when absent")
+
+
+def test_wait_file_contains_incremental() -> None:
+    """wait_file_contains must find needles incrementally: one already in the
+    log is found before any sleep, and one landing in a later append is found
+    on a subsequent poll without re-reading earlier content (server startup
+    logs reach tens of MB while the poll shares the machine with the game)."""
+    with tempfile.TemporaryDirectory(prefix="playtest-wait-") as td:
+        log = Path(td) / "unity.log"
+        log.write_text("boot noise\n", encoding="utf-8")
+
+        t0 = time.monotonic()
+        assert playtest_run.wait_file_contains(log, "boot noise", timeout=5.0)
+        assert time.monotonic() - t0 < 5.0, "pre-existing needle must not wait"
+
+        assert not playtest_run.wait_file_contains(
+            log, "absent-token", timeout=0.05
+        ), "missing needle must time out False"
+
+        result: list[bool] = []
+
+        def waiter() -> None:
+            result.append(playtest_run.wait_file_contains(log, "StartGame done", 30.0))
+
+        th = threading.Thread(target=waiter)
+        th.start()
+        time.sleep(0.7)  # let at least one poll miss pass before appending
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write("StartGame done\n")
+        th.join(timeout=30)
+        assert result == [True], f"late append never matched: {result}"
+        print("PASS wait_file_contains incremental pre-existing/late-append/timeout")
 
 
 def test_suite_wants_host_fixtures_selection_table() -> None:
@@ -488,6 +521,7 @@ def main() -> int:
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
+        ("wait_file_contains", test_wait_file_contains_incremental),
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
