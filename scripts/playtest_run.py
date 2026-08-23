@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
@@ -854,7 +855,7 @@ class TelnetAdmin:
             low = line.lower()
             if not any(k in low for k in self.AI_LINE_KEYWORDS):
                 continue
-            m = re.search(r"(?:id|ID)\s*=\s*(\d+)", line)
+            m = re.search(r"id\s*=\s*(\d+)", line, flags=re.IGNORECASE)
             if m:
                 ids.append(m.group(1))
         return ids
@@ -1631,8 +1632,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.fresh_save:
             if args.server == "stock":
                 fresh_save(args.userdata, args.game_name, qroot)
-            elif args.server == "zdtd" and args.world is not None:
-                fresh_zdtd_world(Path(args.world), qroot)
+            else:
+                # args.world always carries a Path default; only zdtd reads it.
+                fresh_zdtd_world(args.world, qroot)
 
         snapshot_previous_log(args.client_log, qroot, "client-log")
         if peer_client_log is not None:
@@ -1657,6 +1659,37 @@ def main(argv: list[str] | None = None) -> int:
         telnet_host = "127.0.0.1"
         telnet_port = args.admin_port
         telnet_password = args.telnet_password
+
+        def service_barrier(
+            name: str,
+            *,
+            counts: dict[str, int],
+            seen: dict[str, int],
+            act: Callable[[TelnetAdmin], bool | None],
+            cap: int | None = None,
+        ) -> None:
+            """Service each unseen fire of one barrier over a fresh session.
+
+            One connect failure leaves every remaining fire pending so the
+            next poll retries instead of losing events. An ``act`` returning
+            False means "not serviceable yet" and leaves that fire pending
+            too; any other result counts it as serviced. ``cap`` bounds the
+            total services per log generation (re-barrier spam guard).
+            """
+            while counts.get(name, 0) < seen.get(name, 0) and (
+                cap is None or counts.get(name, 0) < cap
+            ):
+                tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                if not tn.connect():
+                    warn(f"{name}: telnet connect fail; retry next poll")
+                    break
+                try:
+                    serviced = act(tn)
+                finally:
+                    tn.close()
+                if serviced is False:
+                    break
+                counts[name] = counts.get(name, 0) + 1
 
         if not args.no_server:
             if args.server == "stock":
@@ -1711,9 +1744,7 @@ def main(argv: list[str] | None = None) -> int:
         # telnet (listplayers/listents/kill/spawnentity/settime). Enable fixtures
         # for both backends so kill/spawn barriers actually fire on playtest-zdtd.
         want_fixtures = (
-            args.server in ("stock", "zdtd")
-            and not args.no_fixtures
-            and suite_wants_host_fixtures(args.suite)
+            not args.no_fixtures and suite_wants_host_fixtures(args.suite)
         )
 
         # Poll budget on the monotonic clock so a wall-clock step (NTP or
@@ -1808,6 +1839,16 @@ def main(argv: list[str] | None = None) -> int:
             setup_deadline = time.monotonic() + min(args.timeout, 300)
             last_setup_progress = float("-inf")
             rejoin_setup_seen = 0
+
+            def tele_pad_and_save(tn: TelnetAdmin) -> bool:
+                if tn.teleport_players_to(*PERSIST_PAD_XYZ) == 0:
+                    log("warn: teleport_persist_pad: no player ids; retry next poll")
+                    return False
+                # Let server commit player position before later setup/save.
+                time.sleep(2.0)
+                tn.exec("saveworld")
+                return True
+
             while time.monotonic() < setup_deadline:
                 reap_finished_helpers()
                 chunk = pump_log_tail(client_tail, client_scan)
@@ -1828,31 +1869,12 @@ def main(argv: list[str] | None = None) -> int:
                     rejoin_setup_seen += barrier_line_hits(chunk, rejoin_setup_barrier)
                     if not provider_rejoin:
                         # Server-authoritative pad tele so pos_survives_rejoin is real.
-                        while (
-                            barrier_counts["teleport_persist_pad"]
-                            < barrier_seen["teleport_persist_pad"]
-                        ):
-                            tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                            n = 0
-                            if tn.connect():
-                                n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
-                                if n == 0:
-                                    log(
-                                        "warn: teleport_persist_pad: no player ids"
-                                        "; retry next poll"
-                                    )
-                                    tn.close()
-                                    break
-                                # Let server commit player position before later setup/save.
-                                time.sleep(2.0)
-                                tn.exec("saveworld")
-                                tn.close()
-                            else:
-                                log(
-                                    "warn: teleport_persist_pad: telnet connect fail; retry"
-                                )
-                                break
-                            barrier_counts["teleport_persist_pad"] += 1
+                        service_barrier(
+                            "teleport_persist_pad",
+                            counts=barrier_counts,
+                            seen=barrier_seen,
+                            act=tele_pad_and_save,
+                        )
                     if rejoin_setup_seen > barrier_counts["rejoin_setup_done"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
@@ -2069,45 +2091,36 @@ def main(argv: list[str] | None = None) -> int:
                         warn("provider rejoin teleport: no joined player yet; retry")
 
                 if want_fixtures:
-                    # spawn_zombie (may fire more than once: combat + sleeper_wake)
-                    while (
-                        barrier_counts["spawn_zombie"]
-                        < barrier_seen["spawn_zombie"]
-                    ):
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("spawn_zombie: telnet connect fail; retry next poll")
-                            break
+                    # spawn_zombie may fire more than once: combat + sleeper_wake.
+                    def spawn_zombie(tn: TelnetAdmin) -> None:
                         n = tn.spawn_near_players("zombieBoe")
                         if n == 0:
                             time.sleep(1.0)
                             tn.spawn_near_players("zombieBoe")
-                        tn.close()
-                        barrier_counts["spawn_zombie"] += 1
 
-                    while barrier_counts["bot_spawn"] < barrier_seen["bot_spawn"]:
-                        # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if needed
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("bot_spawn: telnet connect fail; retry next poll")
-                            break
+                    service_barrier(
+                        "spawn_zombie",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=spawn_zombie,
+                    )
+
+                    def ensure_bots(tn: TelnetAdmin) -> None:
+                        # BotMod auto-spawns TargetBotCount; ensure at least 6
+                        # via telnet if needed (lines with "Bot " in bot list).
                         out = tn.exec("bot list")
-                        # Count bots from bot list output (lines with "Bot ")
-                        n = len(re.findall(r"Bot ", out))
-                        if n < 4:
+                        if len(re.findall(r"Bot ", out)) < 4:
                             r = tn.exec("bot count 6")
                             log(f"telnet bot count 6 -> {r[:120]!r}")
-                        tn.close()
-                        barrier_counts["bot_spawn"] += 1
 
-                    while (
-                        barrier_counts["bot_player_near"]
-                        < barrier_seen["bot_player_near"]
-                    ):
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("bot_player_near: telnet connect fail; retry next poll")
-                            break
+                    service_barrier(
+                        "bot_spawn",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=ensure_bots,
+                    )
+
+                    def bot_near_player(tn: TelnetAdmin) -> None:
                         pids = tn.list_player_ids()
                         if pids:
                             ident = str(pids[0])
@@ -2116,54 +2129,54 @@ def main(argv: list[str] | None = None) -> int:
                         else:
                             r = tn.exec("bot spawn 1")
                             log(f"telnet bot spawn 1 -> {r[:120]!r}")
-                        tn.close()
-                        barrier_counts["bot_player_near"] += 1
 
-                    while (
-                        barrier_counts["kill_fixture_zombie"]
-                        < barrier_seen["kill_fixture_zombie"]
-                    ):
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("kill_fixture_zombie: telnet connect fail; retry next poll")
-                            break
+                    service_barrier(
+                        "bot_player_near",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=bot_near_player,
+                    )
+
+                    def kill_fixtures(tn: TelnetAdmin) -> None:
                         tn.kill_non_player_ai()
-                        tn.close()
-                        barrier_counts["kill_fixture_zombie"] += 1
 
-                    while barrier_counts["kill_player"] < barrier_seen["kill_player"]:
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("kill_player: telnet connect fail; retry next poll")
-                            break
-                        # Kill the human player entity for death-screen case (not AI).
-                        out = tn.exec("listplayers")
-                        pids = [
-                            int(x)
-                            for x in re.findall(r"id\s*=\s*(\d+)", out, flags=re.IGNORECASE)
-                        ]
+                    service_barrier(
+                        "kill_fixture_zombie",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=kill_fixtures,
+                    )
+
+                    def kill_first_player(tn: TelnetAdmin) -> None:
+                        # Kill the human player entity for the death-screen
+                        # case (not AI). Shared parser: dedupes ids and also
+                        # understands zdtd's "(entity N)" reply style.
+                        pids = tn.list_player_ids()
                         for pid in pids[:1]:
                             r = tn.exec(f"kill {pid}")
                             log(f"telnet kill_player {pid} → {r[:80]!r}")
-                        tn.close()
-                        barrier_counts["kill_player"] += 1
+
+                    service_barrier(
+                        "kill_player",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=kill_first_player,
+                    )
 
                     # Cap night sets: re-barrier spam was flipping the world back to 22:00
                     # after settime_day and killing the player in economy cases.
-                    while (
-                        barrier_counts["settime_bloodmoon"] < SETTIME_BLOODMOON_MAX_FIRES
-                        and barrier_counts["settime_bloodmoon"]
-                        < barrier_seen["settime_bloodmoon"]
-                    ):
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("settime_bloodmoon: telnet connect fail; retry next poll")
-                            break
+                    def set_night(tn: TelnetAdmin) -> None:
                         # Day1 22:00 only (not day-7 BM horde).
                         r = tn.exec("settime 22000")
                         log(f"telnet settime 22000 → {r[:120]!r}")
-                        tn.close()
-                        barrier_counts["settime_bloodmoon"] += 1
+
+                    service_barrier(
+                        "settime_bloodmoon",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        cap=SETTIME_BLOODMOON_MAX_FIRES,
+                        act=set_night,
+                    )
                     if (
                         barrier_counts["settime_bloodmoon"] >= SETTIME_BLOODMOON_MAX_FIRES
                         and barrier_seen["settime_bloodmoon"]
@@ -2175,24 +2188,21 @@ def main(argv: list[str] | None = None) -> int:
                             "settime_bloodmoon"
                         ]
 
-                    while barrier_counts["settime_day"] < barrier_seen["settime_day"]:
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("settime_day: telnet connect fail; retry next poll")
-                            break
+                    def set_morning(tn: TelnetAdmin) -> None:
                         # Morning restore; always last after any night set in this poll.
                         r = tn.exec("settime 8000")
                         log(f"telnet settime 8000 (day) → {r[:120]!r}")
                         # Clear AI again after night so leftovers do not down the player.
                         tn.clear_ai()
-                        tn.close()
-                        barrier_counts["settime_day"] += 1
 
-                    while barrier_counts["spawn_vehicle"] < barrier_seen["spawn_vehicle"]:
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("spawn_vehicle: telnet connect fail; retry next poll")
-                            break
+                    service_barrier(
+                        "settime_day",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=set_morning,
+                    )
+
+                    def spawn_bicycle(tn: TelnetAdmin) -> None:
                         # Same path as zombies: spawnentity <playerId> <class>
                         n = tn.spawn_near_players("vehicleBicycle")
                         if n == 0:
@@ -2204,20 +2214,26 @@ def main(argv: list[str] | None = None) -> int:
                                 log(f"telnet vehicle {cmd} → {r[:80]!r}")
                         else:
                             log(f"telnet spawn vehicle near players units~={n}")
-                        tn.close()
-                        barrier_counts["spawn_vehicle"] += 1
 
-                    while barrier_counts["spawn_trader"] < barrier_seen["spawn_trader"]:
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if not tn.connect():
-                            warn("spawn_trader: telnet connect fail; retry next poll")
-                            break
+                    service_barrier(
+                        "spawn_vehicle",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=spawn_bicycle,
+                    )
+
+                    def spawn_trader(tn: TelnetAdmin) -> None:
                         n = tn.spawn_near_players("npcTraderJoel")
                         if n == 0:
                             n = tn.spawn_near_players("npcTraderBob")
                         log(f"telnet spawn trader near players units~={n}")
-                        tn.close()
-                        barrier_counts["spawn_trader"] += 1
+
+                    service_barrier(
+                        "spawn_trader",
+                        counts=barrier_counts,
+                        seen=barrier_seen,
+                        act=spawn_trader,
+                    )
 
                 # Multi-peer / chat / APM barriers (stock or zdtd).
                 while (
@@ -2294,39 +2310,37 @@ def main(argv: list[str] | None = None) -> int:
                     cls = full.split(":", 1)[-1].strip()
                     if cls:
                         vehicle_seen[cls] = vehicle_seen.get(cls, 0) + 1
-                for cls, seen in vehicle_seen.items():
-                    while vehicle_spawns_fired.get(cls, 0) < seen:
-                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            n = tn.spawn_near_players(cls)
-                            if n == 0:
-                                r = tn.exec(f"spawnentityat {cls} {PERSIST_PAD_COORDS}")
-                                log(f"telnet vehicle spawnentityat {cls} → {r[:80]!r}")
-                            else:
-                                log(f"telnet spawn vehicle {cls} near players units~={n}")
-                            tn.close()
-                        else:
-                            warn(f"spawn_vehicle:{cls} telnet connect fail; retry")
-                            break
-                        vehicle_spawns_fired[cls] = vehicle_spawns_fired.get(cls, 0) + 1
-
-                while (
-                    barrier_counts["teleport_persist_pad"]
-                    < barrier_seen["teleport_persist_pad"]
-                ):
-                    tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                    n = 0
-                    if tn.connect():
-                        n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
+                for cls in vehicle_seen:
+                    def spawn_class_vehicle(
+                        tn: TelnetAdmin, cls: str = cls
+                    ) -> None:
+                        n = tn.spawn_near_players(cls)
                         if n == 0:
-                            warn("teleport_persist_pad: no player ids yet; retry")
-                            tn.close()
-                            break
-                        tn.close()
-                    else:
-                        warn("teleport_persist_pad: telnet connect fail; retry")
-                        break
-                    barrier_counts["teleport_persist_pad"] += 1
+                            r = tn.exec(f"spawnentityat {cls} {PERSIST_PAD_COORDS}")
+                            log(f"telnet vehicle spawnentityat {cls} → {r[:80]!r}")
+                        else:
+                            log(f"telnet spawn vehicle {cls} near players units~={n}")
+
+                    service_barrier(
+                        f"spawn_vehicle:{cls}",
+                        counts=vehicle_spawns_fired,
+                        seen=vehicle_seen,
+                        act=spawn_class_vehicle,
+                    )
+
+                def teleport_to_pad(tn: TelnetAdmin) -> bool:
+                    moved = tn.teleport_players_to(*PERSIST_PAD_XYZ)
+                    if moved == 0:
+                        warn("teleport_persist_pad: no player ids yet; retry")
+                        return False
+                    return True
+
+                service_barrier(
+                    "teleport_persist_pad",
+                    counts=barrier_counts,
+                    seen=barrier_seen,
+                    act=teleport_to_pad,
+                )
 
                 while barrier_counts["apm_dump"] < barrier_seen["apm_dump"]:
                     ok = write_zdtd_apm_dump(
