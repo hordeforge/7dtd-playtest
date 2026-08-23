@@ -80,6 +80,12 @@ unchanged.
 - `global.json` pins the dotnet SDK to the 8.0 feature band
   (`rollForward: latestFeature`), so compiler version no longer depends on
   whatever the host has installed.
+- Mod build strictness raised to what the tree already passes: nullable
+  annotation checking (`Nullable=annotations`), warning level 5, Roslyn
+  NET analyzers enabled (they defaulted off for net48), and
+  `TreatWarningsAsErrors`, so a new compiler or analyzer diagnostic fails
+  `make build` instead of scrolling by. Full `Nullable=enable` stays off
+  until the remaining CS86xx findings are worked off.
 - CI runner image pinned (`ubuntu-24.04`) instead of the floating
   `ubuntu-latest`.
 - Entity probes, fixture equips, and barrier bookkeeping share one

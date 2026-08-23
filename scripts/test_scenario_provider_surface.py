@@ -160,7 +160,7 @@ def main() -> int:
         "TryEnterVehicle",
         "FindNearestVehicle",
     ):
-        assert f"public static" in helpers and name in helpers, (
+        assert "public static" in helpers and name in helpers, (
             f"Helpers must expose {name} for providers"
         )
 

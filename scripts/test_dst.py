@@ -22,7 +22,6 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import dst_run  # noqa: E402
-import dst_sim  # noqa: E402
 import playtest_lock as pl  # noqa: E402
 from dst_sim import Faults, SimConfig, run_simulation  # noqa: E402
 
