@@ -402,6 +402,99 @@ def test_write_junit_drops_xml_illegal_characters() -> None:
     print("PASS junit_illegal_chars NUL/control bytes dropped, document stays valid")
 
 
+class _FakeTail:
+    """Stands in for LogTail in the incremental equivalence test below."""
+
+    def __init__(self, chunk: str) -> None:
+        self._chunk = chunk
+
+    def poll(self) -> str:
+        chunk, self._chunk = self._chunk, ""
+        return chunk
+
+
+def test_incremental_scan_matches_whole_parse() -> None:
+    """The orchestrator polls the client log through LogTail + ClientLogScan
+    (pump_log_tail) instead of re-parsing the whole file each poll. The
+    incremental result must equal parse_client_log over the same bytes, and
+    cumulative barrier totals must equal whole-text barrier_line_hits, or the
+    poll loop double-fires or misses host fixtures."""
+    text = (
+        "[7dtd-playtest] ready player=171 pos=(520.0, 62.0, 950.0)\n"
+        "[game] noise line mentioning NullReferenceException\n"
+        "[7dtd-playtest] PASS smoke/dig detail=ok\n"
+        '[7dtd-playtest] {"v":1,"t":"result","suite":"smoke","case":"dig",'
+        '"status":"pass","ms":12}\n'
+        "[7dtd-playtest] barrier spawn_zombie\n"
+        "[7dtd-playtest] barrier spawn_vehicle:gyrocopter\n"
+        "[7dtd-playtest] barrier chat_echo:token1\n"
+        "[7dtd-playtest] SUMMARY pass=1 fail=0 skip=0\n"
+        "[7dtd-playtest] DONE exit_hint=0\n"
+    )
+    # Cut at awkward boundaries, including mid-line pieces that only become
+    # pumpable once a later piece completes the newline.
+    cuts = (0, 13, 40, 41, 120, 121, 200, len(text))
+    buf = ""
+    scan = playtest_log.ClientLogScan()
+    for lo, hi in zip(cuts, cuts[1:]):
+        buf += text[lo:hi]
+        cut = buf.rfind("\n")
+        if cut < 0:
+            continue
+        complete, buf = buf[: cut + 1], buf[cut + 1 :]
+        playtest_run.pump_log_tail(_FakeTail(complete), scan)
+    assert buf == "", f"tail bytes were dropped: {buf!r}"
+
+    got = scan.result()
+    want = playtest_log.parse_client_log(text)
+    assert got["results"] == want["results"], (got["results"], want["results"])
+    assert got["summary"] == want["summary"], (got["summary"], want["summary"])
+    assert got["done"] == want["done"], (got["done"], want["done"])
+    assert got["nre_like_total"] == 1, got["nre_like_total"]
+
+    totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+    playtest_run.add_barrier_hits(totals, text)
+    for name, total in totals.items():
+        assert total == playtest_run.barrier_line_hits(text, name), name
+    assert totals["spawn_zombie"] == 1, totals
+    # Parameterised lines must not count toward the bare name.
+    assert totals["spawn_vehicle"] == 0, totals
+    print("PASS incremental_scan chunked feed equals whole-log parse and counts")
+
+
+def test_pump_log_tail_survives_truncation_between_phases() -> None:
+    """The rejoin flow truncates the client log between setup and verify and
+    the orchestrator recreates tail+scan there. A real LogTail must restart
+    from zero on the shrink so no stale bytes are misread, and the fresh scan
+    must report only the new generation's events."""
+    with tempfile.TemporaryDirectory() as td:
+        log_path = Path(td) / "client.log"
+        log_path.write_text(
+            "[7dtd-playtest] barrier spawn_zombie\n"
+            "[7dtd-playtest] DONE exit_hint=0\n",
+            encoding="utf-8",
+        )
+        tail = playtest_log.LogTail(log_path)
+        scan = playtest_log.ClientLogScan()
+        chunk = playtest_run.pump_log_tail(tail, scan)
+        assert "DONE" in chunk, chunk
+        # Truncate between phases (setup → saveworld → restart → verify).
+        log_path.write_text("", encoding="utf-8")
+        assert playtest_run.pump_log_tail(tail, scan) == ""
+        log_path.write_text(
+            "[7dtd-playtest] PASS persist/pos_survives_rejoin detail=ok\n"
+            "[7dtd-playtest] DONE exit_hint=0\n",
+            encoding="utf-8",
+        )
+        playtest_run.pump_log_tail(tail, scan)
+    got = scan.result()
+    assert [r["case"] for r in got["results"]] == ["persist/pos_survives_rejoin"], (
+        got["results"]
+    )
+    assert got["done"] == {"exit_hint": 0}, got["done"]
+    print("PASS incremental_truncate shrink restarts tail, fresh scan per phase")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -411,6 +504,8 @@ def main() -> int:
     test_write_junit_drops_xml_illegal_characters()
     test_fuzz_parse_client_log_survives_hostile_logs()
     test_fuzz_write_junit_roundtrips_hostile_strings()
+    test_incremental_scan_matches_whole_parse()
+    test_pump_log_tail_survives_truncation_between_phases()
     print("RESULT PASS")
     return 0
 

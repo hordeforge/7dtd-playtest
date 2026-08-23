@@ -31,7 +31,6 @@ from playtest_log import (  # noqa: E402
     ClientLogScan,
     LogTail,
     barrier_hits_prefix,
-    parse_client_log,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -672,6 +671,19 @@ def write_junit(
 class TelnetAdmin:
     """Minimal stock dedicated telnet (password prompt)."""
 
+    # Substrings that mark a listents line as non-player AI. One shared table
+    # so clear_ai and kill_non_player_ai cannot drift apart again.
+    AI_LINE_KEYWORDS = (
+        "zombie",
+        "animal",
+        "vulture",
+        "bear",
+        "wolf",
+        "snake",
+        "kind=zombie",
+        "kind=animal",
+    )
+
     def __init__(self, host: str, port: int, password: str):
         self.host = host
         self.port = port
@@ -714,17 +726,12 @@ class TelnetAdmin:
         """
         # listents lines vary; kill known zombie class names near world if present.
         out = self.exec("listents")
-        # Entity ids in listents often look like: "id=172, ..." or "Entity 172"
-        ids = [int(x) for x in re.findall(r"(?:id|ID)\s*=\s*(\d+)", out)]
         # Avoid low / player-looking ids if we can: players often 171 etc. We only
         # kill when the line also looks like a zombie/animal.
         killed = 0
         for line in out.splitlines():
             low = line.lower()
-            if not any(
-                k in low
-                for k in ("zombie", "animal", "vulture", "kind=zombie", "kind=animal")
-            ):
+            if not any(k in low for k in self.AI_LINE_KEYWORDS):
                 continue
             m = re.search(r"(?:id|ID)\s*=\s*(\d+)", line)
             if not m:
@@ -741,19 +748,7 @@ class TelnetAdmin:
         players = set(str(i) for i in self.list_player_ids())
         for line in out.splitlines():
             low = line.lower()
-            if not any(
-                k in low
-                for k in (
-                    "zombie",
-                    "animal",
-                    "vulture",
-                    "bear",
-                    "wolf",
-                    "snake",
-                    "kind=zombie",
-                    "kind=animal",
-                )
-            ):
+            if not any(k in low for k in self.AI_LINE_KEYWORDS):
                 continue
             m = re.search(r"(?:id|ID)\s*=\s*(\d+)", line)
             if not m:
@@ -968,6 +963,69 @@ def suite_wants_host_fixtures(suite: str) -> bool:
         for token in re.split(r"[,;\s]+", suite.lower())
         if token
     )
+
+
+# Every barrier the orchestrator counts in the client log and services over
+# telnet/admin. Single source for both the fired-count and seen-count tables
+# in main(), so a new barrier cannot be added to one and missed by the other.
+BARRIER_NAMES: tuple[str, ...] = (
+    "spawn_zombie",
+    "spawn_trader",
+    "kill_fixture_zombie",
+    "kill_player",
+    "settime_bloodmoon",
+    "settime_day",
+    "spawn_vehicle",
+    "spawn_loadgen_peer",
+    "spawn_loadgen_bots",
+    "bot_spawn",
+    "bot_player_near",
+    "persist_setup_done",
+    "rejoin_setup_done",
+    "teleport_persist_pad",
+    "apm_dump",
+    "chat_echo",
+)
+
+
+def barrier_line_hits(blob: str, name: str) -> int:
+    """Count human `barrier <name>` lines in ``blob`` (whole-name match).
+
+    Report.Barrier also emits JSON with the same name; summing both
+    double-fires handlers (e.g. kills bots). The whole-name match keeps
+    "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
+    lines, which are collected separately via barrier_hits_prefix.
+    """
+    return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
+
+
+def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
+    """Fold the barrier lines of one newly read chunk into cumulative totals.
+
+    Poll loops feed only appended chunks through here instead of re-scanning
+    the whole log each poll; totals only grow, matching how handlers compare
+    their fired counts against everything seen so far.
+    """
+    for name in totals:
+        hits = barrier_line_hits(blob, name)
+        if hits:
+            totals[name] += hits
+
+
+def pump_log_tail(tail: LogTail, scan: ClientLogScan) -> str:
+    """Drain newly appended complete lines through the shared line parser.
+
+    Returns the new text so per-line greps in the caller see exactly what was
+    parsed. Both sides share ClientLogScan's parser so incremental results
+    cannot drift from parse_client_log over the same bytes.
+    """
+    chunk = tail.poll()
+    if not chunk:
+        return ""
+    for line in chunk.splitlines():
+        scan.feed_line(line)
+    scan.feed_chunk(chunk)
+    return chunk
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1304,6 +1362,16 @@ def main(argv: list[str] | None = None) -> int:
             except OSError as ex:
                 warn(f"could not truncate peer client log: {ex}")
 
+        # Incremental readers created right after the truncation above so every
+        # later append is seen exactly once. Later truncations (rejoin phases)
+        # are detected by LogTail as a shrink and restart from zero.
+        client_tail = LogTail(args.client_log)
+        client_scan = ClientLogScan()
+        peer_tail = (
+            LogTail(peer_client_log) if peer_client_log is not None else None
+        )
+        peer_scan = ClientLogScan()
+
         # Telnet/admin surface, needed by start_stock_dedicated (config password)
         # and every barrier handler below. Assigned once, before first use.
         telnet_host = "127.0.0.1"
@@ -1375,27 +1443,13 @@ def main(argv: list[str] | None = None) -> int:
         if "soak_long" in args.suite or args.suite.strip() == "soak_long":
             deadline = time.monotonic() + max(args.timeout, 1100.0)
             log(f"soak_long timeout deadline wall_s>={int(deadline - time.monotonic())}")
-        last_size = -1
         last_progress = float("-inf")
-        # Barrier fire counts (multi-fire: combat + sleeper + economy may re-spawn/kill).
-        barrier_counts: dict[str, int] = {
-            "spawn_zombie": 0,
-            "spawn_trader": 0,
-            "kill_fixture_zombie": 0,
-            "kill_player": 0,
-            "settime_bloodmoon": 0,
-            "settime_day": 0,
-            "spawn_vehicle": 0,
-            "spawn_loadgen_peer": 0,
-            "spawn_loadgen_bots": 0,
-            "bot_spawn": 0,
-            "bot_player_near": 0,
-            "persist_setup_done": 0,
-            "rejoin_setup_done": 0,
-            "teleport_persist_pad": 0,
-            "apm_dump": 0,
-            "chat_echo": 0,
-        }
+        # Fired counts per barrier (multi-fire: combat + sleeper + economy may
+        # re-spawn/kill). Handlers fire while a fired count trails the
+        # cumulative lines seen for that barrier (barrier_seen below).
+        barrier_counts: dict[str, int] = dict.fromkeys(BARRIER_NAMES, 0)
+        # Cumulative barrier lines seen in the log so far.
+        barrier_seen: dict[str, int] = dict.fromkeys(BARRIER_NAMES, 0)
         ready_seen = False
         peer_ready_seen = not bool(peer_client_suite)
         peer_teleport_done = args.peer_client_teleport is None
@@ -1404,6 +1458,8 @@ def main(argv: list[str] | None = None) -> int:
         # One-shot barrier state for parameterized barriers (per run, not per call).
         chat_tokens_fired: set[str] = set()
         vehicle_spawns_fired: dict[str, int] = {}
+        # Cumulative spawn_vehicle:<class> barrier lines seen in the log.
+        vehicle_seen: dict[str, int] = {}
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
         apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
         client_extra_env: dict[str, str] = {}
@@ -1447,13 +1503,6 @@ def main(argv: list[str] | None = None) -> int:
                     run_suite=bool(peer_client_suite),
                 )
 
-        def _barrier_hits(blob: str, name: str) -> int:
-            # Count only the human log line. Report.Barrier also emits JSON with
-            # the same name; summing both double-fires handlers (e.g. kills bots).
-            # Whole-name match: "spawn_vehicle" must not also count the
-            # parameterised "spawn_vehicle:<class>" lines handled below.
-            return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
-
         # Rejoin flow: setup → saveworld → restart server → rejoin verify.
         # Built-in persist keeps its authoritative pad handling. Providers only
         # need to report their declared durable setup barrier.
@@ -1468,6 +1517,10 @@ def main(argv: list[str] | None = None) -> int:
                     args.client_log.write_text("", encoding="utf-8")
                 except OSError:
                     pass
+            # Fresh readers for the new log generation: the scan must hold only
+            # setup-phase events, not bytes from before the truncation.
+            client_tail = LogTail(args.client_log)
+            client_scan = ClientLogScan()
             client_proc = start_client(
                 args.port,
                 rejoin_setup_suite,
@@ -1476,27 +1529,31 @@ def main(argv: list[str] | None = None) -> int:
             )
             setup_deadline = time.monotonic() + min(args.timeout, 300)
             last_setup_progress = float("-inf")
+            rejoin_setup_seen = 0
             while time.monotonic() < setup_deadline:
                 reap_finished_helpers()
-                if args.client_log.is_file():
-                    try:
-                        text = args.client_log.read_text(encoding="utf-8", errors="replace")
-                    except OSError:
-                        text = ""
+                chunk = pump_log_tail(client_tail, client_scan)
+                if chunk:
                     now = time.monotonic()
                     if now - last_setup_progress > 8:
                         last_setup_progress = now
                         crumbs = [
                             ln
-                            for ln in text.splitlines()
+                            for ln in chunk.splitlines()
                             if "[7dtd-playtest]" in ln or "[7dtd-connect]" in ln
                         ]
                         if crumbs:
                             log(f"setup progress: {crumbs[-1][-160:]}")
+                    add_barrier_hits(barrier_seen, chunk)
+                    # The provider barrier name is arbitrary, so it cannot live
+                    # in the fixed barrier_seen table; count it separately.
+                    rejoin_setup_seen += barrier_line_hits(chunk, rejoin_setup_barrier)
                     if not provider_rejoin:
                         # Server-authoritative pad tele so pos_survives_rejoin is real.
-                        hits = _barrier_hits(text, "teleport_persist_pad")
-                        while barrier_counts["teleport_persist_pad"] < hits:
+                        while (
+                            barrier_counts["teleport_persist_pad"]
+                            < barrier_seen["teleport_persist_pad"]
+                        ):
                             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                             n = 0
                             if tn.connect():
@@ -1517,8 +1574,7 @@ def main(argv: list[str] | None = None) -> int:
                                 )
                                 break
                             barrier_counts["teleport_persist_pad"] += 1
-                    hits = _barrier_hits(text, rejoin_setup_barrier)
-                    if hits > barrier_counts["rejoin_setup_done"]:
+                    if rejoin_setup_seen > barrier_counts["rejoin_setup_done"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             n = 1
@@ -1539,10 +1595,10 @@ def main(argv: list[str] | None = None) -> int:
                                 r = tn.exec("saveworld")
                                 log(f"telnet saveworld (settle) → {r[:100]!r}")
                                 tn.close()
-                                barrier_counts["rejoin_setup_done"] = hits
+                                barrier_counts["rejoin_setup_done"] = rejoin_setup_seen
                         else:
                             warn(f"{rejoin_setup_barrier}: telnet connect fail; retry")
-                    setup_parsed = parse_client_log(text)
+                    setup_parsed = client_scan.result()
                     if setup_parsed.get("done") is not None:
                         log(
                             f"{rejoin_label} setup DONE "
@@ -1552,24 +1608,12 @@ def main(argv: list[str] | None = None) -> int:
                         break
                 if client_proc is not None and client_proc.poll() is not None:
                     time.sleep(1)
-                    if args.client_log.is_file():
-                        if (
-                            parse_client_log(
-                                args.client_log.read_text(encoding="utf-8", errors="replace")
-                            ).get("done")
-                            is not None
-                        ):
-                            log(f"{rejoin_label} setup DONE (client exited)")
-                            break
+                    if client_scan.result().get("done") is not None:
+                        log(f"{rejoin_label} setup DONE (client exited)")
+                        break
                 time.sleep(0.5)
             # Require setup DONE before rejoin verify; otherwise fixtures never existed.
-            setup_text = ""
-            if args.client_log.is_file():
-                try:
-                    setup_text = args.client_log.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    setup_text = ""
-            setup_parsed = parse_client_log(setup_text) if setup_text else {}
+            setup_parsed = client_scan.result()
             setup_done = setup_parsed.get("done") is not None
             setup_fail = int((setup_parsed.get("summary") or {}).get("fail") or 0)
             setup_pass = int((setup_parsed.get("summary") or {}).get("pass") or 0)
@@ -1686,6 +1730,12 @@ def main(argv: list[str] | None = None) -> int:
                     args.client_log.write_text("", encoding="utf-8")
                 except OSError:
                     pass
+            # Fresh readers + seen counts for the verify generation: the old
+            # log's barrier lines were already serviced and must neither
+            # re-fire nor leak into the final parsed report.
+            client_tail = LogTail(args.client_log)
+            client_scan = ClientLogScan()
+            barrier_seen = dict.fromkeys(BARRIER_NAMES, 0)
             client_proc = start_client(
                 args.port, args.suite, client_launch_log, extra_env=client_extra_env
             )
@@ -1698,39 +1748,36 @@ def main(argv: list[str] | None = None) -> int:
         primary_done_logged = False
 
         def read_peer_results() -> dict:
-            if peer_client_log is None or not peer_client_log.is_file():
+            if peer_tail is None:
                 return {}
-            try:
-                return parse_client_log(peer_client_log.read_text(encoding="utf-8", errors="replace"))
-            except OSError:
-                return {}
+            # Drain first so callers between poll ticks still see fresh bytes.
+            pump_log_tail(peer_tail, peer_scan)
+            return peer_scan.result()
 
         def peer_suite_done() -> bool:
             return not peer_client_suite or peer_parsed.get("done") is not None
 
         while time.monotonic() < deadline:
             reap_finished_helpers()
-            text = ""
-            if args.client_log.is_file():
-                try:
-                    text = args.client_log.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    text = ""
-            if text and len(text) != last_size:
-                last_size = len(text)
+            chunk = pump_log_tail(client_tail, client_scan)
+            peer_chunk = (
+                pump_log_tail(peer_tail, peer_scan) if peer_tail is not None else ""
+            )
+            if chunk:
                 # Progress crumbs for long joins
                 now = time.monotonic()
                 if now - last_progress > 8:
                     last_progress = now
                     crumbs = [
                         ln
-                        for ln in text.splitlines()
+                        for ln in chunk.splitlines()
                         if "[7dtd-playtest]" in ln or "[7dtd-connect]" in ln
                     ]
                     if crumbs:
                         log(f"progress: {crumbs[-1][-160:]}")
+                add_barrier_hits(barrier_seen, chunk)
 
-                if not ready_seen and "ready player=" in text:
+                if not ready_seen and "ready player=" in chunk:
                     ready_seen = True
                     log("client playtest ready")
                     # Soft-clear leftover AI (never killall: that kills the player).
@@ -1758,8 +1805,10 @@ def main(argv: list[str] | None = None) -> int:
 
                 if want_fixtures:
                     # spawn_zombie (may fire more than once: combat + sleeper_wake)
-                    hits = _barrier_hits(text, "spawn_zombie")
-                    while barrier_counts["spawn_zombie"] < hits:
+                    while (
+                        barrier_counts["spawn_zombie"]
+                        < barrier_seen["spawn_zombie"]
+                    ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             n = tn.spawn_near_players("zombieBoe", per=1)
@@ -1769,8 +1818,7 @@ def main(argv: list[str] | None = None) -> int:
                             tn.close()
                         barrier_counts["spawn_zombie"] += 1
 
-                    hits = _barrier_hits(text, "bot_spawn")
-                    while barrier_counts["bot_spawn"] < hits:
+                    while barrier_counts["bot_spawn"] < barrier_seen["bot_spawn"]:
                         # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if needed
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
@@ -1783,8 +1831,10 @@ def main(argv: list[str] | None = None) -> int:
                             tn.close()
                         barrier_counts["bot_spawn"] += 1
 
-                    hits = _barrier_hits(text, "bot_player_near")
-                    while barrier_counts["bot_player_near"] < hits:
+                    while (
+                        barrier_counts["bot_player_near"]
+                        < barrier_seen["bot_player_near"]
+                    ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             pids = tn.list_player_ids()
@@ -1798,16 +1848,17 @@ def main(argv: list[str] | None = None) -> int:
                             tn.close()
                         barrier_counts["bot_player_near"] += 1
 
-                    hits = _barrier_hits(text, "kill_fixture_zombie")
-                    while barrier_counts["kill_fixture_zombie"] < hits:
+                    while (
+                        barrier_counts["kill_fixture_zombie"]
+                        < barrier_seen["kill_fixture_zombie"]
+                    ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             tn.kill_non_player_ai()
                             tn.close()
                         barrier_counts["kill_fixture_zombie"] += 1
 
-                    hits = _barrier_hits(text, "kill_player")
-                    while barrier_counts["kill_player"] < hits:
+                    while barrier_counts["kill_player"] < barrier_seen["kill_player"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             # Kill the human player entity for death-screen case (not AI).
@@ -1822,12 +1873,12 @@ def main(argv: list[str] | None = None) -> int:
                             tn.close()
                         barrier_counts["kill_player"] += 1
 
-                    hits = _barrier_hits(text, "settime_bloodmoon")
                     # Cap night sets: re-barrier spam was flipping the world back to 22:00
                     # after settime_day and killing the player in economy cases.
                     while (
-                        barrier_counts["settime_bloodmoon"] < hits
-                        and barrier_counts["settime_bloodmoon"] < 2
+                        barrier_counts["settime_bloodmoon"] < 2
+                        and barrier_counts["settime_bloodmoon"]
+                        < barrier_seen["settime_bloodmoon"]
                     ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
@@ -1836,11 +1887,13 @@ def main(argv: list[str] | None = None) -> int:
                             log(f"telnet settime 22000 → {r[:120]!r}")
                             tn.close()
                         barrier_counts["settime_bloodmoon"] += 1
-                    if hits > barrier_counts["settime_bloodmoon"]:
-                        barrier_counts["settime_bloodmoon"] = hits  # swallow extras
+                    if barrier_seen["settime_bloodmoon"] > barrier_counts["settime_bloodmoon"]:
+                        # Swallow extras past the cap so they never re-fire later.
+                        barrier_counts["settime_bloodmoon"] = barrier_seen[
+                            "settime_bloodmoon"
+                        ]
 
-                    hits = _barrier_hits(text, "settime_day")
-                    while barrier_counts["settime_day"] < hits:
+                    while barrier_counts["settime_day"] < barrier_seen["settime_day"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             # Morning restore; always last after any night set in this poll.
@@ -1851,8 +1904,7 @@ def main(argv: list[str] | None = None) -> int:
                             tn.close()
                         barrier_counts["settime_day"] += 1
 
-                    hits = _barrier_hits(text, "spawn_vehicle")
-                    while barrier_counts["spawn_vehicle"] < hits:
+                    while barrier_counts["spawn_vehicle"] < barrier_seen["spawn_vehicle"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             # Same path as zombies: spawnentity <playerId> <class>
@@ -1869,8 +1921,7 @@ def main(argv: list[str] | None = None) -> int:
                             tn.close()
                         barrier_counts["spawn_vehicle"] += 1
 
-                    hits = _barrier_hits(text, "spawn_trader")
-                    while barrier_counts["spawn_trader"] < hits:
+                    while barrier_counts["spawn_trader"] < barrier_seen["spawn_trader"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             n = tn.spawn_near_players("npcTraderJoel", per=1)
@@ -1881,8 +1932,10 @@ def main(argv: list[str] | None = None) -> int:
                         barrier_counts["spawn_trader"] += 1
 
                 # Multi-peer / chat / APM barriers (stock or zdtd).
-                hits = _barrier_hits(text, "spawn_loadgen_peer")
-                while barrier_counts["spawn_loadgen_peer"] < hits:
+                while (
+                    barrier_counts["spawn_loadgen_peer"]
+                    < barrier_seen["spawn_loadgen_peer"]
+                ):
                     if loadgen_proc is not None and loadgen_proc.poll() is None:
                         # Already running; consume this edge without restart.
                         barrier_counts["spawn_loadgen_peer"] += 1
@@ -1906,8 +1959,10 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     barrier_counts["spawn_loadgen_peer"] += 1
 
-                hits = _barrier_hits(text, "spawn_loadgen_bots")
-                while barrier_counts["spawn_loadgen_bots"] < hits:
+                while (
+                    barrier_counts["spawn_loadgen_bots"]
+                    < barrier_seen["spawn_loadgen_bots"]
+                ):
                     stop_proc(loadgen_proc)
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
@@ -1920,7 +1975,7 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     barrier_counts["spawn_loadgen_bots"] += 1
 
-                for full in barrier_hits_prefix(text, "chat_echo:"):
+                for full in barrier_hits_prefix(chunk, "chat_echo:"):
                     # Fire once per unique token name (only after successful telnet say).
                     token = full.split(":", 1)[-1].strip()
                     if not token:
@@ -1945,13 +2000,12 @@ def main(argv: list[str] | None = None) -> int:
                 # server: every position update for it is rejected as an
                 # invalid entityId and it cannot fly, so providers must ask the
                 # host for one the same way the stock vehicle cases do.
-                vehicle_hits: dict[str, int] = {}
-                for full in barrier_hits_prefix(text, "spawn_vehicle:"):
+                for full in barrier_hits_prefix(chunk, "spawn_vehicle:"):
                     cls = full.split(":", 1)[-1].strip()
                     if cls:
-                        vehicle_hits[cls] = vehicle_hits.get(cls, 0) + 1
-                for cls, hits in vehicle_hits.items():
-                    while vehicle_spawns_fired.get(cls, 0) < hits:
+                        vehicle_seen[cls] = vehicle_seen.get(cls, 0) + 1
+                for cls, seen in vehicle_seen.items():
+                    while vehicle_spawns_fired.get(cls, 0) < seen:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
                             n = tn.spawn_near_players(cls, per=1)
@@ -1966,8 +2020,10 @@ def main(argv: list[str] | None = None) -> int:
                             break
                         vehicle_spawns_fired[cls] = vehicle_spawns_fired.get(cls, 0) + 1
 
-                hits = _barrier_hits(text, "teleport_persist_pad")
-                while barrier_counts["teleport_persist_pad"] < hits:
+                while (
+                    barrier_counts["teleport_persist_pad"]
+                    < barrier_seen["teleport_persist_pad"]
+                ):
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     n = 0
                     if tn.connect():
@@ -1982,8 +2038,7 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     barrier_counts["teleport_persist_pad"] += 1
 
-                hits = _barrier_hits(text, "apm_dump")
-                while barrier_counts["apm_dump"] < hits:
+                while barrier_counts["apm_dump"] < barrier_seen["apm_dump"]:
                     ok = write_zdtd_apm_dump(
                         args.zdtd,
                         args.world,
@@ -1997,25 +2052,19 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     barrier_counts["apm_dump"] += 1
 
-                if "DONE" in text and "[7dtd-playtest]" in text:
-                    parsed = parse_client_log(text)
-                    if parsed.get("done") is not None:
-                        if not primary_done_logged:
-                            primary_done_logged = True
-                            log("saw DONE in primary client log")
-                        peer_parsed = read_peer_results()
-                        if peer_suite_done():
-                            log("saw DONE in every scenario client log")
-                            break
+                parsed = client_scan.result()
+                if parsed.get("done") is not None:
+                    if not primary_done_logged:
+                        primary_done_logged = True
+                        log("saw DONE in primary client log")
+                    peer_parsed = read_peer_results()
+                    if peer_suite_done():
+                        log("saw DONE in every scenario client log")
+                        break
 
-            if peer_client_log is not None and not peer_ready_seen and peer_client_log.is_file():
-                try:
-                    peer_text = peer_client_log.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    peer_text = ""
-                if "ready player=" in peer_text:
-                    peer_ready_seen = True
-                    log("peer client playtest ready")
+            if not peer_ready_seen and peer_chunk and "ready player=" in peer_chunk:
+                peer_ready_seen = True
+                log("peer client playtest ready")
             if peer_client_suite:
                 peer_parsed = read_peer_results()
 
@@ -2039,21 +2088,19 @@ def main(argv: list[str] | None = None) -> int:
 
             if client_proc is not None and client_proc.poll() is not None:
                 time.sleep(2)
-                if args.client_log.is_file():
-                    parsed = parse_client_log(
-                        args.client_log.read_text(encoding="utf-8", errors="replace")
-                    )
-                    peer_parsed = read_peer_results()
-                    if parsed.get("done") is not None and peer_suite_done():
-                        break
+                pump_log_tail(client_tail, client_scan)
+                parsed = client_scan.result()
+                peer_parsed = read_peer_results()
+                if parsed.get("done") is not None and peer_suite_done():
+                    break
             time.sleep(0.5)
         else:
             log(f"timeout after {args.timeout}s waiting for DONE")
-            if args.client_log.is_file():
-                parsed = parse_client_log(args.client_log.read_text(encoding="utf-8", errors="replace"))
 
-        if not parsed and args.client_log.is_file():
-            parsed = parse_client_log(args.client_log.read_text(encoding="utf-8", errors="replace"))
+        # Final parse from everything drained so far, plus any bytes appended
+        # between the last poll and here.
+        pump_log_tail(client_tail, client_scan)
+        parsed = client_scan.result()
         if peer_client_suite:
             peer_parsed = read_peer_results()
 
