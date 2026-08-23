@@ -44,6 +44,7 @@ help:
 	@echo "  make test                        run all offline gates"
 	@echo "  make test-one GATE=test_dst.py   run one gate (file name under scripts/)"
 	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
+	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
 	@echo "  make check                       everything CI runs: test + dst DST_SEEDS=200"
 	@echo
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
@@ -70,7 +71,13 @@ install: build
 	cp -f "$(DIST)/ModInfo.xml" "$(DIST)/7dtd-playtest.dll" "$(INSTALL_DIR)/"
 	@echo "Installed → $(INSTALL_DIR)"
 
-install-pair: install
+install-pair:
+	@test -d "$(CONNECT_DIR)" || { \
+		echo "7dtd-connect not found at $(CONNECT_DIR)"; \
+		echo "clone it first (see README: Join/auto-connect), or install playtest only:"; \
+		echo "  make install"; \
+		exit 2; }
+	$(MAKE) install
 	$(MAKE) -C "$(CONNECT_DIR)" install GAME="$(GAME)"
 
 uninstall:

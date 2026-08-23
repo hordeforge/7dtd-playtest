@@ -4,10 +4,6 @@ version = "0.1.0"
 description = "Host orchestrator for stock-client zdtd playtest suites"
 requires-python = ">=3.11"
 dependencies = []
-
-[project.scripts]
-playtest = "playtest_run:main"
-
 [dependency-groups]
 # Only third-party package in the repo. Declared here (not `uv run --with`)
 # so uv.lock pins the exact version with sha256 hashes instead of resolving
