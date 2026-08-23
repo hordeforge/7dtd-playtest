@@ -70,8 +70,11 @@ CLIENT_LOG = client_log_for_compat(DEFAULT_COMPAT)
 PERSIST_PAD_XYZ = (520, 62, 950)
 PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 
-# Client + dedicated process patterns shared by the rejoin teardown steps.
-REJOIN_GAME_PROC_PATTERNS = [
+# Client + dedicated process identities shared by every pkill step (pre-run
+# clean, rejoin teardown, post-run finally): one table so a new runtime shape
+# cannot be added to one step and missed by the others. Site-specific extras
+# (truncated comm names, zdtd, loadgen) append to this list.
+GAME_PROC_PATTERNS = [
     r"7DaysToDieServer\.x86_64",
     r"[/]7DaysToDie\.exe",
     r"wine64-preloader.*7DaysToDie",
@@ -227,12 +230,9 @@ def clean_processes(*, kill_wine: bool = False) -> None:
     (that drops Steam); only kill game + dedicated + optional zdtd."""
     log("cleaning prior dedicated / client / zdtd")
     patterns = [
-        r"7DaysToDieServer\.x86_64",
+        *GAME_PROC_PATTERNS,
         r"7DaysToDieServe",  # truncated comm
         r"zig-out/bin/zdtd",
-        r"[/]7DaysToDie\.exe",
-        r"wine64-preloader.*7DaysToDie",
-        r"proton.*7DaysToDie",
     ]
     pkill_patterns(patterns, sig="-15")
     time.sleep(2)
@@ -2081,7 +2081,7 @@ def main(argv: list[str] | None = None) -> int:
                 client_proc = None
                 stop_proc(server_proc)
                 server_proc = None
-                pkill_patterns(REJOIN_GAME_PROC_PATTERNS, sig="-9")
+                pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
                 summary = {
                     "pass": setup_pass,
                     "fail": max(setup_fail, 1),
@@ -2138,7 +2138,7 @@ def main(argv: list[str] | None = None) -> int:
                 sig="-15",
             )
             time.sleep(3)
-            pkill_patterns(REJOIN_GAME_PROC_PATTERNS, sig="-9")
+            pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
             time.sleep(5)
             # Restart dedicated on same save (no fresh_save).
             if args.server == "stock" and not args.no_server:
@@ -2757,9 +2757,7 @@ def main(argv: list[str] | None = None) -> int:
             # Soft clean after: leave Steam alone
             pkill_patterns(
                 [
-                    r"7DaysToDieServer\.x86_64",
-                    r"[/]7DaysToDie\.exe",
-                    r"wine64-preloader.*7DaysToDie",
+                    *GAME_PROC_PATTERNS,
                     r"zig-out/bin/zdtd",
                     r"7dtd-loadgen",
                 ],

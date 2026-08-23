@@ -4328,7 +4328,7 @@ namespace ZdtdPlaytest
                 ctx.FloatA = feet;
                 ctx.Detail = $"bot {ctx.IntA} feet={feet:0.0} (must stay 0..4m, not flying/noclip)";
                 // Even if not perfectly on ground due to terrain sample, must be within sane bounds
-                return ElapsedCheck(ctx, 3f);
+                return Time.unscaledTime - ctx.CaseStartUnscaled >= 3f;
             }, assert: ctx =>
             {
                 // After 3s warmup, bot must have stayed between 0 and 4m above ground (no godmode fly/no-clip through void)
@@ -4372,11 +4372,6 @@ namespace ZdtdPlaytest
                 ctx.Detail = $"no bot near t={elapsed:0.0}";
                 return false;
             }, assert: ctx => ctx.FloatA >= 10f && ctx.FloatA <= 55f, timeout: 22f, fail: "no bot spawned in 10-55m ring near player (bot player)", pause: 0.4f));
-        }
-
-        static bool ElapsedCheck(CaseCtx ctx, float want)
-        {
-            return Time.unscaledTime - ctx.CaseStartUnscaled >= want;
         }
 
         static void AddSoak(List<CaseDef> q, string suite)
