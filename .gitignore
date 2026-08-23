@@ -10,3 +10,4 @@ workspace/comparison-playtest/*/stock/
 workspace/comparison-playtest/*/zdtd/
 .local/
 *.flock
+*.lock
