@@ -427,7 +427,6 @@ def start_stock_dedicated(
     ]
     log("start stock dedicated: " + " ".join(cmd))
     proc = _popen_to_logfile(cmd, server_log, cwd=str(game_srv))
-    proc._unity_log = unity_log  # type: ignore[attr-defined]
     return proc, unity_log
 
 

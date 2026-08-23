@@ -78,14 +78,12 @@ def test_clean_run_holds_every_invariant() -> None:
 def test_faults_actually_fire() -> None:
     """A fault-free simulation proves nothing. Assert the faults land."""
     totals = {"torn": 0, "crashes": 0, "io_errors": 0}
-    reasons: set[str] = set()
     coverage: set[str] = set()
     for seed in range(1, GATE_SEEDS + 1):
         r = run_simulation(seed)
         totals["torn"] += r.torn
         totals["crashes"] += r.crashes
         totals["io_errors"] += r.io_errors
-        reasons |= set(r.refusals)
         coverage |= r.coverage
     for name, count in totals.items():
         _assert(count > 0, f"fault {name} never fired across {GATE_SEEDS} seeds")

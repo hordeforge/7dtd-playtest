@@ -341,9 +341,6 @@ class Agent:
         self.rng = sim.rng.stream(f"agent/{name}")
         self.session = pl.new_session_id("sim", env=self._bound_env())
         self.previous_session: str | None = None
-        self.attempts = 0
-        self.completed = 0
-        self.crashed = 0
 
     def _bound_env(self) -> SimEnv:
         self.env.bind(self.name)
@@ -369,7 +366,6 @@ class Agent:
                 self._stale_release()
             if self.rng.chance(f.external_corruption):
                 self.env.storage.corrupt_in_place(LOCK_PATH)
-            self.attempts += 1
             try:
                 state = pl.acquire(
                     self.session,
@@ -387,7 +383,6 @@ class Agent:
             except SimCrash:
                 # Died mid-write. No runtime was up yet, so nothing to clean.
                 self._died()
-                self.crashed += 1
                 self.sim.record(self.name, "crash_in_acquire")
                 yield self.rng.uniform(30.0, 120.0)
                 self._rotate_session()
@@ -460,14 +455,12 @@ class Agent:
                 # Crashed while releasing: processes are already down, so the
                 # lock is reclaimable once it goes stale. Nothing to retry.
                 self._died()
-                self.crashed += 1
                 self.sim.record(self.name, "crash_in_release")
                 break
             except (SimIOError, pl.PlaytestLockError) as ex:
                 self.sim.record(self.name, "release_retry", error=type(ex).__name__)
                 yield 5.0
                 self._bound_env()
-        self.completed += 1
         self.sim.record(self.name, "released")
         self._rotate_session()
         yield self.rng.uniform(10.0, 120.0)
@@ -498,7 +491,6 @@ class Agent:
 
     def _die(self, kind: str) -> None:
         """Process death: runtime processes die with it, lock file stays."""
-        self.crashed += 1
         self.world.stop_runtime(self.name)
         self.world.holders.discard(self.name)
         self.world.holder_sessions.pop(self.name, None)
