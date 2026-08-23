@@ -14,6 +14,7 @@ config summary redaction.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import io
 import os
@@ -241,6 +242,47 @@ def test_prune_run_artifacts_wired_into_main() -> None:
         f"expected prune after both report-writing paths, found {calls} calls"
     )
     print("PASS prune_run_artifacts wired after both report-writing paths")
+
+
+def test_main_finally_reaps_mute_helpers() -> None:
+    """reap_finished_helpers must run from main()'s finally, not only inside
+    the poll loops: the rejoin-abort return, exception unwind, and post-DONE
+    teardown all bypass the loops and would otherwise leave exited detached
+    helpers as zombies for the rest of the orchestrator run."""
+    tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
+    mains = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+    ]
+    assert len(mains) == 1, "expected exactly one main() definition"
+
+    def _call_names(stmts: list[ast.stmt]) -> set[str]:
+        return {
+            n.func.id
+            for stmt in stmts
+            for n in ast.walk(stmt)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        }
+
+    # The nested service_barrier helper has its own try/finally (telnet
+    # close); the teardown finally is the one driving stop_proc.
+    teardown_finallys = [
+        n.finalbody
+        for n in ast.walk(mains[0])
+        if isinstance(n, ast.Try) and "stop_proc" in _call_names(n.finalbody)
+    ]
+    assert len(teardown_finallys) == 1, (
+        "expected exactly one teardown finally (stop_proc-driven) in main()"
+    )
+    calls = [
+        n
+        for stmt in teardown_finallys[0]
+        for n in ast.walk(stmt)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "reap_finished_helpers"
+    ]
+    assert calls, "main()'s finally must call reap_finished_helpers()"
+    print("PASS main_finally_reap_helpers teardown reaps detached helpers")
 
 
 def test_snapshot_previous_log_copies_before_truncate() -> None:
@@ -748,6 +790,7 @@ def main() -> int:
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
+        ("main_finally_reap_helpers", test_main_finally_reaps_mute_helpers),
         ("wait_file_contains", test_wait_file_contains_incremental),
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),

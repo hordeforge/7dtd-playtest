@@ -2564,6 +2564,12 @@ def main(argv: list[str] | None = None) -> int:
             stop_proc(peer_client_proc)
             stop_proc(loadgen_proc)
             stop_proc(server_proc)
+            # Poll loops reap mute helpers each iteration, but teardown paths
+            # (rejoin abort, exception unwind, post-DONE) skip them: without
+            # this reap an exited helper lingers as a zombie until interpreter
+            # exit. Helpers still alive here are detached and self-exit within
+            # their poll window, reparented to init once this process ends.
+            reap_finished_helpers()
             # Soft clean after: leave Steam alone
             pkill_patterns(
                 [
