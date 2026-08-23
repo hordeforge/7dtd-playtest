@@ -64,9 +64,6 @@ class Rng:
             self._streams[name] = got
         return got
 
-    def random(self) -> float:
-        return self._r.random()
-
     def uniform(self, lo: float, hi: float) -> float:
         return self._r.uniform(lo, hi)
 
@@ -80,12 +77,6 @@ class Rng:
         if probability >= 1.0:
             return True
         return self._r.random() < probability
-
-    def choice(self, items):
-        seq = list(items)
-        if not seq:
-            raise ValueError("choice from empty sequence")
-        return seq[self._r.randrange(len(seq))]
 
     def hex(self, nbytes: int) -> str:
         return "".join(f"{self._r.randrange(256):02x}" for _ in range(max(0, nbytes)))
@@ -182,8 +173,7 @@ class Simulation:
         clock: VirtualClock | None = None,
         trace: Trace | None = None,
     ) -> None:
-        self.seed = int(seed) & MAX_SEED
-        self.rng = Rng(self.seed)
+        self.rng = Rng(seed)
         self.clock = clock or VirtualClock()
         self.trace = trace or Trace()
         self._queue: list[_Scheduled] = []

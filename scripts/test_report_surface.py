@@ -41,7 +41,7 @@ def test_write_junit_escapes_log_derived_attributes() -> None:
     ]
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "junit.xml"
-        playtest_run.write_junit(path, 'suite"&x', results, {"pass": 0, "fail": 1})
+        playtest_run.write_junit(path, 'suite"&x', results)
         # Parses as well-formed XML and every value round-trips intact: the
         # injected markup stayed text, never became elements or attributes.
         root = ElementTree.parse(path).getroot()
@@ -369,7 +369,6 @@ def test_fuzz_write_junit_roundtrips_hostile_strings() -> None:
                     path,
                     suite,
                     [{"case": case, "status": status, "detail": detail}],
-                    None,
                 )
             root = ElementTree.parse(path).getroot()
             cases = root.findall("testcase")
@@ -405,7 +404,7 @@ def test_write_junit_drops_xml_illegal_characters() -> None:
     ]
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "junit.xml"
-        playtest_run.write_junit(path, "smoke", results, None)
+        playtest_run.write_junit(path, "smoke", results)
         root = ElementTree.parse(path).getroot()
         case = root.find("testcase")
         assert case.get("name") == "s/cx", f"NUL must be dropped: {case.get('name')!r}"

@@ -171,7 +171,6 @@ class PlaytestLockError(RuntimeError):
 class LockState:
     running: bool
     session: str | None
-    path: Path
     acquired: str | None = None
     heartbeat: str | None = None
 
@@ -300,10 +299,10 @@ def read_lock(path: Path | None = None, *, env: LockEnv | None = None) -> LockSt
     path = path or default_lock_path()
     store = _env(env).storage
     if not store.is_file(path):
-        return LockState(running=False, session=None, path=path)
+        return LockState(running=False, session=None)
     text = store.read_text(path)
     if text is None:
-        return LockState(running=False, session=None, path=path)
+        return LockState(running=False, session=None)
     running = False
     session: str | None = None
     acquired: str | None = None
@@ -332,7 +331,6 @@ def read_lock(path: Path | None = None, *, env: LockEnv | None = None) -> LockSt
     return LockState(
         running=running,
         session=session,
-        path=path,
         acquired=acquired,
         heartbeat=heartbeat,
     )
@@ -449,27 +447,19 @@ def _any_preloader_running_game(
     return False
 
 
-def default_live_client_running() -> bool:
-    """True when a stock/Proton **client** process is present."""
-    return _any_executable_running(STOCK_CLIENT_EXECUTABLES) or _any_preloader_running_game()
-
-
-def default_live_server_running() -> bool:
-    """True when stock dedicated or zdtd server process is present.
+def default_live_runtime_running() -> bool:
+    """True when a stock/Proton client or dedicated/zdtd server is present.
 
     Inspect the executable each process is running. A shell, terminal history,
     or agent prompt may mention these names, but cannot satisfy this check.
-    """
-    return _any_executable_running(STOCK_SERVER_EXECUTABLES)
-
-
-def default_live_runtime_running() -> bool:
-    """True when client **or** dedicated/zdtd server is present.
-
     Used as the default acquire gate: playtest_run starts both, and a second
     run must not double-bind ports or kill the first holder's processes.
     """
-    return default_live_client_running() or default_live_server_running()
+    return (
+        _any_executable_running(STOCK_CLIENT_EXECUTABLES)
+        or _any_preloader_running_game()
+        or _any_executable_running(STOCK_SERVER_EXECUTABLES)
+    )
 
 
 def tcp_port_in_use(port: int, host: str = "127.0.0.1") -> bool:

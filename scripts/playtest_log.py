@@ -177,11 +177,8 @@ def parse_client_log(text: str) -> dict:
     scan = ClientLogScan()
     for line in text.splitlines():
         scan.feed_line(line)
-    out = scan.result()
-    nre_hits = [ln for ln in text.splitlines() if NRE_RE.search(ln)]
-    out["nre_like"] = nre_hits[:NRE_SAMPLE_CAP]
-    out["nre_like_total"] = len(nre_hits)
-    return out
+        scan.feed_chunk(line)
+    return scan.result()
 
 
 class LogTail:

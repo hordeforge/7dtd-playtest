@@ -44,25 +44,9 @@ DEFAULT_GAME_SRV = (
 )
 DEFAULT_USERDATA = Path.home() / ".cache" / "7dtd-playtest-dedicated"
 STEAM_APPID = "251570"
-CLIENT_LOG = (
-    Path.home()
-    / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}/pfx/drive_c"
-    / "users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_7dtd_connect.txt"
+DEFAULT_COMPAT = (
+    Path.home() / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}"
 )
-
-# Server-authoritative persist pad: every rejoin/persist flow teleports players
-# here before saveworld so the saved position is known and walkable. Tuple for
-# teleport_players_to, string form for raw spawnentityat commands.
-PERSIST_PAD_XYZ = (520, 62, 950)
-PERSIST_PAD_COORDS = "520 62 950"
-
-# Client + dedicated process patterns shared by the rejoin teardown steps.
-REJOIN_GAME_PROC_PATTERNS = [
-    r"7DaysToDieServer\.x86_64",
-    r"[/]7DaysToDie\.exe",
-    r"wine64-preloader.*7DaysToDie",
-    r"proton.*7DaysToDie",
-]
 
 
 def client_log_for_compat(compat: Path) -> Path:
@@ -72,6 +56,23 @@ def client_log_for_compat(compat: Path) -> Path:
         / "pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/logs"
         / "output_log_client_7dtd_connect.txt"
     )
+
+
+CLIENT_LOG = client_log_for_compat(DEFAULT_COMPAT)
+
+# Server-authoritative persist pad: every rejoin/persist flow teleports players
+# here before saveworld so the saved position is known and walkable. Tuple for
+# teleport_players_to, string form for raw spawnentityat commands.
+PERSIST_PAD_XYZ = (520, 62, 950)
+PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
+
+# Client + dedicated process patterns shared by the rejoin teardown steps.
+REJOIN_GAME_PROC_PATTERNS = [
+    r"7DaysToDieServer\.x86_64",
+    r"[/]7DaysToDie\.exe",
+    r"wine64-preloader.*7DaysToDie",
+    r"proton.*7DaysToDie",
+]
 
 
 def mod_version() -> str:
@@ -763,10 +764,8 @@ def xml_attr(value: str) -> str:
     return xml_escape(_XML_ILLEGAL_RE.sub("", str(value)), {'"': "&quot;", "'": "&apos;"})
 
 
-def write_junit(
-    path: Path, suite: str, results: list[dict], summary: dict | None
-) -> None:
-    """Minimal JUnit XML for CI UIs."""
+def write_junit(path: Path, suite: str, results: list[dict]) -> None:
+    """Minimal JUnit XML for CI UIs. Counters derive from ``results``."""
     tests = len(results)
     failures = sum(1 for r in results if r.get("status") == "FAIL")
     skipped = sum(1 for r in results if r.get("status") == "SKIP")
@@ -938,19 +937,14 @@ class TelnetAdmin:
             n += 1
         return n
 
-    def spawn_near_players(self, entity: str = "zombieBoe", per: int = 1) -> int:
+    def spawn_near_players(self, entity: str) -> int:
         ids = self.list_player_ids()
         if not ids:
             log("telnet listplayers empty/unparsed for spawn")
             return 0
-        spawned = 0
         # One passive-ish spawn near first player only (no scouts: they swarm and kill).
-        for pid in ids[:1]:
-            for _ in range(max(1, per)):
-                r = self.exec(f"spawnentity {pid} {entity}")
-                if "No spawn point" in r:
-                    break
-                spawned += 1
+        r = self.exec(f"spawnentity {ids[0]} {entity}")
+        spawned = 0 if "No spawn point" in r else 1
         if spawned == 0:
             # Offset from known pad so the zombie is visible but not on top of the player.
             for pos in (PERSIST_PAD_COORDS, "530 62 960", "515 62 955"):
@@ -1922,7 +1916,7 @@ def main(argv: list[str] | None = None) -> int:
                         "error": f"{rejoin_label} setup incomplete",
                     },
                 )
-                write_junit(junit_path, args.suite, results, summary)
+                write_junit(junit_path, args.suite, results)
                 prune_run_artifacts(args.logdir)
                 err(f"FAIL harness: {rejoin_label} setup incomplete")
                 return 2
@@ -2072,10 +2066,10 @@ def main(argv: list[str] | None = None) -> int:
                         if not tn.connect():
                             warn("spawn_zombie: telnet connect fail; retry next poll")
                             break
-                        n = tn.spawn_near_players("zombieBoe", per=1)
+                        n = tn.spawn_near_players("zombieBoe")
                         if n == 0:
                             time.sleep(1.0)
-                            tn.spawn_near_players("zombieBoe", per=1)
+                            tn.spawn_near_players("zombieBoe")
                         tn.close()
                         barrier_counts["spawn_zombie"] += 1
 
@@ -2188,7 +2182,7 @@ def main(argv: list[str] | None = None) -> int:
                             warn("spawn_vehicle: telnet connect fail; retry next poll")
                             break
                         # Same path as zombies: spawnentity <playerId> <class>
-                        n = tn.spawn_near_players("vehicleBicycle", per=1)
+                        n = tn.spawn_near_players("vehicleBicycle")
                         if n == 0:
                             for cmd in (
                                 f"spawnentityat vehicleBicycle {PERSIST_PAD_COORDS}",
@@ -2206,9 +2200,9 @@ def main(argv: list[str] | None = None) -> int:
                         if not tn.connect():
                             warn("spawn_trader: telnet connect fail; retry next poll")
                             break
-                        n = tn.spawn_near_players("npcTraderJoel", per=1)
+                        n = tn.spawn_near_players("npcTraderJoel")
                         if n == 0:
-                            n = tn.spawn_near_players("npcTraderBob", per=1)
+                            n = tn.spawn_near_players("npcTraderBob")
                         log(f"telnet spawn trader near players units~={n}")
                         tn.close()
                         barrier_counts["spawn_trader"] += 1
@@ -2292,7 +2286,7 @@ def main(argv: list[str] | None = None) -> int:
                     while vehicle_spawns_fired.get(cls, 0) < seen:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
-                            n = tn.spawn_near_players(cls, per=1)
+                            n = tn.spawn_near_players(cls)
                             if n == 0:
                                 r = tn.exec(f"spawnentityat {cls} {PERSIST_PAD_COORDS}")
                                 log(f"telnet vehicle spawnentityat {cls} → {r[:80]!r}")
@@ -2456,7 +2450,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         write_report(report_path, payload)
         junit_path = args.junit or (args.logdir / f"junit-{int(time.time())}.xml")
-        write_junit(junit_path, args.suite, combined_results, summary)
+        write_junit(junit_path, args.suite, combined_results)
         # A user-provided --junit path outside logdir is deliberate evidence
         # placement and is never pruned; only the timestamped logdir defaults
         # are bounded.

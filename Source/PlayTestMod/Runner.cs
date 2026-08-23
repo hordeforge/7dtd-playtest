@@ -20,7 +20,6 @@ namespace ZdtdPlaytest
 
     enum Phase
     {
-        Idle,
         WaitReady,
         RunCase,
         Waiting,
@@ -143,7 +142,7 @@ namespace ZdtdPlaytest
     {
         static bool _armed;
         static string[] _suites = Array.Empty<string>();
-        static Phase _phase = Phase.Idle;
+        static Phase _phase = Phase.Finished;
         static readonly List<CaseDef> _queue = new List<CaseDef>();
         static int _caseIndex = -1;
         static CaseCtx _ctx;
@@ -265,7 +264,7 @@ namespace ZdtdPlaytest
 
         public static void Tick()
         {
-            if (!_armed || _phase == Phase.Idle || _phase == Phase.Finished) return;
+            if (!_armed || _phase == Phase.Finished) return;
 
             var gm = GameManager.Instance;
             if (gm == null) return;
