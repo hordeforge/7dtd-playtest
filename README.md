@@ -330,7 +330,7 @@ Durable state this system owns, and what an incident costs:
 | State | Location | Survives instance loss? |
 |---|---|---|
 | Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
-| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`) | No |
+| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run | No |
 | Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/` | No |
 | Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
 

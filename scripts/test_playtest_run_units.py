@@ -32,6 +32,7 @@ import playtest_run
 
 ROOT = _SCRIPTS.parent
 CATALOG_CS = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
+PLAYTEST_RUN = _SCRIPTS / "playtest_run.py"
 
 # Barrier names the orchestrator services only under want_fixtures. The
 # unconditional handlers (chat_echo:, spawn_loadgen_*, teleport_persist_pad,
@@ -198,6 +199,47 @@ def test_prune_quarantine_keeps_newest_entries() -> None:
         left = sorted(p.name for p in qroot.iterdir())
         assert left == names[1:], f"oldest entry (a file) must go first: {left}"
         print("PASS prune_quarantine newest kept, oldest file+dirs dropped")
+
+
+def test_prune_run_artifacts_keeps_newest_per_pattern() -> None:
+    """Run artifacts accumulate one report+junit pair per run forever without
+    a bound. Prune is per pattern so a kept report never loses its junit
+    twin, and unrelated logdir files are untouched."""
+    with tempfile.TemporaryDirectory(prefix="playtest-artifacts-") as td:
+        logdir = Path(td) / "cache"
+        logdir.mkdir()
+        reports = [f"report-{1700000000 + i}.json" for i in range(7)]
+        junits = [f"junit-{1700000000 + i}.xml" for i in range(6)]
+        for name in reports + junits:
+            (logdir / name).write_text("{}", encoding="utf-8")
+        (logdir / "server-orch.log").write_text("keep me", encoding="utf-8")
+
+        playtest_run.prune_run_artifacts(logdir, keep=5)
+
+        left_reports = sorted(p.name for p in logdir.glob("report-*.json"))
+        assert left_reports == reports[-5:], f"newest 5 reports kept: {left_reports}"
+        left_junits = sorted(p.name for p in logdir.glob("junit-*.xml"))
+        assert left_junits == junits[-5:], f"newest 5 junits kept: {left_junits}"
+        assert (logdir / "server-orch.log").is_file(), "unrelated files untouched"
+
+        # keep<=0 disables pruning entirely (opt-out for scripted evidence).
+        playtest_run.prune_run_artifacts(logdir, keep=0)
+        assert len(list(logdir.glob("report-*.json"))) == 5
+        print("PASS prune_run_artifacts newest kept per pattern, others untouched")
+
+
+def test_prune_run_artifacts_wired_into_main() -> None:
+    """Every path that writes timestamped artifacts into <logdir> must prune,
+    or the bound silently stops covering new writers (rejoin-abort path and
+    the final report path both land there)."""
+    text = PLAYTEST_RUN.read_text(encoding="utf-8")
+    calls = len(re.findall(r"prune_run_artifacts\(args\.logdir\)", text))
+    # One definition reference inside main() per artifact-writing exit path;
+    # the def line itself does not match this exact call shape.
+    assert calls == 2, (
+        f"expected prune after both report-writing paths, found {calls} calls"
+    )
+    print("PASS prune_run_artifacts wired after both report-writing paths")
 
 
 def test_snapshot_previous_log_copies_before_truncate() -> None:
@@ -587,6 +629,11 @@ def main() -> int:
         ),
         ("fresh_zdtd_world", test_fresh_zdtd_world_moves_state_and_overlays_recoverably),
         ("prune_quarantine", test_prune_quarantine_keeps_newest_entries),
+        (
+            "prune_run_artifacts",
+            test_prune_run_artifacts_keeps_newest_per_pattern,
+        ),
+        ("prune_run_artifacts_wiring", test_prune_run_artifacts_wired_into_main),
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),

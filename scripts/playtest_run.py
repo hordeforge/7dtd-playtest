@@ -1038,6 +1038,30 @@ def install_signal_handlers() -> None:
 QUARANTINE_DIRNAME = "quarantine"
 QUARANTINE_KEEP = 5
 
+# Per-run evidence (report-<epoch>.json / junit-<epoch>.xml) lands in the
+# cache logdir on every orchestrated run and nothing reads older generations
+# back: without a bound, months of runs fill the disk one file pair at a
+# time. Same newest-wins policy as quarantine evidence; per pattern so a kept
+# report never loses its junit twin.
+REPORT_KEEP = 50
+
+
+def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
+    """Keep only the newest `keep` report/junit files per pattern."""
+    if keep <= 0:
+        return
+    for pattern in ("report-*.json", "junit-*.xml"):
+        try:
+            entries = sorted(p for p in logdir.glob(pattern) if p.is_file())
+        except OSError as ex:
+            warn(f"artifact prune skipped ({ex}); old {pattern} will accumulate")
+            continue
+        for old in entries[:-keep]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
 
 def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
     """Keep only the newest `keep` quarantine entries (dirs or files)."""
@@ -1899,6 +1923,7 @@ def main(argv: list[str] | None = None) -> int:
                     },
                 )
                 write_junit(junit_path, args.suite, results, summary)
+                prune_run_artifacts(args.logdir)
                 err(f"FAIL harness: {rejoin_label} setup incomplete")
                 return 2
 
@@ -2432,6 +2457,10 @@ def main(argv: list[str] | None = None) -> int:
         write_report(report_path, payload)
         junit_path = args.junit or (args.logdir / f"junit-{int(time.time())}.xml")
         write_junit(junit_path, args.suite, combined_results, summary)
+        # A user-provided --junit path outside logdir is deliberate evidence
+        # placement and is never pruned; only the timestamped logdir defaults
+        # are bounded.
+        prune_run_artifacts(args.logdir)
 
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"
