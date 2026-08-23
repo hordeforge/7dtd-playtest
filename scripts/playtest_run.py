@@ -1002,11 +1002,16 @@ def fresh_save(userdata: Path, game_name: str) -> None:
         log(f"fresh-save: no existing save named {game_name}")
 
 
-def suite_wants_zombie_fixture(suite: str) -> bool:
-    s = suite.lower()
-    keys = (
+# Suite ids whose live cases depend on host-serviced admin fixtures. The
+# barrier handlers below (spawn_zombie, kill_fixture_zombie, spawn_trader,
+# spawn_vehicle, kill_player, settime_*, bot_spawn, bot_player_near) only arm
+# when the selection names one of these; every other suite must stay
+# telnet-free. demo/full/all/live/benchmark/bench/mp/residual are legacy
+# aliases whose expansions include fixture suites.
+FIXTURE_SUITE_IDS = frozenset(
+    (
+        # Aliases that expand into fixture-bearing suites.
         "demo",
-        "combat",
         "full",
         "all",
         "live",
@@ -1014,12 +1019,30 @@ def suite_wants_zombie_fixture(suite: str) -> bool:
         "bench",
         "mp",
         "residual",
+        # Catalog suites with live cases that fire host-serviced barriers:
+        # combat/economy (AI + traders), vehicle (host-owned spawns),
+        # finale (player kill), bot (BotMod telnet commands).
+        "combat",
+        "economy",
+        "vehicle",
+        "finale",
+        "bot",
     )
-    return (
-        any(k in s for k in keys)
-        and "demo_min" not in s
-        and "gate" not in s
-        and "smoke" != s.strip()
+)
+
+
+def suite_wants_host_fixtures(suite: str) -> bool:
+    """True when any selected suite id needs host telnet fixtures.
+
+    Matches whole suite tokens (same , ; space delimiters as the client's
+    Catalog.ExpandSuites), never substrings of the joined list: a bare
+    "smoke" or "gate" run stays telnet-free, while every catalog suite whose
+    live cases emit barrier lines opens the fixture path.
+    """
+    return any(
+        token in FIXTURE_SUITE_IDS
+        for token in re.split(r"[,;\s]+", suite.lower())
+        if token
     )
 
 
@@ -1381,7 +1404,7 @@ def main(argv: list[str] | None = None) -> int:
         want_fixtures = (
             args.server in ("stock", "zdtd")
             and not args.no_fixtures
-            and suite_wants_zombie_fixture(args.suite)
+            and suite_wants_host_fixtures(args.suite)
         )
 
         deadline = time.time() + args.timeout

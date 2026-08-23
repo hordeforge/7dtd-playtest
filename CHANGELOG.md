@@ -68,6 +68,19 @@ unchanged.
 
 ### Fixed
 
+- `SUITE=economy`, `vehicle`, `finale`, and `bot` standalone runs now arm
+  host telnet fixtures. The fixture gate (`suite_wants_zombie_fixture`) was a
+  substring heuristic whose key list predated the current barrier set, so
+  these suites' live cases fired barrier lines (`kill_fixture_zombie`,
+  `spawn_trader`, `spawn_vehicle`, `kill_player`, `bot_spawn`,
+  `bot_player_near`) that no orchestrator handler ever serviced:
+  `bot_player_near` had no client-side fallback and timed out on every run.
+  The gate now matches whole suite tokens against the full set of
+  fixture-bearing suites (`FIXTURE_SUITE_IDS`), is named for what it does
+  (`suite_wants_host_fixtures`), and an offline gate cross-checks the catalog
+  so a new barrier-emitting suite cannot be missed again. Selections used by
+  the make targets (demo, gate, benchmark, mp, persist, soak_long, apm,
+  smoke/core lists) arm exactly as before.
 - `parse_client_log` no longer aborts the run on a crafted log line: an
   infinite summary count or exit hint (`1e999`, bare `Infinity`) raised
   OverflowError past the bad-event handler, and non-string JSON status or
