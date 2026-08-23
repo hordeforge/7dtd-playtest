@@ -1568,7 +1568,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"(held_by={holder} reason={ex.reason} file={lock_path})"
             )
             err(
-                "see AGENTS.md — Playtest / live-client exclusivity; "
+                "see AGENTS.md (Playtest / live-client exclusivity); "
                 "set PLAYTEST_LOCK_FILE / PLAYTEST_SESSION_ID to coordinate"
             )
             return 2
@@ -2252,7 +2252,7 @@ def main(argv: list[str] | None = None) -> int:
                     chat_tokens_fired.add(token)
                     barrier_counts["chat_echo"] += 1
 
-                # spawn_vehicle:<entityClass> — one host-owned vehicle of that
+                # spawn_vehicle:<entityClass>: one host-owned vehicle of that
                 # class per barrier line (a provider case that needs, say, a
                 # gyrocopter rather than the bare barrier's bicycle). A vehicle
                 # the client creates itself is never known to the dedicated

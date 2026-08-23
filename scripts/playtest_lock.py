@@ -1,6 +1,6 @@
 """Exclusive playtest runtime lock (host-side, no game I/O).
 
-Covers the shared **client and dedicated/zdtd server** on one machine — not
+Covers the shared **client and dedicated/zdtd server** on one machine, not
 only the client. Deterministic, parseable lock shared across agents and
 orchestrators. Compatible with the 7dtd-mods monorepo convention:
 

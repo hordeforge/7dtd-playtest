@@ -61,7 +61,7 @@ namespace ZdtdPlaytest
                         // Lightweight in-client residual probe only (mp + short soak).
                         // The Make target playtest-residual is different: it runs
                         // separate host orch for persist, mp, apm, and soak_long
-                        // (multi-phase / long wall-clock). Do not expand those here —
+                        // (multi-phase / long wall-clock). Do not expand those here:
                         // persist needs persist_setup host barriers; soak_long is ≥15m.
                         AddUnique(list, "mp", "soak");
                         break;
@@ -3182,7 +3182,7 @@ namespace ZdtdPlaytest
                 }
                 catch (Exception ex)
                 {
-                    // Bicycle may have no fuel system — report driveable instead.
+                    // Bicycle may have no fuel system; report driveable instead.
                     try
                     {
                         ctx.Detail = "nofuel api " + ex.Message + " driveable=" + v.isDriveable();

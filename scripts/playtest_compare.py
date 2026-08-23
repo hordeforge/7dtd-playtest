@@ -13,6 +13,12 @@ a --*-dir) or raw client logs with [7dtd-playtest] result lines.
 Usage:
   playtest_compare.py --stock-dir <dir> --zdtd-dir <dir> [--out <dir>]
   playtest_compare.py --stock <file> --zdtd <file> [--out <dir>]
+
+Exit codes:
+  0  comparison written
+  1  no playtest result lines found on either side
+  2  a side has no input (side never ran, logs wiped, or a bad path)
+  3  inputs older than --require-fresh-minutes
 """
 
 from __future__ import annotations
@@ -96,13 +102,34 @@ def main() -> int:
                          "many minutes (0 disables the check)")
     args = ap.parse_args()
 
-    stock_path = args.stock or (newest_report(args.stock_dir) if args.stock_dir else None)
-    zdtd_path = args.zdtd or (newest_report(args.zdtd_dir) if args.zdtd_dir else None)
+    stock_path, stock_flag = (
+        (args.stock, "--stock") if args.stock is not None
+        else ((newest_report(args.stock_dir), "--stock-dir") if args.stock_dir else (None, "--stock"))
+    )
+    zdtd_path, zdtd_flag = (
+        (args.zdtd, "--zdtd") if args.zdtd is not None
+        else ((newest_report(args.zdtd_dir), "--zdtd-dir") if args.zdtd_dir else (None, "--zdtd"))
+    )
     missing = [s for s, p in (("stock", stock_path), ("zdtd", zdtd_path)) if p is None]
     if missing:
         print(f"ERROR: no report found on the {', '.join(missing)} side; the side "
               "either failed to start or its logs were wiped before the run. "
               "Refusing to diff missing or stale evidence.",
+              file=sys.stderr)
+        return 2
+    # A path that does not name a readable file must fail like every other
+    # unusable input (exit 2 with the offending flag named), never as a
+    # FileNotFoundError traceback from load_results.
+    unreadable = [
+        f"{flag} {path}: not a readable file"
+        for flag, path in (
+            (stock_flag, stock_path),
+            (zdtd_flag, zdtd_path),
+        )
+        if not path.is_file()
+    ]
+    if unreadable:
+        print("ERROR: " + "; ".join(unreadable) + "; refusing to diff.",
               file=sys.stderr)
         return 2
 

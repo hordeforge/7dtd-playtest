@@ -102,6 +102,58 @@ def test_report_json_wall_axis(tmp_path):
     assert "| wall time (s) | 157.1 | 128.0 |" in report_md
 
 
+def _run_bad_input(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    out = tmp_path / "out"
+    return subprocess.run(
+        [sys.executable, str(TOOL), *extra, "--out", str(out)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+
+
+def test_nonexistent_input_refuses_diff(tmp_path):
+    """A bad --stock/--zdtd path must fail like every other unusable input:
+    exit 2 with the offending flag named on stderr, no traceback, and no
+    comparison outputs."""
+    r = _run_bad_input(
+        tmp_path,
+        "--stock", str(tmp_path / "nope.json"),
+        "--zdtd", str(tmp_path / "also-nope.json"),
+    )
+    assert r.returncode == 2, r.stderr
+    assert "--stock" in r.stderr and "not a readable file" in r.stderr
+    assert "nope.json" in r.stderr
+    assert "Traceback" not in r.stderr
+    assert not (tmp_path / "out" / "playtest-compare.json").exists()
+
+
+def test_directory_input_refuses_diff(tmp_path):
+    """--stock pointing at a directory is not silently globbed like
+    --stock-dir would be: refuse with the flag named instead of crashing on
+    IsADirectoryError."""
+    d = tmp_path / "adir"
+    d.mkdir()
+    other = tmp_path / "side.log"
+    other.write_text(STOCK_LOG, encoding="utf-8")
+    r = _run_bad_input(tmp_path, "--stock", str(d), "--zdtd", str(other))
+    assert r.returncode == 2, r.stderr
+    assert "--stock" in r.stderr and "not a readable file" in r.stderr
+    assert "Traceback" not in r.stderr
+    assert not (tmp_path / "out" / "playtest-compare.json").exists()
+
+
+def test_exit_codes_documented_in_help():
+    """The 0/1/2/3 contract is part of the CLI surface; --help must show it."""
+    r = subprocess.run(
+        [sys.executable, str(TOOL), "--help"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "Exit codes:" in r.stdout
+    for line in ("0  comparison written", "1  no playtest result lines",
+                 "2  a side has no input", "3  inputs older than"):
+        assert line in r.stdout, line
+
+
 def test_missing_side_refuses_diff(tmp_path):
     """A side dir without any report must fail loudly, naming the side, and
     must NOT write comparison outputs (no phantom 'compared' result)."""

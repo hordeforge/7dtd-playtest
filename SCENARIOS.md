@@ -63,7 +63,7 @@ make playtest SUITE=combat
 
 ---
 
-## smoke — boot / join gate
+## smoke: boot / join gate
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -75,7 +75,7 @@ make playtest SUITE=combat
 
 ---
 
-## core — play loop (demo spine)
+## core: play loop (demo spine)
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -100,7 +100,7 @@ make playtest SUITE=combat
 
 ---
 
-## world — world / mesh / content probes
+## world: world / mesh / content probes
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -117,7 +117,7 @@ make playtest SUITE=combat
 
 ---
 
-## ui — window tour (demo-style)
+## ui: window tour (demo-style)
 
 | Case | Status | Tags | Assert |
 |---|---|---|---|
@@ -149,7 +149,7 @@ make playtest SUITE=combat
 
 ---
 
-## finale — death / respawn (runs last in demo)
+## finale: death / respawn (runs last in demo)
 
 Suite id `finale`. Death and respawn close the attract path so earlier
 suites stay healthy.
@@ -161,7 +161,7 @@ suites stay healthy.
 
 ---
 
-## economy — craft / TE / trade
+## economy: craft / TE / trade
 
 | Case | Status | Tags | Notes |
 |---|---|---|---|
@@ -222,7 +222,7 @@ catalog registers it there.)
 
 ---
 
-## persist_setup — host multi-phase setup (orchestrator phase A)
+## persist_setup: host multi-phase setup (orchestrator phase A)
 
 Suite id `persist_setup`. Prepares world/player state, then emits the
 `persist_setup_done` barrier so the host can save and rejoin.
@@ -236,7 +236,7 @@ Suite id `persist_setup`. Prepares world/player state, then emits the
 | `persist_setup_blockmeta` | live | Seed block and apply damage meta |
 | `persist_setup_done` | live | Emit checkpoint barrier for host |
 
-## persist — host multi-phase verify (orchestrator phase B)
+## persist: host multi-phase verify (orchestrator phase B)
 
 Suite id `persist`. Asserts setup state after save + client rejoin.
 
@@ -252,7 +252,7 @@ These need orchestrator phases (restart pair mid-suite), not only in-mod steps.
 
 ---
 
-## mp — multiplayer
+## mp: multiplayer
 
 | Case | Status | Notes |
 |---|---|---|
@@ -280,7 +280,7 @@ Make targets: `make playtest-soak-long`, `make playtest-apm`, `make playtest-res
 
 ---
 
-## bot — BotManager visibility / parity
+## bot: BotManager visibility / parity
 
 Cases that observe the dedicated server's `BotMod` bots (BotManager auto-spawn
 plus orchestrator telnet spawn requests) from the playtest client's point of

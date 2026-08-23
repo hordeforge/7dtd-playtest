@@ -214,7 +214,7 @@ def test_heartbeat_and_stale_takeover(tmp: Path) -> None:
     owner = "owner-20260810-000000-aaaaaaaaaaaa"
     other = "other-20260810-000001-bbbbbbbbbbbb"
     pl.acquire(owner, path=lock, live_probe=lambda: False)
-    # Force an old heartbeat then touch — second resolution UTC does not move in 50ms.
+    # Force an old heartbeat then touch; second resolution UTC does not move in 50ms.
     pl.write_lock(
         lock,
         running=True,
@@ -506,7 +506,7 @@ def main() -> int:
                     (tmp / name).mkdir(exist_ok=True)
                 fn()  # type: ignore[operator]
                 print(f"PASS {name}")
-            except Exception as ex:  # noqa: BLE001 — report each test
+            except Exception as ex:  # noqa: BLE001: report each test
                 fails += 1
                 print(f"FAIL {name}: {ex}", file=sys.stderr)
 

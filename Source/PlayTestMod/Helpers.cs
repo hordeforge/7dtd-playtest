@@ -1431,7 +1431,7 @@ namespace ZdtdPlaytest
                 int stock1 = CountTraderPrimaryEntries(trader);
                 bool spent = coins1 < coins0;
                 // Goods must actually move: bag slots up and/or trader stock down.
-                // bag1 >= bag0 alone is almost always true (soft pass) — do not use it.
+                // bag1 >= bag0 alone is almost always true (soft pass); do not use it.
                 bool goodsMoved = bag1 > bag0 || stock1 < stock0;
                 detail = "coins0=" + coins0 + " coins1=" + coins1
                     + " bag0=" + bag0 + " bag1=" + bag1
