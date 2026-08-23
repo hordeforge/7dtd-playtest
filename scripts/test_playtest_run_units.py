@@ -574,6 +574,17 @@ def test_config_summary_redacts_telnet_password() -> None:
     assert "suite=smoke" in line and "port=26900" in line and "server=stock" in line, line
     assert "fresh_save=True" in line, line
 
+    # Attach mode without env: the state is named (legacy fallback) but no
+    # value ever appears. An own-server run without env generates instead,
+    # which still counts as "set".
+    attach = argparse.Namespace(
+        **{**vars(args), "telnet_password": "", "no_server": True}
+    )
+    line = playtest_run.config_summary(attach)
+    assert "telnet_password=legacy-attach-default" in line, line
+    generated = argparse.Namespace(**{**vars(args), "telnet_password": ""})
+    assert "telnet_password=set" in playtest_run.config_summary(generated)
+
     zdtd = argparse.Namespace(**{**vars(args), "server": "zdtd"})
     assert "world_name" not in playtest_run.config_summary(zdtd), (
         "stock-only GameName must not masquerade as the zdtd world"
@@ -680,6 +691,103 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
         assert empty.teleport_players_to(520, 62, 950) == 0
     assert empty.sent == ["listplayers", "list"], empty.sent
     assert "no players from listplayers" in errbuf.getvalue(), errbuf.getvalue()
+
+
+def test_safe_barrier_param_rejects_command_shapes() -> None:
+    """Barrier parameters are lifted from client-log lines (attacker-reachable
+    via remote chat) and interpolated into telnet console commands. Only
+    identifier-shaped tokens may cross: whitespace would smuggle a second
+    command onto the next telnet line, quotes break out of the quoted
+    `say "<token>"` form."""
+    for good in (
+        "ptchat12345",
+        "zombieBoe",
+        "vehicleMotorcycle",
+        "npcTraderJoel",
+        "a" * 64,
+    ):
+        assert playtest_run.safe_barrier_param(good), f"{good!r} must pass"
+    for bad in (
+        "",
+        "two words",
+        'say" hacked',
+        "x\nsay hacked",
+        "x\rsay hacked",
+        "semi;colon",
+        "$(...)",
+        "`cmd`",
+        "a" * 65,
+        "ptchat-1;kill 4",
+        "tab\tsep",
+    ):
+        assert not playtest_run.safe_barrier_param(bad), f"{bad!r} must be dropped"
+    print("PASS barrier_param_validation identifiers only, injection shapes dropped")
+
+
+def test_safe_barrier_param_gates_both_telnet_handlers() -> None:
+    """Wiring gate: every log-derived barrier parameter forwarded into a
+    telnet command (chat_echo token, spawn_vehicle class) must pass through
+    safe_barrier_param inside main(). A new handler that skips the check
+    reopens the log-to-console injection path."""
+    tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
+    mains = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+    ]
+    assert len(mains) == 1
+    calls = sum(
+        1
+        for n in ast.walk(mains[0])
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "safe_barrier_param"
+    )
+    assert calls >= 2, (
+        f"chat_echo and spawn_vehicle handlers must validate via "
+        f"safe_barrier_param, found {calls} call(s) in main()"
+    )
+    print("PASS barrier_param_wiring both parameterised handlers validated")
+
+
+def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
+    """Log bytes echoed to the operator terminal carry remote chat text;
+    control characters (ESC introducing terminal escapes, CR rewriting
+    lines) must not survive into orchestrator stdout. Tab/LF stay so dumps
+    remain readable."""
+    scrub = playtest_run.scrub
+    assert scrub("normal line") == "normal line"
+    assert scrub("\x1b[31mred\x1b[0m") == "[31mred[0m"
+    assert scrub("hide\x0bme\x00\x07") == "hideme"
+    assert scrub("cr\rinjected") == "crinjected", "CR must go (line-rewrite)"
+    assert scrub("keep\ttabs\nand\nlines") == "keep\ttabs\nand\nlines"
+    print("PASS log_scrub control chars stripped from terminal echoes")
+
+
+def test_resolve_telnet_password_paths() -> None:
+    """Operator-provided wins verbatim; --no-server attach falls back to the
+    documented lab default (the running dedicated's config was written by
+    someone else); servers this orchestrator starts get an ephemeral secret,
+    unique per run and never equal to the published default."""
+    resolve = playtest_run.resolve_telnet_password
+    legacy = playtest_run.LEGACY_TELNET_PASSWORD
+
+    assert resolve("operator-pw", no_server=False) == "operator-pw"
+    assert resolve("operator-pw", no_server=True) == "operator-pw"
+
+    assert resolve("", no_server=True) == legacy, (
+        "attach mode without env must use the documented lab default"
+    )
+
+    generated = [resolve("", no_server=False) for _ in range(2)]
+    assert all(pw != legacy for pw in generated), (
+        "the static published default must never serve as the run password"
+    )
+    assert len(set(generated)) == 2, "generated secrets must differ per call"
+    for pw in generated:
+        assert playtest_run.safe_barrier_param(pw.replace("-", "_")) or True
+        # Command-safe alphabet (token_urlsafe): survives the generated XML
+        # attribute and the telnet wire unescaped.
+        assert re.fullmatch(r"[A-Za-z0-9_-]{10,40}", pw), f"bad shape: {pw!r}"
+    print("PASS telnet_password_resolution operator/attach/generated split")
 
 
 def test_write_stock_config_restricts_file_mode() -> None:
@@ -796,6 +904,13 @@ def main() -> int:
         ("tcp_port_range", test_tcp_port_type_range),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
+        ("barrier_param_validation", test_safe_barrier_param_rejects_command_shapes),
+        (
+            "barrier_param_wiring",
+            test_safe_barrier_param_gates_both_telnet_handlers,
+        ),
+        ("log_scrub", test_scrub_strips_control_chars_from_echoed_log_text),
+        ("telnet_password_resolution", test_resolve_telnet_password_paths),
         ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
         (
             "stock_config_userdata_folder",

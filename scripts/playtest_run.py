@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -77,6 +78,13 @@ REJOIN_GAME_PROC_PATTERNS = [
     r"proton.*7DaysToDie",
 ]
 
+# Documented lab default shipped by the loadgen template and older playtest
+# runs. Only used when attaching to an already-running dedicated
+# (--no-server) whose generated config this process did not write; servers
+# started by this orchestrator get an ephemeral per-run password instead, so
+# a network-reachable telnet listener never opens with a published default.
+LEGACY_TELNET_PASSWORD = "retest"
+
 
 def mod_version() -> str:
     """Version declared by ModInfo.xml (single source of truth), "unknown" if absent."""
@@ -133,6 +141,14 @@ def config_summary(args: argparse.Namespace) -> str:
     The telnet password appears only as set/unset so run logs stay shareable;
     everything here is already visible in --help or the generated paths.
     """
+    # Credential state without the value: operator-supplied or generated
+    # per-run both count as set; only the --no-server attach fallback to the
+    # legacy lab default is called out by name so logs show which path ran.
+    pw_state = (
+        "set"
+        if (args.telnet_password or not args.no_server)
+        else "legacy-attach-default"
+    )
     parts = [
         f"server={args.server}",
         f"suite={args.suite.strip()}",
@@ -145,7 +161,7 @@ def config_summary(args: argparse.Namespace) -> str:
         f"fresh_save={bool(args.fresh_save)}",
         f"no_server={bool(args.no_server)}",
         f"fixtures={not args.no_fixtures}",
-        f"telnet_password={'set' if args.telnet_password else 'unset'}",
+        f"telnet_password={pw_state}",
     ]
     if args.peer_client_name:
         parts.append(f"peer={args.peer_client_name}")
@@ -164,6 +180,23 @@ def warn(msg: str) -> None:
 def err(msg: str) -> None:
     """Terminal harness error (nonzero exit follows)."""
     print(f"[playtest-orch] {msg}", file=sys.stderr, flush=True)
+
+
+# Control characters (C0 except tab/LF, plus DEL). ESC (\x1b) and CR (\x0d)
+# are covered by the \x0b-\x0d and \x0e-\x1f ranges. Log bytes echoed to the
+# operator terminal carry remote chat text verbatim; without stripping, a
+# crafted line can emit arbitrary terminal escape sequences into the run's
+# stdout or rewrite already-written lines via CR.
+_LOG_CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def scrub(text: str) -> str:
+    """Strip control characters from log-derived text before echoing it.
+
+    Only for interactive stdout/stderr echoes (progress crumbs, failure
+    dumps); report JSON/XML keep raw detail and escape it structurally.
+    """
+    return _LOG_CTRL_RE.sub("", text)
 
 
 # Bound on each pkill escalation step. These run in the finally teardown
@@ -1364,6 +1397,22 @@ def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:
     )
 
 
+# Parameterised barriers (`chat_echo:<token>`, `spawn_vehicle:<class>`) lift
+# their parameter from client-log lines and forward it into telnet console
+# commands (`say`, `spawnentityat`). Log bytes are attacker-reachable through
+# remote chat text, so a parameter must be a plain identifier before it may
+# cross into the admin plane: no whitespace or CR (the telnet session is one
+# command per line), no quotes (one handler form wraps it in double quotes),
+# no console metacharacters. Entity class names (`zombieBoe`,
+# `vehicleMotorcycle`) and chat tokens (`ptchat12345`) all match.
+BARRIER_PARAM_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
+
+
+def safe_barrier_param(value: str) -> bool:
+    """True when a log-derived barrier parameter may reach a telnet command."""
+    return bool(BARRIER_PARAM_RE.fullmatch(value))
+
+
 def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
     """Drain newly appended complete lines through the shared line parser.
 
@@ -1378,6 +1427,23 @@ def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
         scan.feed_line(line)
     scan.feed_chunk(chunk)
     return chunk
+
+
+def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> str:
+    """Single credential source for the generated server config and every
+    TelnetAdmin session:
+
+      operator-provided   -> used verbatim (config + client agree);
+      --no-server attach  -> legacy lab default (the running dedicated's
+                             config was written by someone else);
+      own stock server    -> ephemeral per-run secret written into the 0600
+                             generated config and never logged.
+    """
+    if operator_value:
+        return operator_value
+    if no_server:
+        return LEGACY_TELNET_PASSWORD
+    return secrets.token_urlsafe(15)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1539,8 +1605,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--telnet-password",
-        default=os.environ.get("PLAYTEST_TELNET_PASSWORD", "retest"),
-        help="stock dedicated telnet password (env PLAYTEST_TELNET_PASSWORD)",
+        default=os.environ.get("PLAYTEST_TELNET_PASSWORD", ""),
+        help=(
+            "stock dedicated telnet password (env PLAYTEST_TELNET_PASSWORD); "
+            "when unset the orchestrator generates an ephemeral per-run "
+            "secret for servers it starts itself, and falls back to "
+            f"{LEGACY_TELNET_PASSWORD!r} for --no-server attach"
+        ),
     )
     ap.add_argument(
         "--no-fixtures",
@@ -1729,7 +1800,9 @@ def main(argv: list[str] | None = None) -> int:
         # and every barrier handler below. Assigned once, before first use.
         telnet_host = "127.0.0.1"
         telnet_port = args.admin_port
-        telnet_password = args.telnet_password
+        telnet_password = resolve_telnet_password(
+            args.telnet_password, no_server=args.no_server
+        )
 
         def service_barrier(
             name: str,
@@ -1785,7 +1858,8 @@ def main(argv: list[str] | None = None) -> int:
                             err(
                                 "tail server log:\n"
                                 + "\n".join(
-                                    ready_log.read_text(
+                                    scrub(line)
+                                    for line in ready_log.read_text(
                                         encoding="utf-8", errors="replace"
                                     ).splitlines()[-40:]
                                 )
@@ -1939,7 +2013,7 @@ def main(argv: list[str] | None = None) -> int:
                             if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
                         ]
                         if crumbs:
-                            log(f"setup progress: {crumbs[-1][-160:]}")
+                            log(f"setup progress: {scrub(crumbs[-1][-160:])}")
                     add_barrier_hits(barrier_seen, chunk)
                     # The provider barrier name is arbitrary, so it cannot live
                     # in the fixed barrier_seen table; count it separately.
@@ -2143,7 +2217,7 @@ def main(argv: list[str] | None = None) -> int:
                         if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
                     ]
                     if crumbs:
-                        log(f"progress: {crumbs[-1][-160:]}")
+                        log(f"progress: {scrub(crumbs[-1][-160:])}")
                 add_barrier_hits(barrier_seen, chunk)
 
                 if not ready_seen and "ready player=" in chunk:
@@ -2373,10 +2447,17 @@ def main(argv: list[str] | None = None) -> int:
 
                 for full in barrier_hits_prefix(chunk, "chat_echo:"):
                     # Fire once per unique token name (only after successful telnet say).
-                    token = full.split(":", 1)[-1].strip()
-                    if not token:
+                    raw = full.split(":", 1)[-1].strip()
+                    if not raw or raw in chat_tokens_fired:
                         continue
-                    if token in chat_tokens_fired:
+                    token = raw if safe_barrier_param(raw) else ""
+                    if not token:
+                        # A log line is attacker-reachable via remote chat;
+                        # only identifier-shaped tokens may cross into the
+                        # console. Mark fired so a bad token is dropped once,
+                        # not retried every poll.
+                        warn(f"chat_echo:{raw!r}: unsafe token, dropped")
+                        chat_tokens_fired.add(raw)
                         continue
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     if not tn.connect():
@@ -2398,8 +2479,14 @@ def main(argv: list[str] | None = None) -> int:
                 # host for one the same way the stock vehicle cases do.
                 for full in barrier_hits_prefix(chunk, "spawn_vehicle:"):
                     cls = full.split(":", 1)[-1].strip()
-                    if cls:
-                        vehicle_seen[cls] = vehicle_seen.get(cls, 0) + 1
+                    if not cls:
+                        continue
+                    if not safe_barrier_param(cls):
+                        # Same trust boundary as chat_echo: the class string
+                        # is interpolated into spawnentityat/spawnentity.
+                        warn(f"spawn_vehicle:{cls!r}: unsafe entity class, dropped")
+                        continue
+                    vehicle_seen[cls] = vehicle_seen.get(cls, 0) + 1
                 for cls in vehicle_seen:
                     def spawn_class_vehicle(
                         tn: TelnetAdmin, cls: str = cls
@@ -2603,7 +2690,8 @@ def main(argv: list[str] | None = None) -> int:
                 ):
                     hits = [ln for ln in cl_lines if key in ln]
                     if hits:
-                        err(f"client log '{key}' ({len(hits)}): {hits[-3:]}")
+                        shown = [scrub(ln)[-160:] for ln in hits[-3:]]
+                        err(f"client log '{key}' ({len(hits)}): {shown}")
             exit_code = 2
         else:
             if summary:
