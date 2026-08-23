@@ -322,6 +322,30 @@ def test_suite_wants_host_fixtures_selection_table() -> None:
     print("PASS fixture_gate_selection fixture suites arm, telnet-free suites do not")
 
 
+def test_new_barrier_tables_fresh_pair_per_generation() -> None:
+    """Fired and seen tables are created (and reset) as one pair: both cover
+    every barrier name at zero, and a fresh pair is independent of the old
+    one. A generation boundary that reset only one side would keep stale
+    fired counts that swallow the first verify-generation emission of an
+    already-serviced name."""
+    fired, seen = playtest_run.new_barrier_tables()
+    assert fired.keys() == set(playtest_run.BARRIER_NAMES)
+    assert seen.keys() == set(playtest_run.BARRIER_NAMES)
+    assert all(v == 0 for v in fired.values())
+    assert all(v == 0 for v in seen.values())
+    # Simulate one setup generation servicing a barrier, then take the next
+    # generation's pair: it must start clean, not inherit the counts.
+    seen["teleport_persist_pad"] += 1
+    fired["teleport_persist_pad"] += 1
+    fired2, seen2 = playtest_run.new_barrier_tables()
+    assert fired2["teleport_persist_pad"] == 0, "stale fired count crossed generations"
+    assert seen2["teleport_persist_pad"] == 0, "stale seen count crossed generations"
+    # And the new tables are distinct objects, not aliased views.
+    seen2["spawn_zombie"] += 5
+    assert seen["spawn_zombie"] == 0
+    print("PASS new_barrier_tables paired zeroed fresh per generation")
+
+
 def test_fixture_gate_covers_every_barrier_emitting_suite() -> None:
     """Catalog<->orchestrator surface: if a suite's Add* function emits any
     host-serviced (gated) barrier, selecting that suite alone must arm the
@@ -637,6 +661,7 @@ def main() -> int:
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
+        ("barrier_tables_pair", test_new_barrier_tables_fresh_pair_per_generation),
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),

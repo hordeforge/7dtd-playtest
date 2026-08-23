@@ -118,6 +118,26 @@ def defer_reasons(src: str) -> list[tuple[str, str]]:
     )
 
 
+def persist_pad_from_catalog(src: str) -> tuple[int, int, int] | None:
+    m = re.search(
+        r"PersistPlayerPos\s*=\s*new Vector3\(\s*([\d.]+)f?\s*,"
+        r"\s*([\d.]+)f?\s*,\s*([\d.]+)f?\s*\)",
+        src,
+    )
+    if not m:
+        return None
+    return tuple(int(float(g)) for g in m.groups())
+
+
+def persist_pad_from_orchestrator(src: str) -> tuple[int, int, int] | None:
+    m = re.search(
+        r"PERSIST_PAD_XYZ\s*=\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", src
+    )
+    if not m:
+        return None
+    return tuple(int(g) for g in m.groups())
+
+
 def main() -> int:
     assert CATALOG.is_file(), f"missing {CATALOG}"
     assert SCENARIOS.is_file(), f"missing {SCENARIOS}"
@@ -170,6 +190,20 @@ def main() -> int:
         if cid in RESIDUAL_MUST_BE_LIVE:
             raise AssertionError(f"residual {cid} still deferred: {reason}")
 
+    # Cross-language pad contract: the host teleports players to
+    # PERSIST_PAD_XYZ over telnet while persist_setup_pos and
+    # pos_survives_rejoin assert proximity to Catalog.PersistPlayerPos. A
+    # drift between the two copies of this constant fails persist runs with
+    # an opaque "far from pad", so pin them equal like every other surface.
+    cat_pad = persist_pad_from_catalog(cat)
+    orch_pad = persist_pad_from_orchestrator(orch)
+    assert cat_pad is not None, "Catalog.cs lost the PersistPlayerPos constant"
+    assert orch_pad is not None, "playtest_run.py lost the PERSIST_PAD_XYZ constant"
+    assert cat_pad == orch_pad, (
+        f"persist pad drift: Catalog.cs PersistPlayerPos {cat_pad} != "
+        f"playtest_run.py PERSIST_PAD_XYZ {orch_pad}"
+    )
+
     for name in (
         "kill_fixture_zombie",
         "spawn_zombie",
@@ -197,6 +231,7 @@ def main() -> int:
     print("OK demo alias includes vehicle+power+finale")
     print("OK residual 13 ids are Live:", ", ".join(RESIDUAL_MUST_BE_LIVE[:4]), "…")
     print("OK orchestrator has persist/loadgen/apm barriers")
+    print("OK persist pad matches Catalog.cs PersistPlayerPos:", cat_pad)
     return 0
 
 

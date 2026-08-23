@@ -1291,6 +1291,22 @@ def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
             totals[name] += hits
 
 
+def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:
+    """Fresh (fired, seen) counter pair for one client-log generation.
+
+    The pair must be created together because handlers fire while
+    ``fired[name] < seen[name]`` within a generation. Resetting only one side
+    at the rejoin boundary keeps stale fired counts from the setup phase, so
+    a verify-phase emission of an already-serviced name (teleport_persist_pad,
+    rejoin_setup_done, or any provider-named barrier) stays swallowed until
+    new lines exceed the leftover count instead of firing once, as intended.
+    """
+    return (
+        dict.fromkeys(BARRIER_NAMES, 0),
+        dict.fromkeys(BARRIER_NAMES, 0),
+    )
+
+
 def pump_log_tail(tail: LogTail, scan: ClientLogScan) -> str:
     """Drain newly appended complete lines through the shared line parser.
 
@@ -1718,12 +1734,10 @@ def main(argv: list[str] | None = None) -> int:
             deadline = time.monotonic() + max(args.timeout, 1100.0)
             log(f"soak_long timeout deadline wall_s>={int(deadline - time.monotonic())}")
         last_progress = float("-inf")
-        # Fired counts per barrier (multi-fire: combat + sleeper + economy may
-        # re-spawn/kill). Handlers fire while a fired count trails the
-        # cumulative lines seen for that barrier (barrier_seen below).
-        barrier_counts: dict[str, int] = dict.fromkeys(BARRIER_NAMES, 0)
-        # Cumulative barrier lines seen in the log so far.
-        barrier_seen: dict[str, int] = dict.fromkeys(BARRIER_NAMES, 0)
+        # Fired and seen counts per barrier (fired may trail seen: combat +
+        # sleeper + economy re-spawn/kill). Created as one pair per log
+        # generation so a handler can never compare across generations.
+        barrier_counts, barrier_seen = new_barrier_tables()
         ready_seen = False
         peer_ready_seen = not bool(peer_client_suite)
         peer_teleport_done = args.peer_client_teleport is None
@@ -1981,12 +1995,14 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     warn("no tick=20Hz after rejoin restart; proceeding")
             truncate_file(args.client_log, "client log")
-            # Fresh readers + seen counts for the verify generation: the old
-            # log's barrier lines were already serviced and must neither
-            # re-fire nor leak into the final parsed report.
+            # Fresh readers + fresh counter pair for the verify generation: the
+            # old log's barrier lines were already serviced (or deliberately
+            # dropped with the setup client) and must neither re-fire nor leak
+            # into the final parsed report, nor leave fired counts that would
+            # swallow the first verify-generation emission of the same name.
             client_tail = LogTail(args.client_log)
             client_scan = ClientLogScan()
-            barrier_seen = dict.fromkeys(BARRIER_NAMES, 0)
+            barrier_counts, barrier_seen = new_barrier_tables()
             client_proc = start_client(
                 args.port, args.suite, client_launch_log, extra_env=client_extra_env
             )
