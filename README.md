@@ -345,7 +345,8 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 surface incl. live rows + counts total, mod version/changelog sync, scenario-provider
 env surface, stock-peer orchestration surface, host lock, deterministic simulation,
 orchestrator local-init order, compare diff)
-plus a wider `make dst DST_SEEDS=200` sweep on every push. No game install needed - these are pure Python. The mod
+plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
+runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are
 the push-time guard for catalog/doc drift.
 

@@ -20,6 +20,10 @@ ADMIN_PORT ?= 8081
 FRESH ?= 1
 LAPS ?= 1
 
+# Bare `make` prints the target list instead of starting a dotnet build that
+# fails cryptically on machines without the game SDK layout.
+.DEFAULT_GOAL := help
+
 DOTNET_ROOT ?= $(firstword \
   $(wildcard $(HOME)/.cache/dotnet-sdk) \
   $(wildcard $(HOME)/.dotnet) \
@@ -29,13 +33,33 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: build install uninstall clean test dst dst-soak playtest playtest-smoke \
+.PHONY: help build install uninstall clean test test-one check dst dst-soak playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
 	playtest-residual install-pair playtest-compare playtest-repeat
 
+help:
+	@echo "Offline dev loop (no game install needed):"
+	@echo "  make test                        run all offline gates"
+	@echo "  make test-one GATE=test_dst.py   run one gate (file name under scripts/)"
+	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
+	@echo "  make check                       everything CI runs: test + dst DST_SEEDS=200"
+	@echo
+	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
+	@echo "  make build | install | install-pair | uninstall | clean"
+	@echo
+	@echo "Live suites (needs game client; see README):"
+	@echo "  make playtest SUITE=demo SERVER=stock|zdtd"
+	@echo "  make playtest-smoke | playtest-gate | playtest-demo | playtest-bench LAPS=3"
+	@echo "  make playtest-zdtd | playtest-compare | playtest-repeat LAPS=3"
+	@echo "  make playtest-residual           persist + mp + apm + soak_long"
+
 build:
+	@test -f "$(GAME)/7DaysToDie.x86_64" -o -f "$(GAME)/7DaysToDie.exe" || { \
+		echo "game not found at GAME=$(GAME)"; \
+		echo "set GAME=/path/to/7 Days To Die (csproj needs its DLLs to reference)"; \
+		exit 2; }
 	dotnet build "$(ROOT)/Source/PlayTestMod/PlayTestMod.csproj" -c Release -v q \
 		-p:GameRoot="$(GAME)"
 	cp -f "$(ROOT)/ModInfo.xml" "$(DIST)/"
@@ -73,6 +97,22 @@ test:
 	$(UV) "$(ROOT)/scripts/test_report_surface.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_run_units.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_compare.py"
+
+# One gate while iterating: make test-one GATE=test_dst.py
+GATE ?=
+test-one:
+	@test -n "$(GATE)" || { \
+		echo "usage: make test-one GATE=<gate file name, e.g. GATE=test_dst.py>"; \
+		exit 2; }
+	@test -f "$(ROOT)/scripts/$(GATE)" || { \
+		echo "unknown gate: scripts/$(GATE)"; \
+		exit 2; }
+	$(UV) "$(ROOT)/scripts/$(GATE)"
+
+# The full local verification, identical to .github/workflows/ci.yml.
+check:
+	$(MAKE) test
+	$(MAKE) dst DST_SEEDS=200
 
 # Deterministic simulation of the exclusivity lock. No game, no server, no
 # wall-clock waiting: DST_SEEDS runs of simulated multi-agent contention with

@@ -124,6 +124,9 @@ that module, or the simulation stops covering it.
 ## Commands
 
 ```bash
+make test                 # offline gates, no game install needed
+make test-one GATE=test_dst.py   # run one gate while iterating
+make check                # exactly what CI runs: test + dst DST_SEEDS=200
 make install              # build + install playtest mod
 make install-pair         # playtest + connect
 make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)

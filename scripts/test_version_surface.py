@@ -27,7 +27,6 @@ def read_mod_info_version(path: Path) -> str:
 
 def main() -> int:
     manifest = read_mod_info_version(MOD_INFO)
-    dist_manifest = read_mod_info_version(DIST_MOD_INFO)
     api = MOD_API.read_text(encoding="utf-8")
     m = re.search(r'public\s+const\s+string\s+Version\s*=\s*"([^"]+)"\s*;', api)
     assert m, f"{MOD_API.relative_to(ROOT)}: public const string Version missing"
@@ -40,11 +39,18 @@ def main() -> int:
         f"version drift: ModInfo.xml {manifest} != ModApi.Version {code}; "
         "bump both together (game mod list and the runner banner show them)"
     )
-    assert manifest == dist_manifest, (
-        f"stale shipped manifest: dist/7dtd-playtest/ModInfo.xml has "
-        f"{dist_manifest} but ModInfo.xml has {manifest}; run make build "
-        "after bumping so the installed artifact matches"
-    )
+    # dist/ is a build artifact (gitignored): absent on a clean clone and in
+    # CI, where nothing was built yet. Only a machine that has built can have
+    # a stale shipped manifest to catch.
+    if DIST_MOD_INFO.is_file():
+        dist_manifest = read_mod_info_version(DIST_MOD_INFO)
+        assert manifest == dist_manifest, (
+            f"stale shipped manifest: dist/7dtd-playtest/ModInfo.xml has "
+            f"{dist_manifest} but ModInfo.xml has {manifest}; run make build "
+            "after bumping so the installed artifact matches"
+        )
+    else:
+        print("OK no dist build present; shipped-manifest check not applicable")
 
     changelog = CHANGELOG.read_text(encoding="utf-8")
     headings = re.findall(r"^##\s+\[([^\]]+)\]", changelog, flags=re.M)
@@ -54,7 +60,7 @@ def main() -> int:
         "needs consumer-facing notes before it ships"
     )
 
-    print(f"OK mod version {manifest} matches ModApi.Version and dist manifest")
+    print(f"OK mod version {manifest} matches ModApi.Version")
     print("OK CHANGELOG.md has [Unreleased] and the current release entry")
     return 0
 
