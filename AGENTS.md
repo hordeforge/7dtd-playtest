@@ -33,7 +33,7 @@ Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
 6. Host Python via **`uv`** only. Secrets via env.
 7. No em dashes. No AI attribution.
 8. Name for what it does (suite ids, case ids, env vars).
-9. **Exclusive live client** — see below. Only one orchestrated playtest (or
+9. **Exclusive live client** (see below). Only one orchestrated playtest (or
    other exclusive client drive) at a time on this machine.
 
 ## Playtest / live-client exclusivity
@@ -89,7 +89,8 @@ When free: `running=no` (omit session / timestamps).
   also **no** live client process. If a client is still up, do not clear the
   lock; stop and record the mismatch (`stale_but_live`).
 
-Inspect: `cat` the lock file, or `python3 -c "import playtest_lock as p; print(p.read_lock())"`.
+Inspect: `cat` the lock file, or from the repo root
+`PYTHONPATH=scripts python3 -c "import playtest_lock as p; print(p.read_lock())"`.
 
 ### Acquire / release / process check
 
