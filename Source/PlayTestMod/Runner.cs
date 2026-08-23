@@ -109,6 +109,7 @@ namespace ZdtdPlaytest
         public int PlaceBlockType = -1;
         public int IntA;
         public int IntB;
+        public int IntC;
         public float FloatA;
         public float FloatB;
         /// <summary>Optional entity id for combat fixtures (ranged target, etc.).</summary>

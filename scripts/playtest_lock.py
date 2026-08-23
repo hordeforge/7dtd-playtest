@@ -26,6 +26,7 @@ alive; agents should wait.
 from __future__ import annotations
 
 import fcntl
+import math
 import os
 import re
 import secrets
@@ -196,26 +197,35 @@ def _warn_invalid_env(name: str, raw: str, fallback: float) -> None:
     )
 
 
-def _stale_sec_from_environ() -> float:
-    raw = os.environ.get("PLAYTEST_LOCK_STALE_SEC", "").strip()
+def _seconds_from_environ(name: str, fallback: float) -> float:
+    """Read a seconds override; unparseable or non-finite values warn+default.
+
+    ``float("nan")`` would collapse to a 1s clamp through ``max`` and make a
+    fresh live holder look stale instantly; ``inf`` makes the lock never stale
+    (or freezes the heartbeat wait). Both silently corrupt exclusivity, so
+    they are rejected like unparseable text.
+    """
+    raw = os.environ.get(name, "").strip()
     if raw:
         try:
-            return max(1.0, float(raw))
+            val = float(raw)
         except ValueError:
-            _warn_invalid_env("PLAYTEST_LOCK_STALE_SEC", raw, DEFAULT_STALE_SEC)
-    return float(DEFAULT_STALE_SEC)
+            _warn_invalid_env(name, raw, fallback)
+        else:
+            if math.isfinite(val):
+                return max(1.0, val)
+            _warn_invalid_env(name, raw, fallback)
+    return float(fallback)
+
+
+def _stale_sec_from_environ() -> float:
+    return _seconds_from_environ("PLAYTEST_LOCK_STALE_SEC", DEFAULT_STALE_SEC)
 
 
 def _heartbeat_interval_from_environ() -> float:
-    raw = os.environ.get("PLAYTEST_LOCK_HEARTBEAT_SEC", "").strip()
-    if raw:
-        try:
-            return max(1.0, float(raw))
-        except ValueError:
-            _warn_invalid_env(
-                "PLAYTEST_LOCK_HEARTBEAT_SEC", raw, DEFAULT_HEARTBEAT_INTERVAL_SEC
-            )
-    return float(DEFAULT_HEARTBEAT_INTERVAL_SEC)
+    return _seconds_from_environ(
+        "PLAYTEST_LOCK_HEARTBEAT_SEC", DEFAULT_HEARTBEAT_INTERVAL_SEC
+    )
 
 
 def flock_path_for(lock_path: Path) -> Path:

@@ -95,6 +95,13 @@ unchanged.
 
 ### Fixed
 
+- `loot_bag_pickup` no longer parks the dropped item's entity id in the
+  float context slot: entity ids above 2^24 lost precision through the
+  `float`/`(int)` round-trip and corrupted the gone-check verdict. The id
+  now lives in a new int slot (`CaseCtx.IntC`; additive, provider-visible).
+- The `world_time` case dropped its dead `worldTime → float` parking; the
+  full ulong value was already reported via Detail.
+
 - `SUITE=economy`, `vehicle`, `finale`, and `bot` standalone runs now arm
   host telnet fixtures. The fixture gate (`suite_wants_zombie_fixture`) was a
   substring heuristic whose key list predated the current barrier set, so
@@ -138,8 +145,10 @@ unchanged.
   `--port` / `--admin-port` are rejected the same way instead of producing an
   instant timeout or a late server-bind failure.
 - `PLAYTEST_LOCK_STALE_SEC` / `PLAYTEST_LOCK_HEARTBEAT_SEC` set to an
-  unparseable value now warn on stderr instead of silently falling back to
-  the defaults (the fallback itself is unchanged).
+  unparseable or non-finite value (`nan`, `inf`) now warn on stderr instead of
+  silently falling back to the defaults (the fallback itself is unchanged).
+  Previously `nan` collapsed through the 1s clamp into an instant-stale window
+  and `inf` made a lock never stale (or froze the heartbeat wait).
 - The generated stock serverconfig (`TelnetPassword` inside) is written with
   user-only permissions (0600) instead of inheriting a world-readable umask.
 

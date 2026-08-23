@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import signal
 import socket
@@ -372,6 +374,55 @@ def test_parse_utc_timestamp_zones() -> None:
         _assert(pl.parse_utc_timestamp(bad) is None, f"garbage {bad!r} → None")
 
 
+def test_seconds_env_overrides_reject_non_finite() -> None:
+    """inf/nan overrides must warn+default, not poison staleness decisions.
+
+    nan collapses through max(1.0, nan) to a 1s stale window (instant takeover
+    of live holders); inf makes the lock never stale and freezes the heartbeat
+    wait. Both are rejected like unparseable text.
+    """
+    names = ("PLAYTEST_LOCK_STALE_SEC", "PLAYTEST_LOCK_HEARTBEAT_SEC")
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        for name, fallback in (
+            ("PLAYTEST_LOCK_STALE_SEC", pl.DEFAULT_STALE_SEC),
+            ("PLAYTEST_LOCK_HEARTBEAT_SEC", pl.DEFAULT_HEARTBEAT_INTERVAL_SEC),
+        ):
+            for raw in ("nan", "inf", "-inf", "NaN", "Infinity"):
+                os.environ[name] = raw
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    val = pl._seconds_from_environ(name, fallback)
+                _assert(val == float(fallback), f"{name}={raw!r} → default, got {val}")
+                _assert("warn" in err.getvalue(), f"{name}={raw!r} warns")
+            # Valid finite values still honored; small ones clamp to 1s.
+            os.environ[name] = "45"
+            _assert(
+                pl._seconds_from_environ(name, fallback) == 45.0,
+                f"{name}=45 honored",
+            )
+            os.environ[name] = "-5"
+            _assert(
+                pl._seconds_from_environ(name, fallback) == 1.0,
+                f"{name}=-5 clamps to 1s",
+            )
+            # Unset falls back without warning.
+            os.environ.pop(name)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                _assert(
+                    pl._seconds_from_environ(name, fallback) == float(fallback),
+                    f"unset {name} → default",
+                )
+                _assert(err.getvalue() == "", f"unset {name} stays quiet")
+    finally:
+        for name, old in saved.items():
+            if old is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old
+
+
 def main() -> int:
     fails = 0
     with tempfile.TemporaryDirectory(prefix="playtest-lock-") as td:
@@ -405,6 +456,10 @@ def main() -> int:
             ),
             ("playtest_run_wiring", test_playtest_run_wiring),
             ("parse_utc_timestamp_zones", test_parse_utc_timestamp_zones),
+            (
+                "seconds_env_overrides_reject_non_finite",
+                test_seconds_env_overrides_reject_non_finite,
+            ),
             ("sigterm_becomes_graceful_exit", test_sigterm_becomes_graceful_exit),
         ]
         for name, fn in cases:

@@ -940,7 +940,6 @@ namespace ZdtdPlaytest
                 try
                 {
                     ulong t = ctx.World.worldTime;
-                    ctx.FloatA = t;
                     // day-ish: stock packs days in high bits; just ensure readable
                     ctx.Detail = "worldTime=" + t;
                     ctx.PlaceBlockType = 1;
@@ -2084,7 +2083,7 @@ namespace ZdtdPlaytest
                 int totalSlots;
                 ctx.IntB = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
                 ctx.PlaceBlockType = 0;
-                ctx.FloatA = -1f; // collect entity id
+                ctx.IntC = -1; // collect entity id
                 // Prefer unique item so bag occupancy change is likely.
                 string used = "";
                 string[] names = { "resourceScrapIron", "resourceRockSmall", "resourceWood", "casinoCoin" };
@@ -2111,7 +2110,9 @@ namespace ZdtdPlaytest
                     var item = Helpers.FindNearestEntityItem(ctx.World, ctx.Player.GetPosition(), 32f);
                     if (item != null)
                     {
-                        ctx.FloatA = item.entityId;
+                        // Entity ids exceed float exactness above 2^24; keep
+                        // them in an int slot so the gone-check stays exact.
+                        ctx.IntC = item.entityId;
                         try
                         {
                             // Stand on the drop so collect range is valid.
@@ -2124,11 +2125,11 @@ namespace ZdtdPlaytest
                 }
                 int totalSlots;
                 int bagNow = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
-                bool gone = n < ctx.IntA || (ctx.FloatA > 0 && Helpers.FindAliveById(ctx.World, (int)ctx.FloatA) == null
+                bool gone = n < ctx.IntA || (ctx.IntC > 0 && Helpers.FindAliveById(ctx.World, ctx.IntC) == null
                     && Helpers.FindNearestEntityItem(ctx.World, ctx.Player.GetPosition(), 32f) == null);
                 // EntityItem is not EntityAlive; re-check by entity id in list.
                 bool entityGone = false;
-                if (ctx.FloatA > 0)
+                if (ctx.IntC > 0)
                 {
                     entityGone = true;
                     try
@@ -2138,7 +2139,7 @@ namespace ZdtdPlaytest
                         {
                             for (int i = 0; i < list.Count; i++)
                             {
-                                if (list[i] != null && list[i].entityId == (int)ctx.FloatA)
+                                if (list[i] != null && list[i].entityId == ctx.IntC)
                                 {
                                     entityGone = false;
                                     break;
@@ -2150,7 +2151,7 @@ namespace ZdtdPlaytest
                 }
                 bool bagUp = bagNow > ctx.IntB;
                 ctx.Detail = "items0=" + ctx.IntA + " items=" + n + " bag0=" + ctx.IntB
-                    + " bag=" + bagNow + " eid=" + ((int)ctx.FloatA)
+                    + " bag=" + bagNow + " eid=" + ctx.IntC
                     + " gone=" + entityGone + " t=" + elapsed.ToString("0.0");
                 return entityGone || bagUp || (n < ctx.IntA);
             }, assert: ctx =>
@@ -2165,7 +2166,7 @@ namespace ZdtdPlaytest
                 int totalSlots;
                 int bagNow = Helpers.CountOccupiedBagSlots(ctx.Player, out totalSlots);
                 bool entityGone = false;
-                if (ctx.FloatA > 0)
+                if (ctx.IntC > 0)
                 {
                     entityGone = true;
                     try
@@ -2175,7 +2176,7 @@ namespace ZdtdPlaytest
                         {
                             for (int i = 0; i < list.Count; i++)
                             {
-                                if (list[i] != null && list[i].entityId == (int)ctx.FloatA)
+                                if (list[i] != null && list[i].entityId == ctx.IntC)
                                 {
                                     entityGone = false;
                                     break;
@@ -2187,7 +2188,7 @@ namespace ZdtdPlaytest
                 }
                 bool ok = entityGone || bagNow > ctx.IntB || n < ctx.IntA;
                 ctx.Detail = "items0=" + ctx.IntA + " items=" + n + " bag0=" + ctx.IntB
-                    + " bag=" + bagNow + " eid=" + ((int)ctx.FloatA) + " gone=" + entityGone;
+                    + " bag=" + bagNow + " eid=" + ctx.IntC + " gone=" + entityGone;
                 return ok;
             }, timeout: 14f, fail: "EntityItem collect did not remove drop", pause: 0.5f));
 
