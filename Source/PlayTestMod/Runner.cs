@@ -203,7 +203,7 @@ namespace ZdtdPlaytest
 
             Report.Reset();
             Report.Info("armed suites=" + string.Join(",", _suites)
-                + " laps=" + _benchmarkLaps + " v" + ModApi.Version);
+                + " laps=" + _benchmarkLaps + " v" + ModIdentity.Version);
             if (string.Equals(suiteEnv, "list", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(suiteEnv, "catalog", StringComparison.OrdinalIgnoreCase))
             {
