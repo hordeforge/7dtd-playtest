@@ -178,9 +178,6 @@ class LockState:
             return None
         return max(0.0, now - ep)
 
-    @property
-    def heartbeat_age_sec(self) -> float | None:
-        return self.heartbeat_age_sec_at(_ENV.now())
 
 
 def default_lock_path() -> Path:
@@ -200,10 +197,6 @@ def _stale_sec_from_environ() -> float:
     return float(DEFAULT_STALE_SEC)
 
 
-def stale_sec(env: LockEnv | None = None) -> float:
-    return _env(env).stale_sec()
-
-
 def _heartbeat_interval_from_environ() -> float:
     raw = os.environ.get("PLAYTEST_LOCK_HEARTBEAT_SEC", "").strip()
     if raw:
@@ -212,10 +205,6 @@ def _heartbeat_interval_from_environ() -> float:
         except ValueError:
             pass
     return float(DEFAULT_HEARTBEAT_INTERVAL_SEC)
-
-
-def heartbeat_interval_sec(env: LockEnv | None = None) -> float:
-    return _env(env).heartbeat_interval_sec()
 
 
 def flock_path_for(lock_path: Path) -> Path:
@@ -747,10 +736,6 @@ class HeartbeatThread:
             on_error=on_error,
             env=env,
         )
-        self.session = session
-        self.path = self.loop.path
-        self.interval_sec = self.loop.interval_sec
-        self.on_error = on_error
         self._stop = threading.Event()
         self._started = False
         self._thread = threading.Thread(
@@ -775,5 +760,5 @@ class HeartbeatThread:
     def _run(self) -> None:
         # Immediate first touch so age stays low even if interval is long.
         self.loop.tick(force=True)
-        while not self._stop.wait(self.interval_sec):
+        while not self._stop.wait(self.loop.interval_sec):
             self.loop.tick(force=True)

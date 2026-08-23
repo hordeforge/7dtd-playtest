@@ -108,10 +108,6 @@ class VirtualClock:
             )
         self._now = float(epoch)
 
-    @property
-    def elapsed(self) -> float:
-        return self._now - self.start_epoch
-
 
 class InvariantViolation(AssertionError):
     """An always-true property of the model did not hold."""
@@ -161,9 +157,6 @@ class Trace:
 
     def lines(self) -> list[str]:
         return [ev.canonical() for ev in self.events]
-
-    def tail(self, n: int = 40) -> list[str]:
-        return self.lines()[-n:]
 
 
 @dataclass(order=True)

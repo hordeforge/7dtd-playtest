@@ -129,9 +129,7 @@ class SimStorage(pl.LockStorage):
         self.rng: Rng = sim.rng.stream("storage")
         self.locked_by: str | None = None
         self.actor: str = "sim"
-        self.writes = 0
         self.torn = 0
-        self.corruptions = 0
         self.externally_corrupted = False
         self.crashes = 0
         self.io_errors = 0
@@ -155,7 +153,6 @@ class SimStorage(pl.LockStorage):
         return self.files.get(str(path))
 
     def write_text(self, path: Path, text: str) -> None:
-        self.writes += 1
         if self.rng.chance(self.faults.write_error):
             self.io_errors += 1
             self.sim.record(self.actor, "fault_write_error", path=str(path))
@@ -191,7 +188,6 @@ class SimStorage(pl.LockStorage):
             return False
         cut = self.rng.randint(0, max(0, len(body) - 1))
         self.files[str(path)] = body[:cut]
-        self.corruptions += 1
         self.externally_corrupted = True
         self.sim.record("external", "fault_external_corruption", kept=cut)
         return True
@@ -289,8 +285,6 @@ class World:
         # collapse the state space we are trying to explore.
         self.stray_until = 0.0
         self.max_concurrent_runtime = 0
-        self.takeovers = 0
-        self.acquires = 0
         self.refusals: dict[str, int] = {}
 
     @property
@@ -414,7 +408,6 @@ class Agent:
                     f"{self.name}: acquired while runtime owned by "
                     f"{sorted(self.world.runtime_up)} was still up"
                 )
-            self.world.acquires += 1
             self.world.holders.add(self.name)
             self.world.holder_sessions[self.name] = self.session
             yield from self._hold()
@@ -654,10 +647,7 @@ class SimResult:
     seed: int
     digest: str
     steps: int
-    elapsed: float
-    acquires: int
     refusals: dict[str, int]
-    writes: int
     torn: int
     crashes: int
     io_errors: int
@@ -720,10 +710,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
         seed=seed,
         digest=sim.trace.digest(),
         steps=sim.steps,
-        elapsed=sim.clock.elapsed,
-        acquires=world.acquires,
         refusals=dict(sorted(world.refusals.items())),
-        writes=storage.writes,
         torn=storage.torn,
         crashes=storage.crashes,
         io_errors=storage.io_errors,
