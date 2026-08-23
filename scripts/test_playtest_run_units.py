@@ -3,11 +3,13 @@
 
 The orchestrator's process-driving paths need real game binaries, but some
 helpers are fully offline-testable and destructive enough to deserve their
-own gate. Today: fresh_save (the --fresh-save implementation; a regression
-there either wipes the wrong directories or silently stops wiping), the
-host-fixture suite gate, and the startup config validators (a bad timeout /
-port env value must fail fast with a named error instead of crashing at
-argparse setup or timing out instantly), plus the config summary redaction.
+own gate. Today: the fresh-save quarantine (stock saves, zdtd world state,
+and prior-run log evidence move under <logdir>/quarantine instead of being
+hard-deleted; a regression there either wipes the wrong directories or
+silently stops wiping), the host-fixture suite gate, and the startup config
+validators (a bad timeout / port env value must fail fast with a named error
+instead of crashing at argparse setup or timing out instantly), plus the
+config summary redaction.
 """
 from __future__ import annotations
 
@@ -53,6 +55,7 @@ def test_fresh_save_removes_only_named_game_saves() -> None:
     named game must go; sibling saves, stray files, and other worlds stay."""
     with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
         ud = Path(td) / "userdata"
+        qroot = Path(td) / "logdir" / "quarantine"
         saves = ud / "Saves"
         removed_markers: list[Path] = []
         kept = []
@@ -68,7 +71,7 @@ def test_fresh_save_removes_only_named_game_saves() -> None:
         stray_file.write_text("keep", encoding="utf-8")
         kept += [sibling_game, stray_file]
 
-        playtest_run.fresh_save(ud, "PlaytestNav")
+        playtest_run.fresh_save(ud, "PlaytestNav", qroot)
 
         for target in removed_markers:
             assert not target.exists(), f"named save must be wiped: {target}"
@@ -88,12 +91,135 @@ def test_fresh_save_without_saves_dir_is_noop() -> None:
         ud.mkdir()
         (ud / "not_a_dir").write_text("keep", encoding="utf-8")
 
-        playtest_run.fresh_save(ud, "PlaytestNav")
+        playtest_run.fresh_save(ud, "PlaytestNav", Path(td) / "q")
 
         assert ud.is_dir() and (ud / "not_a_dir").is_file(), (
             "no-op fresh-save must leave userdata untouched"
         )
         print("PASS fresh_save_no_saves_dir noop without creating anything")
+
+
+def test_fresh_save_quarantines_named_saves_recoverably() -> None:
+    """Removed saves land under <quarantine> intact: soft-delete window, so a
+    mispointed --userdata costs a copy-back instead of unrecoverable loss."""
+    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
+        ud = Path(td) / "userdata"
+        qroot = Path(td) / "logdir" / "quarantine"
+        game = ud / "Saves" / "Navezgane" / "PlaytestNav"
+        game.mkdir(parents=True)
+        (game / "main.ttw").write_text("save-bytes", encoding="utf-8")
+
+        playtest_run.fresh_save(ud, "PlaytestNav", qroot)
+
+        assert not game.exists(), "save must leave the live Saves tree"
+        entries = [p for p in qroot.iterdir() if p.is_dir()]
+        assert len(entries) == 1, f"want one quarantine entry, got {entries}"
+        rescued = entries[0] / "Navezgane--PlaytestNav" / "PlaytestNav" / "main.ttw"
+        assert rescued.is_file() and rescued.read_text(encoding="utf-8") == (
+            "save-bytes"
+        ), "quarantined save must keep its content for copy-back"
+        print("PASS fresh_save_quarantine removed save recoverable from quarantine")
+
+
+def test_fresh_save_unusable_quarantine_keeps_data_in_place() -> None:
+    """If the quarantine cannot take the save, it stays (stale-run warning)
+    rather than being destroyed without a recovery path."""
+    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
+        ud = Path(td) / "userdata"
+        qroot_file = Path(td) / "not-a-dir"
+        qroot_file.write_text("blocker", encoding="utf-8")
+        game = ud / "Saves" / "Navezgane" / "PlaytestNav"
+        game.mkdir(parents=True)
+        (game / "main.ttw").write_text("precious", encoding="utf-8")
+
+        errbuf = io.StringIO()
+        with contextlib.redirect_stderr(errbuf):
+            playtest_run.fresh_save(ud, "PlaytestNav", qroot_file)
+
+        assert game.is_dir() and (game / "main.ttw").is_file(), (
+            "unusable quarantine must keep the save in place"
+        )
+        assert "stale save will be reused" in errbuf.getvalue()
+        print("PASS fresh_save_quarantine_unavailable data kept, stale warned")
+
+
+def test_fresh_zdtd_world_moves_state_and_overlays_recoverably() -> None:
+    """zdtd wipe: persisted state + chunk overlays go to quarantine; unrelated
+    files stay; missing world dir is a noop."""
+    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
+        qroot = Path(td) / "logdir" / "quarantine"
+        world = Path(td) / "playtest_auto"
+        world.mkdir()
+        payloads = {
+            "players.zsv": "players",
+            "containers.zct": "containers",
+            "c_0_0.zch": "chunk",
+            "c_1_0.zch.bak": "chunk-bak",
+        }
+        for name, body in payloads.items():
+            (world / name).write_text(body, encoding="utf-8")
+        (world / "unrelated.txt").write_text("keep", encoding="utf-8")
+
+        playtest_run.fresh_zdtd_world(world, qroot)
+
+        for name in payloads:
+            assert not (world / name).exists(), f"{name} must leave the world dir"
+        assert (world / "unrelated.txt").is_file()
+        entries = [p for p in qroot.iterdir() if p.is_dir()]
+        assert len(entries) == 1, f"want one quarantine entry, got {entries}"
+        for name, body in payloads.items():
+            rel = "state" if not name.startswith("c_") else "chunks"
+            moved = entries[0] / rel / name
+            assert moved.is_file() and moved.read_text(encoding="utf-8") == body, (
+                f"quarantined {name} must keep its content"
+            )
+        # Noop path: absent world must not create anything.
+        before = sorted(p.name for p in qroot.iterdir())
+        playtest_run.fresh_zdtd_world(Path(td) / "missing", qroot)
+        assert sorted(p.name for p in qroot.iterdir()) == before
+        print("PASS fresh_zdtd_world state+chunks quarantined, unrelated kept")
+
+
+def test_prune_quarantine_keeps_newest_entries() -> None:
+    """Prune deletes oldest entries past QUARANTINE_KEEP (files included)."""
+    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
+        qroot = Path(td) / "q"
+        qroot.mkdir()
+        names = [f"{i:04d}-entry" for i in range(6)]
+        for i, name in enumerate(names):
+            if i == 0:
+                (qroot / name).write_text("old-log", encoding="utf-8")
+            else:
+                (qroot / name).mkdir()
+
+        playtest_run.prune_quarantine(qroot, keep=5)
+
+        left = sorted(p.name for p in qroot.iterdir())
+        assert left == names[1:], f"oldest entry (a file) must go first: {left}"
+        print("PASS prune_quarantine newest kept, oldest file+dirs dropped")
+
+
+def test_snapshot_previous_log_copies_before_truncate() -> None:
+    """Log evidence of the previous run is copied aside; original untouched
+    (the caller still truncates for the incremental readers)."""
+    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
+        qroot = Path(td) / "q"
+        log_path = Path(td) / "client.log"
+        log_path.write_text("previous crash stacktrace", encoding="utf-8")
+
+        playtest_run.snapshot_previous_log(log_path, qroot, "client-log")
+
+        entries = list(qroot.iterdir())
+        assert len(entries) == 1
+        copy = entries[0] / "client.log"
+        assert copy.is_file()
+        assert copy.read_text(encoding="utf-8") == "previous crash stacktrace"
+        assert log_path.read_text(encoding="utf-8") == "previous crash stacktrace"
+        # Missing logs are a noop.
+        playtest_run.snapshot_previous_log(None, qroot, "client-log")
+        playtest_run.snapshot_previous_log(Path(td) / "absent.log", qroot, "x")
+        assert len(list(qroot.iterdir())) == 1
+        print("PASS snapshot_previous_log prior run preserved, noop when absent")
 
 
 def test_suite_wants_host_fixtures_selection_table() -> None:
@@ -349,6 +475,14 @@ def main() -> int:
     for name, fn in (
         ("fresh_save_named_only", test_fresh_save_removes_only_named_game_saves),
         ("fresh_save_no_saves_dir", test_fresh_save_without_saves_dir_is_noop),
+        ("fresh_save_quarantine", test_fresh_save_quarantines_named_saves_recoverably),
+        (
+            "fresh_save_quarantine_unavailable",
+            test_fresh_save_unusable_quarantine_keeps_data_in_place,
+        ),
+        ("fresh_zdtd_world", test_fresh_zdtd_world_moves_state_and_overlays_recoverably),
+        ("prune_quarantine", test_prune_quarantine_keeps_newest_entries),
+        ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),

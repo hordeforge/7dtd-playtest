@@ -972,12 +972,76 @@ def install_signal_handlers() -> None:
             warn(f"cannot install {name} handler: {ex}")
 
 
-def fresh_save(userdata: Path, game_name: str) -> None:
-    """Remove stock save folder for a clean, reproducible world state."""
-    # Typical layout: UserData/Saves/<World>/<GameName>
+# Soft-delete window for destructive pre-run wipes (--fresh-save, zdtd world
+# reset, prior client-log evidence): data moves under <logdir>/quarantine and
+# is pruned to the newest QUARANTINE_KEEP entries instead of being destroyed.
+# A mispointed --userdata/--game-name/--world therefore costs a copy-back, not
+# an unrecoverable loss.
+QUARANTINE_DIRNAME = "quarantine"
+QUARANTINE_KEEP = 5
+
+
+def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
+    """Keep only the newest `keep` quarantine entries (dirs or files)."""
+    try:
+        entries = sorted(qroot.iterdir())
+    except OSError:
+        return
+    for old in entries[:-keep]:
+        if old.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+        else:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+
+def _quarantine_entry(qroot: Path, label: str) -> Path | None:
+    """Create a timestamped quarantine entry dir; prune older ones.
+
+    None means the quarantine itself is unusable (disk, permissions): callers
+    must then leave the data in place rather than destroy it unrecoverably.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    entry = qroot / f"{stamp}-{label}"
+    n = 0
+    while entry.exists():
+        n += 1
+        entry = qroot / f"{stamp}-{label}.{n}"
+    try:
+        entry.mkdir(parents=True)
+    except OSError as ex:
+        warn(f"quarantine unavailable ({ex}); keeping data in place")
+        return None
+    prune_quarantine(qroot)
+    return entry
+
+
+def _quarantine_move(src: Path, entry: Path, rel: str) -> bool:
+    """Move src to entry/<rel>/<name>; False leaves src untouched in place."""
+    dest_root = entry / rel
+    try:
+        dest_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest_root / src.name))
+        return True
+    except OSError as ex:
+        warn(f"quarantine: could not move {src} aside: {ex}")
+        return False
+
+
+def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
+    """Move stock save folders aside into `quarantine` for a clean world.
+
+    Typical layout: UserData/Saves/<World>/<GameName>. Every world's copy of
+    the named game goes; sibling saves and stray files stay. Removal means
+    "recoverable until pruned", so a mispointed --userdata cannot destroy real
+    playthroughs irrecoverably.
+    """
     saves = userdata / "Saves"
     if not saves.is_dir():
         return
+    entry = _quarantine_entry(quarantine, "stock-save")
     removed = 0
     failed = 0
     for world_dir in saves.iterdir():
@@ -985,8 +1049,11 @@ def fresh_save(userdata: Path, game_name: str) -> None:
             continue
         target = world_dir / game_name
         if target.is_dir():
-            shutil.rmtree(target, ignore_errors=True)
-            if target.exists():
+            moved = (
+                entry is not None
+                and _quarantine_move(target, entry, f"{world_dir.name}--{game_name}")
+            )
+            if not moved:
                 # A surviving save would silently poison the run: dig/place
                 # would then fail on the previous run's terrain, not on the
                 # server. Say so instead of logging a false "removed".
@@ -1000,6 +1067,55 @@ def fresh_save(userdata: Path, game_name: str) -> None:
             log(f"fresh-save removed {target}")
     if removed == 0 and failed == 0:
         log(f"fresh-save: no existing save named {game_name}")
+
+
+def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
+    """Move zdtd persisted state aside (`--world`) for a clean starting bag.
+
+    players.zsv / containers.zct / blockmeta.zbm plus c_*.zch* chunk overlays
+    go to `quarantine` so dig/place start from the map baseline; a failed move
+    leaves the file in place (stale state reused, never silent loss).
+    """
+    if not world.is_dir():
+        return
+    entry = _quarantine_entry(quarantine, f"zdtd-world--{world.name}")
+    if entry is None:
+        warn(f"fresh-save: could not clean {world}; stale world will be reused")
+        return
+    state = 0
+    for name in ("players.zsv", "containers.zct", "blockmeta.zbm"):
+        p = world / name
+        if p.is_file() and _quarantine_move(p, entry, "state"):
+            state += 1
+            log(f"fresh-save removed {p}")
+    chunks = 0
+    for ch in sorted(world.glob("c_*.zch*")):
+        if _quarantine_move(ch, entry, "chunks"):
+            chunks += 1
+    if state == 0 and chunks == 0:
+        log(f"fresh-save: no persisted zdtd state under {world}")
+        return
+    log(
+        f"fresh-save zdtd world cleaned under {world} "
+        f"(state={state}, chunks={chunks})"
+    )
+
+
+def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> None:
+    """Copy the previous run's log into the quarantine before truncation.
+
+    The truncation itself stays: incremental readers depend on starting from
+    an empty file. Only the evidence of the previous run is preserved.
+    """
+    if path is None or not path.is_file():
+        return
+    entry = _quarantine_entry(qroot, kind)
+    if entry is None:
+        return
+    try:
+        shutil.copy2(path, entry / path.name)
+    except OSError as ex:
+        warn(f"could not preserve previous {kind}: {ex}")
 
 
 # Suite ids whose live cases depend on host-serviced admin fixtures. The
@@ -1419,29 +1535,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
 
+        qroot = args.logdir / QUARANTINE_DIRNAME
         if args.fresh_save:
             if args.server == "stock":
-                fresh_save(args.userdata, args.game_name)
+                fresh_save(args.userdata, args.game_name, qroot)
             elif args.server == "zdtd" and args.world is not None:
-                # zdtd persists players.zsv / chunks under --world; wipe for clean bag.
-                wpath = Path(args.world)
-                if wpath.is_dir():
-                    for name in ("players.zsv", "containers.zct", "blockmeta.zbm"):
-                        p = wpath / name
-                        if p.is_file():
-                            try:
-                                p.unlink()
-                                log(f"fresh-save removed {p}")
-                            except OSError as ex:
-                                warn(f"fresh-save: could not remove {p}: {ex}")
-                    # Drop chunk overlays so dig/place start from map baseline.
-                    for ch in wpath.glob("c_*.zch*"):
-                        try:
-                            ch.unlink()
-                        except OSError:
-                            pass
-                    log(f"fresh-save zdtd world cleaned under {wpath}")
+                fresh_zdtd_world(Path(args.world), qroot)
 
+        snapshot_previous_log(args.client_log, qroot, "client-log")
+        if peer_client_log is not None:
+            snapshot_previous_log(peer_client_log, qroot, "peer-client-log")
         if args.client_log.is_file():
             try:
                 args.client_log.write_text("", encoding="utf-8")

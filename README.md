@@ -305,6 +305,35 @@ uv run --locked --project . python scripts/playtest_run.py --suite your_suite --
 `FRESH=0` keeps the existing save when you deliberately inspect one. Providers
 do not need Atomic’s OCR `create-smoke-world.py` when using this host path.
 
+### State, backups, and recovery
+
+Durable state this system owns, and what an incident costs:
+
+| State | Location | Survives instance loss? |
+|---|---|---|
+| Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
+| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`) | No |
+| Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/` | No |
+| Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
+
+Recovery facts:
+
+- **RPO/RTO:** run artifacts are reproducible output, not records of record.
+  Losing them costs a suite re-run (RTO = suite wall time). The compare
+  baselines are the only long-lived results, and git carries those. Nothing
+  here backs up sibling projects (`zdtd`, `7dtd-connect`) or game installs.
+- **Restore a wiped save:** `--fresh-save` no longer hard-deletes. The named
+  stock save, zdtd `players.zsv`/`containers.zct`/`blockmeta.zbm`, chunk
+  overlays, and the previous client log move into
+  `<logdir>/quarantine/`; the newest `QUARANTINE_KEEP = 5` entries are kept
+  (oldest pruned). Copy an entry's contents back to its original path to
+  restore. If the quarantine itself is unwritable, data stays in place and
+  the run warns about stale reuse instead of destroying anything.
+- **Interrupted run:** kill leftovers with the orchestrator's own clean pass,
+  then clear the lock per the [Live-client exclusivity lock](#live-client-exclusivity-lock)
+  rules (fresh heartbeat means another holder is alive; stale plus no live
+  client process may take over).
+
 ### Multi-phase rejoin (persist) for provider cases
 
 Built-in flow (host-driven; do not invent client-only rejoin):

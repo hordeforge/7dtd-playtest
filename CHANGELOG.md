@@ -53,6 +53,14 @@ unchanged.
   (`PLAYTEST_SERVER`, `ZDTD`, `RE_DEDICATED_USERDATA`, `LOGDIR`,
   `PLAYTEST_TIMEOUT_SEC`, peer-client defaults) with defaults and the
   flag-overrides-env precedence.
+- Quarantine-before-delete for the orchestrator's destructive pre-run paths:
+  `--fresh-save` stock saves, zdtd world state (`players.zsv`,
+  `containers.zct`, `blockmeta.zbm`, chunk overlays), and previous client
+  logs move under `<logdir>/quarantine/` (newest 5 entries kept) instead of
+  being hard-deleted or truncated. A mispointed `--userdata`/`--game-name`/
+  `--world` now costs a copy-back; an unwritable quarantine keeps data in
+  place and warns about stale reuse. README gains a "State, backups, and
+  recovery" section (state inventory, RPO/RTO stance, restore steps).
 
 ### Changed
 
