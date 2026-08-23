@@ -27,6 +27,7 @@ from xml.etree import ElementTree
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import playtest_log
 import playtest_run
 
 
@@ -62,7 +63,7 @@ def test_parse_client_log_survives_null_numbers() -> None:
         '[7dtd-playtest] {"v":1,"t":"done","exit_hint":[1,2]}\n'
         '[7dtd-playtest] PASS s/c2 ok\n'
     )
-    parsed = playtest_run.parse_client_log(text)
+    parsed = playtest_log.parse_client_log(text)
     # The malformed summary/done events are skipped, the valid result event
     # survives, and summary falls back to recounting the surviving results.
     assert parsed["done"] is None, f"bad done event must be dropped: {parsed['done']}"
@@ -86,7 +87,7 @@ def test_parse_client_log_survives_inf_and_type_garbage() -> None:
         '"status":["pass"],"detail":12}\n'
         '[7dtd-playtest] PASS s/c2 ok\n'
     )
-    parsed = playtest_run.parse_client_log(text)
+    parsed = playtest_log.parse_client_log(text)
     # Both inf events are dropped, so the summary falls back to recounting
     # the surviving results; the coerced "['PASS']" status matches none of
     # the three countable statuses.
@@ -115,13 +116,13 @@ def test_barrier_hits_prefix_keeps_repeats_and_scope() -> None:
         "[game] barrier spawn_vehicle:not_ours\n"
         "[7dtd-playtest] barrier chat_echo:hello\n"
     )
-    hits = playtest_run.barrier_hits_prefix(blob, "spawn_vehicle:")
+    hits = playtest_log.barrier_hits_prefix(blob, "spawn_vehicle:")
     assert hits == [
         "spawn_vehicle:bicycle",
         "spawn_vehicle:jeep",
         "spawn_vehicle:bicycle",
     ], f"repeated barriers collapsed or misparsed: {hits}"
-    assert playtest_run.barrier_hits_prefix(blob, "chat_echo:") == ["chat_echo:hello"]
+    assert playtest_log.barrier_hits_prefix(blob, "chat_echo:") == ["chat_echo:hello"]
     print("PASS barrier_prefix repeats preserved, foreign lines excluded")
 
 
@@ -265,11 +266,11 @@ def test_fuzz_parse_client_log_survives_hostile_logs() -> None:
         blob = _log_fuzz_blob(rng)
         if not blob.endswith("\n"):
             blob += "\n"
-        parsed = playtest_run.parse_client_log(blob)
+        parsed = playtest_log.parse_client_log(blob)
         _assert_parsed_shape(parsed, seed)
-        again = playtest_run.parse_client_log(blob)
+        again = playtest_log.parse_client_log(blob)
         assert again == parsed, f"seed {seed}: parse is nondeterministic"
-        doubled = playtest_run.parse_client_log(blob * 2)
+        doubled = playtest_log.parse_client_log(blob * 2)
         _assert_parsed_shape(doubled, seed)
         n_single = len(parsed["results"])
         assert len(doubled["results"]) == 2 * n_single, (

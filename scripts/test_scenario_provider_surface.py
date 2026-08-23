@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 
-from playtest_run import barrier_hits_prefix
+from playtest_log import barrier_hits_prefix
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"

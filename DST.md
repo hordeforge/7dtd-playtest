@@ -142,5 +142,6 @@ about time and log content, and it would need its own seams first:
 
 Order matters: the clock alone would already make the barrier and deadline
 logic testable without waiting fifteen minutes for a soak. Until then the
-orchestrator's deterministic parts (`parse_client_log`, `barrier_hits_prefix`,
-the compare diff) stay covered by the ordinary offline gates.
+log-contract parser (`parse_client_log`, `barrier_hits_prefix`, in
+`scripts/playtest_log.py`) and the compare diff stay covered by the ordinary
+offline gates.

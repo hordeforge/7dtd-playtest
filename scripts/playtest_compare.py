@@ -25,7 +25,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from playtest_run import parse_client_log
+from playtest_log import parse_client_log
 
 
 def load_results(path: Path) -> dict:
