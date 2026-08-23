@@ -508,6 +508,37 @@ def test_pump_log_tail_survives_truncation_between_phases() -> None:
     print("PASS incremental_truncate shrink restarts tail, fresh scan per phase")
 
 
+def test_log_tail_keeps_multibyte_char_split_across_polls() -> None:
+    """LogTail decodes only complete lines, so a UTF-8 multi-byte character
+    whose bytes straddle two polls stays intact in the byte buffer. The
+    client log carries arbitrary game/chat text (chat_roundtrip echoes player
+    strings into case details); decoding per poll would replace the torn
+    character with U+FFFD and permanently corrupt the parsed detail."""
+    with tempfile.TemporaryDirectory() as td:
+        log_path = Path(td) / "client.log"
+        tail = playtest_log.LogTail(log_path)
+        # Torn write boundary: first 2 of the 4 bytes of an astral char.
+        torn = "[7dtd-playtest] PASS mp/chat_roundtrip detail=tOKEN \N{GRINNING FACE}".encode(
+            "utf-8"
+        )
+        cut = len(torn) - 2
+        with log_path.open("wb") as fh:
+            fh.write(torn[:cut])
+        assert tail.poll() == "", "partial line without newline must stay buffered"
+        with log_path.open("ab") as fh:
+            fh.write(torn[cut:] + b"\n")
+        chunk = tail.poll()
+    assert "\N{GRINNING FACE}" in chunk, f"split character corrupted: {chunk!r}"
+    scan = playtest_log.ClientLogScan()
+    for line in chunk.splitlines():
+        scan.feed_line(line)
+    got = scan.result()
+    assert len(got["results"]) == 1 and "\N{GRINNING FACE}" in got["results"][0]["detail"], (
+        got["results"]
+    )
+    print("PASS logtail_multibyte torn UTF-8 char survives across polls intact")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -519,6 +550,7 @@ def main() -> int:
     test_fuzz_write_junit_roundtrips_hostile_strings()
     test_incremental_scan_matches_whole_parse()
     test_pump_log_tail_survives_truncation_between_phases()
+    test_log_tail_keeps_multibyte_char_split_across_polls()
     print("RESULT PASS")
     return 0
 

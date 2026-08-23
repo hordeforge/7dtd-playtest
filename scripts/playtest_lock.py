@@ -69,7 +69,13 @@ class LockStorage:
 
     def read_text(self, path: Path) -> str | None:
         try:
-            return path.read_text(encoding="utf-8")
+            # Foreign helpers share this file through plain shell redirects;
+            # nothing forces their bytes to be valid UTF-8. Decode with
+            # replacement like every other reader of externally written
+            # bytes: U+FFFD never matches a key or session, so a mangled
+            # record degrades exactly like the truncated-corruption case
+            # instead of raising UnicodeDecodeError out of acquire/release.
+            return path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return None
 

@@ -423,6 +423,40 @@ def test_seconds_env_overrides_reject_non_finite() -> None:
                 os.environ[name] = old
 
 
+def test_non_utf8_lock_bytes_survive_read(tmp: Path) -> None:
+    """The lock file is shared with foreign helpers writing plain shell
+    redirects; nothing forces valid UTF-8 (latin-1 names, binary junk from a
+    torn write). Reading must degrade like every other corruption path:
+    replacement chars parse as a foreign record and acquire/release refuse
+    cleanly, never UnicodeDecodeError out of the orchestrator's finally."""
+    lock = tmp / "playtest_running"
+    tmp.mkdir(exist_ok=True)
+    now = pl.format_utc(time.time())
+    # 0xE9 is 'é' in latin-1 and invalid as any UTF-8 byte position.
+    lock.write_bytes(
+        f"running=yes\nsession=caf\xe9-holder\nacquired={now}\nheartbeat={now}\n".encode(
+            "latin-1"
+        )
+    )
+    state = pl.read_lock(lock)
+    _assert(state.running is True, "intact running=yes still parses")
+    _assert(state.session != "caf\xe9-holder", "raw latin-1 session not resurrected")
+    sid = "grok-20260810-231500-a1b2c3d4e5f6"
+    try:
+        pl.acquire(sid, path=lock, live_probe=lambda: False)
+        raise AssertionError("garbled foreign record must refuse acquire")
+    except pl.PlaytestLockError as e:
+        _assert(e.reason == "foreign_holder", f"reason={e.reason}")
+        _assert(e.held_by == state.session, "held_by names the replaced record")
+    # A non-owner release refuses instead of wiping the garbled record.
+    try:
+        pl.release(sid, path=lock)
+        raise AssertionError("non-owner release should raise")
+    except pl.PlaytestLockError as e:
+        _assert(e.reason == "foreign_holder", f"reason={e.reason}")
+    _assert(pl.read_lock(lock).running is True, "refused release left record alone")
+
+
 def main() -> int:
     fails = 0
     with tempfile.TemporaryDirectory(prefix="playtest-lock-") as td:
@@ -461,6 +495,10 @@ def main() -> int:
                 test_seconds_env_overrides_reject_non_finite,
             ),
             ("sigterm_becomes_graceful_exit", test_sigterm_becomes_graceful_exit),
+            (
+                "non_utf8_lock_bytes_survive_read",
+                lambda: test_non_utf8_lock_bytes_survive_read(tmp / "nonutf8"),
+            ),
         ]
         for name, fn in cases:
             try:
