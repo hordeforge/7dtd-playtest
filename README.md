@@ -14,6 +14,9 @@ as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTES
 
 ## Requirements
 
+- Host OS: **Linux** on x86_64. Host scripts assume bash, procps (`pkill`),
+  GNU coreutils, and PulseAudio/PipeWire; the client runs through
+  Steam/Proton and the dedicated server is the Linux build.
 - Stock client V3.x, EAC off (`-noeac`)
 - `0_TFP_Harmony`
 - `7dtd-connect` installed
