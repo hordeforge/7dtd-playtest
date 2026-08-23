@@ -51,13 +51,14 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// Build a live case (Act → optional Wait → optional Assert). Used by the
-        /// built-in catalog and by external scenario providers.
+        /// built-in catalog and by external scenario providers. <paramref name="tags"/>
+        /// is informational only (catalog listing) and may be omitted.
         /// </summary>
         public static CaseDef Live(
             string suite,
             string id,
-            string[] tags,
-            Action<CaseCtx> act,
+            string[] tags = null,
+            Action<CaseCtx> act = null,
             Func<CaseCtx, bool> wait = null,
             Func<CaseCtx, bool> assert = null,
             float timeout = 8f,
@@ -194,6 +195,17 @@ namespace ZdtdPlaytest
             }
 
             BuildQueue();
+            if (_queue.Count == 0)
+            {
+                // Every requested suite failed to produce cases (unknown id or
+                // uninstalled provider). Finish now with the recorded failures
+                // instead of waiting out the join for an empty green pass.
+                Report.Summary(_suites);
+                Report.Done();
+                _armed = false;
+                _phase = Phase.Finished;
+                return;
+            }
             _phase = Phase.WaitReady;
             _caseIndex = -1;
             _readySince = -1f;
@@ -204,6 +216,7 @@ namespace ZdtdPlaytest
         {
             _queue.Clear();
             int laps = Array.IndexOf(_suites, "benchmark") >= 0 ? _benchmarkLaps : 1;
+            var produced = new HashSet<string>();
 
             for (int lap = 0; lap < laps; lap++)
             {
@@ -211,9 +224,19 @@ namespace ZdtdPlaytest
                 {
                     int before = _queue.Count;
                     Catalog.AppendSuite(_queue, s, lap);
-                    if (_queue.Count == before && s != "benchmark")
-                        Report.Info("unknown or empty suite: " + s);
+                    if (_queue.Count > before) produced.Add(s);
                 }
+            }
+
+            // A requested suite that appended nothing is a harness failure, not
+            // a green run: typo'd ids and uninstalled providers must stay
+            // visible in SUMMARY / DONE exit_hint so hosts can detect them
+            // programmatically instead of reading exit 0 for zero work.
+            foreach (var s in _suites)
+            {
+                if (produced.Contains(s)) continue;
+                Report.Info("unknown or empty suite: " + s);
+                Report.Result(s, "(unknown)", "fail", 0f, "unknown or empty suite");
             }
             Report.Info("queue cases=" + _queue.Count);
         }

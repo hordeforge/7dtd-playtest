@@ -152,12 +152,47 @@ Another client mod can add a suite without forking this harness by referencing
 `IScenarioProvider`. Install that mod **alongside** `7dtd-playtest`, then set
 the suite env (see below) to your provider suite id.
 
+### Minimal provider
+
+Discovery scans loaded mod assemblies for public `IScenarioProvider`
+implementations with a public parameterless constructor:
+
+```csharp
+using System.Collections.Generic;
+using ZdtdPlaytest;
+
+public sealed class MyProvider : IScenarioProvider
+{
+    // Suite ids are matched case-insensitively. Ids that collide with
+    // built-in suites run the built-in instead; an id no provider owns and
+    // that produces zero cases fails the run (FAIL row + DONE exit_hint=1),
+    // so typos and uninstalled providers are never silent.
+    public IEnumerable<string> SuiteIds
+    {
+        get { yield return "my_wave_suite"; }
+    }
+
+    public void AppendSuite(List<CaseDef> queue, string suite, int lap)
+    {
+        // lap > 0 means a benchmark-style repeat: suffix case ids with "@lap"
+        // so per-lap results stay distinct in reports.
+        string label = lap > 0 ? suite + "@" + lap : suite;
+        queue.Add(CaseDef.Live(label, "my_case", new[] { "provider" },
+            act: ctx => Report.Barrier("my_provider_ready"),
+            assert: ctx => ctx.World != null && ctx.Player != null));
+    }
+}
+```
+
+Arm it with `PLAYTEST_SUITE=my_wave_suite` (`make playtest SUITE=my_wave_suite`).
+
 ### Build cases (public factories + helpers)
 
 Do **not** assign `CaseDef` fields by hand. Use:
 
 ```csharp
 // Live case with long wait (e.g. propagation / fallout wave).
+// tags (3rd arg) is informational only and may be omitted.
 queue.Add(CaseDef.Live(suite, "my_wave", new[] { "bench" },
     act: ctx => { /* setup */ },
     wait: ctx => /* server-visible predicate */,
@@ -182,8 +217,42 @@ Helpers.PlayerInVehicle(ctx.Player, vehicle);
 Helpers.TryEnterVehicle(ctx.Player, vehicle, out var detail);
 ```
 
+#### Barriers the stock host answers
+
+`scripts/playtest_run.py` greps client log for `barrier <name>` and performs
+telnet/admin setup. Barrier names it already handles (safe to emit from
+provider cases):
+
+| Barrier | Host action |
+|---|---|
+| `spawn_zombie` | Spawn a fixture zombie near the player |
+| `kill_fixture_zombie` | Kill non-player AI (fixture cleanup) |
+| `spawn_trader` | Spawn a trader fixture |
+| `kill_player` | Kill the player entity (death / respawn cases) |
+| `settime_day` / `settime_bloodmoon` | Set world time via telnet |
+| `spawn_vehicle:<entityClass>` | Host-owned vehicle of that class (bare `spawn_vehicle` = bicycle) |
+| `chat_echo:<token>` | Server chat `say <token>` (once per token) |
+| `spawn_loadgen_peer` / `spawn_loadgen_bots` | Start loadgen peers/bots |
+| `bot_spawn` / `bot_player_near` | Server-side `BotMod` commands |
+| `teleport_persist_pad` | Teleport players to the persist pad |
+| `apm_dump` | zdtd APM dump write (zdtd targets only) |
+
+Any other name is inert on this host (third-party hosts may grep their own).
+Repeated identical lines are separate requests; handlers count hits.
+
 Public surface for providers: `CaseDef.Live` / `CaseDef.Defer`, `CaseCtx`,
 `IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`).
+
+#### CaseCtx members (fresh instance per case)
+
+| Member | Meaning |
+|---|---|
+| `Gm`, `World`, `Player` | Live game objects, refreshed every tick; `Player` can go null/dead mid-case (the runner rescues or fails the case) |
+| `StartPos` | Player position when the case started |
+| `Detail` | Optional scratch string; appended to FAIL detail on timeout/failure |
+| `TargetEntityId` | Entity id for combat fixtures (ranged target etc.) |
+| `BenchmarkLap` | Lap number parsed from the `suite@N` label (0 outside laps) |
+| `WasBlockType`, `PlaceBlockType`, `IntA`, `IntB`, `FloatA`, `FloatB`, `TargetBlock`, `WorldTime0` | Built-in catalog scratch fields; providers may reuse them or capture closure locals instead |
 
 ### Suite environment (stock dedicated + connect)
 

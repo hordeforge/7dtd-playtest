@@ -231,6 +231,7 @@ def _assert_parsed_shape(parsed: dict, seed: int) -> None:
         "done",
         "json_events",
         "nre_like",
+        "nre_like_total",
     }, f"seed {seed}: unexpected parse keys {sorted(parsed)}"
     for r in parsed["results"]:
         assert set(r) == {"status", "case", "detail"}, f"seed {seed}: result keys {r}"
@@ -250,6 +251,12 @@ def _assert_parsed_shape(parsed: dict, seed: int) -> None:
             isinstance(v, int) and not isinstance(v, bool) for v in summary.values()
         ), f"seed {seed}: summary types {summary}"
     assert len(parsed["nre_like"]) <= 50, f"seed {seed}: nre cap broken"
+    assert isinstance(parsed["nre_like_total"], int) and not isinstance(
+        parsed["nre_like_total"], bool
+    ), f"seed {seed}: nre_like_total type {parsed['nre_like_total']}"
+    assert parsed["nre_like_total"] >= len(parsed["nre_like"]), (
+        f"seed {seed}: nre total below sample count"
+    )
 
 
 def test_fuzz_parse_client_log_survives_hostile_logs() -> None:

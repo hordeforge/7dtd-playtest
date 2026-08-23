@@ -171,6 +171,17 @@ def main() -> int:
     )
     assert "ZDTD_PLAYTEST_LAPS" in arm or "PLAYTEST_LAPS" in arm
 
+    # A suite that appends nothing (typo'd id, uninstalled provider) must be a
+    # recorded failure, never a silent green run with zero cases.
+    build_body = method_body(runner, r"static\s+void\s+BuildQueue\s*\(\s*\)")
+    assert '"(unknown)"' in build_body and "Report.Result(" in build_body, (
+        "BuildQueue must record a FAIL row for every suite that produced no cases"
+    )
+    assert "_queue.Count == 0" in arm and "Report.Done()" in arm, (
+        "an entirely empty queue must finish at arm time (DONE exit_hint=1), "
+        "not wait out the join for an empty pass"
+    )
+
     # Residual client alias stays light; Make residual is multi-target.
     m_res = re.search(
         r'case\s+"residual"\s*:(.*?)break\s*;',
@@ -223,6 +234,7 @@ def main() -> int:
     print("OK README documents CaseDef.Live/Defer")
     print("OK public Helpers + Report.Barrier for providers")
     print("OK dual PLAYTEST_SUITE / ZDTD_PLAYTEST_SUITE arming")
+    print("OK unknown/empty suite is a recorded failure, not a green pass")
     print("OK residual client alias vs make playtest-residual split")
     print("OK provider fresh-save / barrier / long-timeout docs")
 

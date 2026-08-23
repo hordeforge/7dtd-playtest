@@ -43,9 +43,23 @@ unchanged.
   `parse_client_log` (shape, determinism, doubling invariants) and hostile
   strings through `write_junit` (well-formedness, round-trip), both offline
   and deterministic under `make test`.
+- README provider section now ships a complete minimal `IScenarioProvider`
+  example, a `CaseCtx` member reference, and the full list of barrier names
+  the stock orchestrator answers.
 
 ### Changed
 
+- Requesting a suite that produces zero cases (typo'd id, uninstalled
+  provider) is now a recorded failure instead of a silent green run: the
+  runner logs `unknown or empty suite: <id>` once, records a
+  `FAIL <id>/(unknown)` row, and an entirely empty queue finishes at arm
+  time with `DONE exit_hint=1`. Hosts exit 1 and see the offending suite by
+  name; previously such runs waited out the join and exited 0.
+- `CaseDef.Live` tags parameter is optional (informational only); act is
+  optional too, so pure-wait observation cases no longer pass `null`
+  positionally. Existing call sites are unaffected.
+- Removed the dead internal `Suites` shim (no callers, invisible outside
+  the assembly).
 - Host Python runs through `uv` only (requires Python >= 3.11).
 - Host Python invocations now pass `--locked` to uv (`make test`, repeat
   wrapper, README): a pyproject/uv.lock mismatch fails the run instead of
