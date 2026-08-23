@@ -70,7 +70,9 @@ def fmt_utc(epoch: float | None) -> str:
 def newest_report(d: Path) -> Path | None:
     if d.is_file():
         return d
-    cands = sorted(d.glob("report-*.json"), key=lambda p: p.stat().st_mtime)
+    # Name as tie-break: equal mtimes must not let readdir order decide
+    # which run's evidence gets diffed.
+    cands = sorted(d.glob("report-*.json"), key=lambda p: (p.stat().st_mtime, p.name))
     return cands[-1] if cands else None
 
 

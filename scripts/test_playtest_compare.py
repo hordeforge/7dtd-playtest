@@ -166,6 +166,37 @@ def test_ran_at_surfaces_in_report(tmp_path):
     assert "| ran (UTC) | " in report_md
 
 
+def test_newest_report_picks_greatest_name_on_mtime_tie(tmp_path):
+    """Equal mtimes must not hand the choice of diffed evidence to readdir
+    order: the lexicographically greatest report name wins."""
+    import json as _json
+    import os
+    import time
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    spec = spec_from_file_location("playtest_compare", TOOL)
+    mod = module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    d = tmp_path / "stock"
+    d.mkdir()
+
+    def write(name: str, passn: int) -> None:
+        p = d / name
+        p.write_text(_json.dumps({
+            "server": "stock", "ran_epoch": None,
+            "summary": {"pass": passn, "fail": 0, "skip": 0},
+            "results": [{"case": "smoke/join", "status": "PASS"}],
+        }), encoding="utf-8")
+
+    write("report-100.json", 1)
+    write("report-200.json", 2)
+    stamp = time.time() - 60
+    for name in ("report-100.json", "report-200.json"):
+        os.utime(d / name, (stamp, stamp))
+    picked = mod.newest_report(d)
+    assert picked is not None and picked.name == "report-200.json"
+
+
 if __name__ == "__main__":
     import pytest
     import sys

@@ -74,31 +74,39 @@ def config_from_args(args: argparse.Namespace) -> SimConfig:
     )
 
 
-def report_failure(
-    result: SimResult, cfg: SimConfig, trace_dir: Path, argv0: str
-) -> Path:
-    """Print the seed, the repro command, and the tail of the event history."""
-    trace_dir.mkdir(parents=True, exist_ok=True)
-    path = trace_dir / f"dst-trace-{result.seed}.jsonl"
-    lines = result.trace_lines
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("", file=sys.stderr)
-    print("=" * 72, file=sys.stderr)
-    print(f"[dst] FAIL seed={result.seed}", file=sys.stderr)
-    print(f"[dst] invariant: {result.violation}", file=sys.stderr)
-    print(
-        f"[dst] replay:    python3 {argv0} --seed {result.seed}"
-        f" --agents {cfg.agents} --sim-seconds {int(cfg.run_seconds)}",
-        file=sys.stderr,
-    )
-    print(f"[dst] trace:     {path} ({len(lines)} events)", file=sys.stderr)
-    print("=" * 72, file=sys.stderr)
-    for line in lines[-25:]:
-        print(f"  {line}", file=sys.stderr)
-    return path
+def replay_flags(cfg: SimConfig) -> str:
+    """Flags that pin every knob ``config_from_args`` can move.
+
+    The seed alone does not determine a run: stale/heartbeat seconds and the
+    fault mode change scheduling and injected faults, so a replay command
+    that omits them can silently reproduce a different run than the one
+    that failed.
+    """
+    flags = [
+        f"--agents {cfg.agents}",
+        f"--sim-seconds {cfg.run_seconds:g}",
+        f"--stale-sec {cfg.stale_sec:g}",
+        f"--heartbeat-sec {cfg.heartbeat_sec:g}",
+    ]
+    faults = cfg.faults
+    if faults == Faults.none():
+        flags.append("--no-faults")
+    elif faults.clock_skew_sec > 0.0 and faults == Faults(
+        clock_skew_sec=faults.clock_skew_sec
+    ):
+        # Only the skew knob moved off the default; --clock-skew rebuilds it.
+        # Any other shape is not expressible on the CLI, so emit nothing
+        # rather than a command that lies about the fault set.
+        flags.append("--clock-skew")
+    return " ".join(flags)
 
 
-def main(argv: list[str] | None = None) -> int:
+def replay_command(seed: int, cfg: SimConfig, argv0: str) -> str:
+    """Command line that reruns this exact simulation."""
+    return f"python3 {argv0} --seed {seed} {replay_flags(cfg)}"
+
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -132,6 +140,32 @@ def main(argv: list[str] | None = None) -> int:
                     help="write a machine-readable summary here")
     ap.add_argument("--quiet", action="store_true",
                     help="only print failures and the final verdict")
+    return ap
+
+
+def report_failure(
+    result: SimResult, cfg: SimConfig, trace_dir: Path, argv0: str
+) -> Path:
+    """Print the seed, the repro command, and the tail of the event history."""
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    path = trace_dir / f"dst-trace-{result.seed}.jsonl"
+    lines = result.trace_lines
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("", file=sys.stderr)
+    print("=" * 72, file=sys.stderr)
+    print(f"[dst] FAIL seed={result.seed}", file=sys.stderr)
+    print(f"[dst] invariant: {result.violation}", file=sys.stderr)
+    print(f"[dst] replay:    {replay_command(result.seed, cfg, argv0)}",
+          file=sys.stderr)
+    print(f"[dst] trace:     {path} ({len(lines)} events)", file=sys.stderr)
+    print("=" * 72, file=sys.stderr)
+    for line in lines[-25:]:
+        print(f"  {line}", file=sys.stderr)
+    return path
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = build_parser()
     args = ap.parse_args(argv)
 
     cfg = config_from_args(args)

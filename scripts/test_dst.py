@@ -195,6 +195,27 @@ def test_regression_seeds_replay() -> None:
     print(f"  {len(seeds)} regression seed(s) replayed")
 
 
+def test_replay_command_pins_the_config() -> None:
+    """The seed does not determine a run alone: stale/heartbeat seconds and
+    the fault mode move scheduling and injected faults. Whatever config a
+    failure ran under, the printed replay command must rebuild it exactly."""
+    for argv in (
+        [],
+        ["--clock-skew"],
+        ["--no-faults"],
+        ["--agents", "5", "--sim-seconds", "600",
+         "--stale-sec", "60", "--heartbeat-sec", "10"],
+        ["--no-faults", "--agents", "7", "--sim-seconds", "120"],
+    ):
+        want = dst_run.config_from_args(dst_run.build_parser().parse_args(argv))
+        cmd = dst_run.replay_command(1234, want, "scripts/dst_run.py")
+        reparsed = dst_run.build_parser().parse_args(cmd.split()[2:])
+        _assert(
+            dst_run.config_from_args(reparsed) == want,
+            f"replay command does not pin the config for argv={argv}: {cmd}",
+        )
+
+
 def test_lock_release_is_no_op_when_not_owner() -> None:
     """The defect the simulator found, pinned as a unit test."""
     import tempfile
@@ -246,6 +267,7 @@ def main() -> int:
         ("simulator_catches_planted_regressions",
          test_simulator_catches_planted_regressions),
         ("regression_seeds_replay", test_regression_seeds_replay),
+        ("replay_command_pins_the_config", test_replay_command_pins_the_config),
         ("release_no_op_when_not_owner", test_lock_release_is_no_op_when_not_owner),
         ("heartbeat_flags_lost_claim", test_heartbeat_loop_flags_a_lost_claim),
     ]
