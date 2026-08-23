@@ -3,13 +3,13 @@ GAME ?= $(HOME)/.local/share/Steam/steamapps/common/7 Days To Die
 MOD_NAME := 7dtd-playtest
 DIST := $(ROOT)/dist/$(MOD_NAME)
 INSTALL_DIR := $(GAME)/Mods/$(MOD_NAME)
-CONNECT_DIR := $(ROOT)/../7dtd-connect
+CONNECT_DIR := $(ROOT)/../7dtd-fastconnect
 SUITE ?= demo
 # Default target is stock dedicated (Navezgane). Override SERVER=zdtd for zig dedi.
 SERVER ?= stock
 WORLD_NAME ?= Navezgane
 GAME_NAME ?= PlaytestNav
-WORLD ?= $(ROOT)/../zdtd/worlds/playtest_auto
+WORLD ?= $(ROOT)/../zdtd-server/worlds/playtest_auto
 # stock ServerPort default 26900; zdtd often 27025
 PORT ?=
 ADMIN_PORT ?= 8081
@@ -75,7 +75,7 @@ install: build
 
 install-pair:
 	@test -d "$(CONNECT_DIR)" || { \
-		echo "7dtd-connect not found at $(CONNECT_DIR)"; \
+		echo "7dtd-fastconnect not found at $(CONNECT_DIR)"; \
 		echo "clone it first (see README: Join/auto-connect), or install playtest only:"; \
 		echo "  make install"; \
 		exit 2; }

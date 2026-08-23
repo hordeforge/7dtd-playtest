@@ -236,7 +236,7 @@ def main() -> int:
         lines.append("- no per-case status differences")
     lines.append("\n*Triage each finding: zdtd bug vs harness artifact vs known "
                  "divergence. Known divergences are recorded in "
-                 "zdtd/docs/PROVENANCE.md (divergence register).*")
+                 "zdtd-server/docs/PROVENANCE.md (divergence register).*")
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "playtest-compare.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

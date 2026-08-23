@@ -1,12 +1,14 @@
 # AGENTS.md - 7dtd-playtest
 
 Stock-client **gameplay automation** against real servers: the **stock
-dedicated** (default target) and **zdtd**. Drive stock APIs and assert
+dedicated** (default target) and **zdtd-server**. Drive stock APIs and assert
 observable state. Prefer missing over fakes.
 
+Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)
+
 Workspace: [`../AGENTS.md`](../AGENTS.md).  
-Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).  
-Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
+Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).  
+Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
 
 ## Owns
 
@@ -16,7 +18,7 @@ Join plumbing: [`../7dtd-connect/`](../7dtd-connect/).
 
 ## Does not own
 
-- IP connect / intro skip (that is **7dtd-connect**)
+- IP connect / intro skip (that is **7dtd-fastconnect**)
 - Server implementation (zdtd)
 - Load volume bots (7dtd-loadgen)
 - Inventing world/chunk/sign/inventory S2C to keep tests green

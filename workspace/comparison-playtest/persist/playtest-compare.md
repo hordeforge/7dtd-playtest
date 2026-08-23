@@ -22,4 +22,4 @@
 - persist_setup/persist_setup_blockmeta: status differs (PASS vs FAIL)
 - persist_setup/persist_setup_te: status differs (PASS vs FAIL)
 
-*Triage each finding: zdtd bug vs harness artifact vs known divergence. Known divergences are recorded in zdtd/docs/PROVENANCE.md (divergence register).*
+*Triage each finding: zdtd bug vs harness artifact vs known divergence. Known divergences are recorded in zdtd-server/docs/PROVENANCE.md (divergence register).*

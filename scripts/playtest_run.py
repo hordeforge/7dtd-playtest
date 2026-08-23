@@ -38,7 +38,7 @@ from playtest_log import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
-CONNECT = WORKSPACE / "7dtd-connect"
+CONNECT = WORKSPACE / "7dtd-fastconnect"
 LOADGEN = WORKSPACE / "7dtd-loadgen"
 DEFAULT_ZDTD = WORKSPACE / "zdtd" / "zig-out" / "bin" / "zdtd"
 DEFAULT_GAME_SRV = (
@@ -488,7 +488,7 @@ def client_mute_enabled() -> bool:
 def mute_client_audio_async() -> None:
     """Poll PipeWire/Pulse for 7DaysToDie sink-input and mute it (default on).
 
-    Prefer 7dtd-connect's mute_client_audio.sh (same helper launch_client uses).
+    Prefer 7dtd-fastconnect's mute_client_audio.sh (same helper launch_client uses).
     Best-effort: missing pactl/jq only logs a warning inside the helper.
     """
     if not client_mute_enabled():
@@ -1815,7 +1815,7 @@ def main(argv: list[str] | None = None) -> int:
                         crumbs = [
                             ln
                             for ln in chunk.splitlines()
-                            if "[7dtd-playtest]" in ln or "[7dtd-connect]" in ln
+                            if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
                         ]
                         if crumbs:
                             log(f"setup progress: {crumbs[-1][-160:]}")
@@ -2031,7 +2031,7 @@ def main(argv: list[str] | None = None) -> int:
                     crumbs = [
                         ln
                         for ln in chunk.splitlines()
-                        if "[7dtd-playtest]" in ln or "[7dtd-connect]" in ln
+                        if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
                     ]
                     if crumbs:
                         log(f"progress: {crumbs[-1][-160:]}")
@@ -2478,7 +2478,7 @@ def main(argv: list[str] | None = None) -> int:
                 cl = args.client_log.read_text(encoding="utf-8", errors="replace")
                 for key in (
                     "7dtd-playtest",
-                    "7dtd-connect",
+                    "7dtd-fastconnect",
                     "InitMod",
                     "Connect",
                     "ERROR",

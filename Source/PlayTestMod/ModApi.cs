@@ -4,7 +4,7 @@ using HarmonyLib;
 namespace ZdtdPlaytest
 {
     /// <summary>
-    /// Client-only automated play suite. Requires 7dtd-connect (or manual join)
+    /// Client-only automated play suite. Requires 7dtd-fastconnect (or manual join)
     /// to enter the game. Does not invent S2C world state.
     /// </summary>
     public class ModApi : IModApi

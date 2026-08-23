@@ -28,4 +28,4 @@
 - combat/sleeper_wake: status differs (FAIL vs PASS)
 - combat/zombie_death_loot: status differs (PASS vs FAIL)
 
-*Triage each finding: zdtd bug vs harness artifact vs known divergence. Known divergences are recorded in zdtd/docs/PROVENANCE.md (divergence register).*
+*Triage each finding: zdtd bug vs harness artifact vs known divergence. Known divergences are recorded in zdtd-server/docs/PROVENANCE.md (divergence register).*

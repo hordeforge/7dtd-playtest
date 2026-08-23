@@ -102,4 +102,4 @@
 - economy/item_drop_entity: status differs (PASS vs FAIL)
 - economy/loot_bag_pickup: status differs (PASS vs FAIL)
 
-*Triage each finding: zdtd bug vs harness artifact vs known divergence. Known divergences are recorded in zdtd/docs/PROVENANCE.md (divergence register).*
+*Triage each finding: zdtd bug vs harness artifact vs known divergence. Known divergences are recorded in zdtd-server/docs/PROVENANCE.md (divergence register).*
