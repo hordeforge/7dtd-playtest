@@ -7,7 +7,7 @@ observable state. Prefer missing over fakes.
 Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)
 
 Workspace: [`../AGENTS.md`](../AGENTS.md).  
-Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).  
+Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server-server/docs/CLIENT_PLAYTEST.md).  
 Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
 
 ## Owns

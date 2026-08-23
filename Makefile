@@ -9,7 +9,7 @@ SUITE ?= demo
 SERVER ?= stock
 WORLD_NAME ?= Navezgane
 GAME_NAME ?= PlaytestNav
-WORLD ?= $(ROOT)/../zdtd-server/worlds/playtest_auto
+WORLD ?= $(ROOT)/../zdtd-server-server/worlds/playtest_auto
 # stock ServerPort default 26900; zdtd often 27025
 PORT ?=
 ADMIN_PORT ?= 8081
