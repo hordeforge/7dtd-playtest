@@ -4,13 +4,17 @@
 The orchestrator's process-driving paths need real game binaries, but some
 helpers are fully offline-testable and destructive enough to deserve their
 own gate. Today: fresh_save (the --fresh-save implementation; a regression
-there either wipes the wrong directories or silently stops wiping) and the
-host-fixture suite gate (a regression there either opens the telnet fixture
-path for telnet-free suites or strands live cases whose barriers the host
-must service).
+there either wipes the wrong directories or silently stops wiping), the
+host-fixture suite gate, and the startup config validators (a bad timeout /
+port env value must fail fast with a named error instead of crashing at
+argparse setup or timing out instantly), plus the config summary redaction.
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
+import io
+import os
 import re
 import subprocess
 import sys
@@ -217,6 +221,129 @@ def test_reap_finished_helpers_drops_only_exited() -> None:
     print("PASS reap_finished_helpers exited helpers reaped, live ones kept")
 
 
+def test_positive_seconds_type_and_env_reader() -> None:
+    """--timeout and PLAYTEST_TIMEOUT_SEC accept only finite seconds > 0; a
+    bad env value exits 2 naming the variable instead of a raw traceback or
+    an instant timeout later."""
+    assert playtest_run.positive_seconds("900") == 900.0
+    assert playtest_run.positive_seconds("0.5") == 0.5
+    for bad in ("abc", "", "0", "-5", "inf", "nan", "1e999"):
+        try:
+            playtest_run.positive_seconds(bad)
+        except argparse.ArgumentTypeError:
+            pass
+        else:
+            raise AssertionError(f"positive_seconds accepted {bad!r}")
+
+    name = "PLAYTEST_TIMEOUT_SEC"
+    old = os.environ.get(name)
+    try:
+        os.environ.pop(name, None)
+        assert playtest_run.seconds_from_env(name, 900.0) == 900.0, (
+            "unset env must fall back to the documented default"
+        )
+        os.environ[name] = "120"
+        assert playtest_run.seconds_from_env(name, 900.0) == 120.0
+        os.environ[name] = "not-a-number"
+        errbuf = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(errbuf):
+                playtest_run.seconds_from_env(name, 900.0)
+        except SystemExit as ex:
+            assert ex.code == 2, f"bad env value must exit 2 (harness error): {ex.code}"
+        else:
+            raise AssertionError("bad env value must exit nonzero")
+        out = errbuf.getvalue()
+        assert name in out and "not-a-number" in out, (
+            f"error must name the variable and the bad value: {out!r}"
+        )
+    finally:
+        if old is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = old
+    print("PASS timeout_validation bad env values fail fast with a named error")
+
+
+def test_tcp_port_type_range() -> None:
+    """--port / --admin-port must be real TCP ports: out-of-range values are
+    config errors at startup, not late server-bind failures."""
+    assert playtest_run.tcp_port("26900") == 26900
+    assert playtest_run.tcp_port("65535") == 65535
+    for bad in ("0", "65536", "-1", "abc", ""):
+        try:
+            playtest_run.tcp_port(bad)
+        except argparse.ArgumentTypeError:
+            pass
+        else:
+            raise AssertionError(f"tcp_port accepted {bad!r}")
+    print("PASS tcp_port_range ports outside 1..65535 rejected at startup")
+
+
+def test_config_summary_redacts_telnet_password() -> None:
+    """The startup config line lists the effective options but never the
+    telnet password value, so run logs stay shareable."""
+    args = argparse.Namespace(
+        server="stock",
+        suite=" smoke ",
+        port=26900,
+        admin_port=8081,
+        timeout=900.0,
+        world_name="Navezgane",
+        world=None,
+        game_name="PlaytestNav",
+        logdir=Path("/tmp/logdir"),
+        fresh_save=True,
+        no_server=False,
+        no_fixtures=False,
+        telnet_password="hunter2-secret",
+        peer_client_name="",
+    )
+    line = playtest_run.config_summary(args)
+    assert "hunter2-secret" not in line, f"password leaked into config line: {line}"
+    assert "telnet_password=set" in line, line
+    assert "suite=smoke" in line and "port=26900" in line and "server=stock" in line, line
+    assert "fresh_save=True" in line, line
+
+    zdtd = argparse.Namespace(**{**vars(args), "server": "zdtd"})
+    assert "world_name" not in playtest_run.config_summary(zdtd), (
+        "stock-only GameName must not masquerade as the zdtd world"
+    )
+    peer = argparse.Namespace(**{**vars(args), "peer_client_name": "atomic-peer"})
+    assert "peer=atomic-peer" in playtest_run.config_summary(peer)
+    print("PASS config_summary_redaction effective options logged, password redacted")
+
+
+def test_write_stock_config_restricts_file_mode() -> None:
+    """The generated serverconfig carries TelnetPassword: it must not inherit
+    a world-readable umask."""
+    src = (
+        "<ServerSettings>\n"
+        '  <property name="TelnetPassword" value="old"/>\n'
+        "</ServerSettings>\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        src_cfg = tdp / "serverconfig.xml"
+        out_cfg = tdp / "out" / "serverconfig_playtest.xml"
+        src_cfg.write_text(src, encoding="utf-8")
+        errbuf = io.StringIO()
+        with contextlib.redirect_stderr(errbuf):
+            playtest_run.write_stock_config(
+                src_cfg,
+                out_cfg,
+                tdp / "userdata",
+                world_name="Navezgane",
+                game_name="PlaytestNav",
+                port=26900,
+                telnet_port=8081,
+                telnet_password="pw",
+            )
+        mode = out_cfg.stat().st_mode & 0o777
+        assert mode == 0o600, f"generated serverconfig mode {oct(mode)}, want 0o600"
+    print("PASS stock_config_permissions generated config is user-only")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -227,6 +354,10 @@ def main() -> int:
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
+        ("timeout_validation", test_positive_seconds_type_and_env_reader),
+        ("tcp_port_range", test_tcp_port_type_range),
+        ("config_summary_redaction", test_config_summary_redacts_telnet_password),
+        ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
     ):
         try:
             fn()

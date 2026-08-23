@@ -105,6 +105,28 @@ Orchestrator exit codes:
 
 Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
 
+### Host orchestrator environment
+
+`scripts/playtest_run.py` reads these environment variables as defaults for
+the matching CLI flags; a flag always overrides its env var. Every run logs
+one effective `config:` line at startup (values only; the telnet password is
+reported as set/unset, never its value), so a misread environment is visible
+in the log without rerunning with `--help`.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `PLAYTEST_SERVER` | `stock` | Server backend, `stock` or `zdtd` (`--server`) |
+| `ZDTD` | `../zdtd/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
+| `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
+| `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |
+| `PLAYTEST_TIMEOUT_SEC` | `900` | Harness wall-clock timeout in seconds > 0 (`--timeout`). Invalid values are a harness error (exit 2) naming the variable |
+| `PLAYTEST_TELNET_PASSWORD` | `retest` | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings) |
+| `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
+
+Invalid numeric values in `PLAYTEST_LOCK_STALE_SEC` /
+`PLAYTEST_LOCK_HEARTBEAT_SEC` fall back to their defaults (120 / 30) with a
+warning on stderr instead of silently changing lock takeover timing.
+
 ### Client audio mute (default on)
 
 Automated client launches **mute the game process at the OS audio layer by

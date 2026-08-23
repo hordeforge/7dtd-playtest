@@ -68,6 +68,71 @@ def mod_version() -> str:
     m = re.search(r'<Version value="([^"]+)"', text)
     return m.group(1) if m else "unknown"
 
+def positive_seconds(text: str) -> float:
+    """argparse type: a finite number of seconds > 0 (--timeout, env reader)."""
+    try:
+        val = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}")
+    if not math.isfinite(val) or val <= 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number of seconds > 0, got {text!r}"
+        )
+    return val
+
+
+def seconds_from_env(name: str, default: float) -> float:
+    """Read a positive-seconds env var; harness error (exit 2) when invalid.
+
+    A typo'd value must fail fast with the variable named, not surface later
+    as an instant "timeout after 0s" or a bare float() traceback.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return positive_seconds(raw)
+    except argparse.ArgumentTypeError as ex:
+        err(f"invalid {name}: {ex}")
+        raise SystemExit(2) from None
+
+
+def tcp_port(text: str) -> int:
+    """argparse type: TCP port 1..65535 (--port, --admin-port)."""
+    try:
+        val = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a port number: {text!r}")
+    if not 1 <= val <= 65535:
+        raise argparse.ArgumentTypeError(f"port out of range 1..65535: {val}")
+    return val
+
+
+def config_summary(args: argparse.Namespace) -> str:
+    """Effective top-level options as one startup log line.
+
+    The telnet password appears only as set/unset so run logs stay shareable;
+    everything here is already visible in --help or the generated paths.
+    """
+    parts = [
+        f"server={args.server}",
+        f"suite={args.suite.strip()}",
+        f"port={args.port}",
+        f"admin_port={args.admin_port}",
+        f"timeout_sec={args.timeout:g}",
+        f"world={args.world_name if args.server == 'stock' else args.world}",
+        f"game_name={args.game_name}",
+        f"logdir={args.logdir}",
+        f"fresh_save={bool(args.fresh_save)}",
+        f"no_server={bool(args.no_server)}",
+        f"fixtures={not args.no_fixtures}",
+        f"telnet_password={'set' if args.telnet_password else 'unset'}",
+    ]
+    if args.peer_client_name:
+        parts.append(f"peer={args.peer_client_name}")
+    return " ".join(parts)
+
+
 def log(msg: str) -> None:
     print(f"[playtest-orch] {msg}", flush=True)
 
@@ -213,6 +278,12 @@ def write_stock_config(
         )
     out_cfg.parent.mkdir(parents=True, exist_ok=True)
     out_cfg.write_text(text, encoding="utf-8")
+    # The generated config carries TelnetPassword; keep it user-only instead
+    # of inheriting a world-readable umask.
+    try:
+        os.chmod(out_cfg, 0o600)
+    except OSError as ex:
+        warn(f"could not restrict serverconfig permissions to 0600: {ex}")
 
 
 def start_stock_dedicated(
@@ -1049,7 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
         "--server",
         choices=("stock", "zdtd"),
         default=os.environ.get("PLAYTEST_SERVER", "stock"),
-        help="server backend (default: stock dedicated)",
+        help="server backend (env PLAYTEST_SERVER; default stock dedicated)",
     )
     ap.add_argument(
         "--suite",
@@ -1074,11 +1145,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--port",
-        type=int,
+        type=tcp_port,
         default=None,
         help="ServerPort / connect-to-IP port (stock default 26900, zdtd 27025)",
     )
-    ap.add_argument("--admin-port", type=int, default=8081, help="telnet/admin port")
+    ap.add_argument(
+        "--admin-port", type=tcp_port, default=8081, help="telnet/admin port"
+    )
     ap.add_argument(
         "--zdtd",
         type=Path,
@@ -1099,9 +1172,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--timeout",
-        type=float,
-        default=float(os.environ.get("PLAYTEST_TIMEOUT_SEC", "900")),
-        help="harness wall-clock timeout in seconds (env PLAYTEST_TIMEOUT_SEC)",
+        type=positive_seconds,
+        default=None,
+        help="harness wall-clock timeout in seconds > 0 (env PLAYTEST_TIMEOUT_SEC)",
     )
     ap.add_argument(
         "--rejoin-setup-suite",
@@ -1149,7 +1222,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--peer-client-name",
         default=os.environ.get("PLAYTEST_PEER_CLIENT_NAME", ""),
-        help="optional distinct Local-platform name for one passive stock peer",
+        help="optional distinct Local-platform name for one passive stock peer"
+        " (env PLAYTEST_PEER_CLIENT_NAME)",
     )
     ap.add_argument(
         "--peer-client-compat",
@@ -1159,7 +1233,8 @@ def main(argv: list[str] | None = None) -> int:
             if os.environ.get("PLAYTEST_PEER_CLIENT_COMPAT")
             else None
         ),
-        help="separate initialized Proton compat profile for --peer-client-name",
+        help="separate initialized Proton compat profile for --peer-client-name"
+        " (env PLAYTEST_PEER_CLIENT_COMPAT)",
     )
     ap.add_argument(
         "--peer-client-log",
@@ -1170,7 +1245,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--peer-client-suite",
         default=os.environ.get("PLAYTEST_PEER_CLIENT_SUITE", ""),
-        help="optional suite for the stock peer; empty leaves it passive",
+        help="optional suite for the stock peer; empty leaves it passive"
+        " (env PLAYTEST_PEER_CLIENT_SUITE)",
     )
     ap.add_argument(
         "--peer-client-teleport",
@@ -1183,7 +1259,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--telnet-password",
         default=os.environ.get("PLAYTEST_TELNET_PASSWORD", "retest"),
-        help="stock dedicated telnet password",
+        help="stock dedicated telnet password (env PLAYTEST_TELNET_PASSWORD)",
     )
     ap.add_argument(
         "--no-fixtures",
@@ -1239,6 +1315,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.port is None:
         args.port = 27025 if args.server == "zdtd" else 26900
+    if args.timeout is None:
+        args.timeout = seconds_from_env("PLAYTEST_TIMEOUT_SEC", 900.0)
+
+    # One effective-config line at startup (password redacted) so a misread
+    # env var or stale shell default is visible in every log without --help.
+    log("config: " + config_summary(args))
 
     report_path = args.logdir / f"report-{int(time.time())}.json"
     server_log = args.logdir / "server-orch.log"

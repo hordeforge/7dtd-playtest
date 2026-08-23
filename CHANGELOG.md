@@ -46,6 +46,13 @@ unchanged.
 - README provider section now ships a complete minimal `IScenarioProvider`
   example, a `CaseCtx` member reference, and the full list of barrier names
   the stock orchestrator answers.
+- The orchestrator logs one effective `config:` line at startup (options
+  only; the telnet password appears as set/unset, never its value), so a
+  misread environment is visible without rerunning with `--help`.
+- README now documents every host orchestrator environment variable
+  (`PLAYTEST_SERVER`, `ZDTD`, `RE_DEDICATED_USERDATA`, `LOGDIR`,
+  `PLAYTEST_TIMEOUT_SEC`, peer-client defaults) with defaults and the
+  flag-overrides-env precedence.
 
 ### Changed
 
@@ -119,6 +126,16 @@ unchanged.
 - Provider rejoin with `SERVER=zdtd` now restarts the zdtd server between
   setup save and verify instead of leaving the verify client facing a dead
   server.
+- `PLAYTEST_TIMEOUT_SEC` with a non-numeric value no longer crashes the
+  orchestrator with a bare `float()` traceback at startup: it is a harness
+  error (exit 2) naming the variable. Zero/negative/inf values and out-of-range
+  `--port` / `--admin-port` are rejected the same way instead of producing an
+  instant timeout or a late server-bind failure.
+- `PLAYTEST_LOCK_STALE_SEC` / `PLAYTEST_LOCK_HEARTBEAT_SEC` set to an
+  unparseable value now warn on stderr instead of silently falling back to
+  the defaults (the fallback itself is unchanged).
+- The generated stock serverconfig (`TelnetPassword` inside) is written with
+  user-only permissions (0600) instead of inheriting a world-readable umask.
 
 ## [0.7.1] - 2026-08-22
 

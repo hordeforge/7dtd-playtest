@@ -29,6 +29,7 @@ import fcntl
 import os
 import re
 import secrets
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -187,13 +188,21 @@ def default_lock_path() -> Path:
     return Path.home() / DEFAULT_LOCK_REL
 
 
+def _warn_invalid_env(name: str, raw: str, fallback: float) -> None:
+    """A set-but-unparseable override must not silently change behaviour."""
+    print(
+        f"playtest-lock warn: invalid {name}={raw!r}; using default {fallback:g}s",
+        file=sys.stderr,
+    )
+
+
 def _stale_sec_from_environ() -> float:
     raw = os.environ.get("PLAYTEST_LOCK_STALE_SEC", "").strip()
     if raw:
         try:
             return max(1.0, float(raw))
         except ValueError:
-            pass
+            _warn_invalid_env("PLAYTEST_LOCK_STALE_SEC", raw, DEFAULT_STALE_SEC)
     return float(DEFAULT_STALE_SEC)
 
 
@@ -203,7 +212,9 @@ def _heartbeat_interval_from_environ() -> float:
         try:
             return max(1.0, float(raw))
         except ValueError:
-            pass
+            _warn_invalid_env(
+                "PLAYTEST_LOCK_HEARTBEAT_SEC", raw, DEFAULT_HEARTBEAT_INTERVAL_SEC
+            )
     return float(DEFAULT_HEARTBEAT_INTERVAL_SEC)
 
 
