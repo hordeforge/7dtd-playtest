@@ -82,34 +82,41 @@ def report_failure(
     path = trace_dir / f"dst-trace-{result.seed}.jsonl"
     lines = result.trace_lines
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("")
-    print("=" * 72)
-    print(f"[dst] FAIL seed={result.seed}")
-    print(f"[dst] invariant: {result.violation}")
+    print("", file=sys.stderr)
+    print("=" * 72, file=sys.stderr)
+    print(f"[dst] FAIL seed={result.seed}", file=sys.stderr)
+    print(f"[dst] invariant: {result.violation}", file=sys.stderr)
     print(
         f"[dst] replay:    python3 {argv0} --seed {result.seed}"
-        f" --agents {cfg.agents} --sim-seconds {int(cfg.run_seconds)}"
+        f" --agents {cfg.agents} --sim-seconds {int(cfg.run_seconds)}",
+        file=sys.stderr,
     )
-    print(f"[dst] trace:     {path} ({len(lines)} events)")
-    print("=" * 72)
+    print(f"[dst] trace:     {path} ({len(lines)} events)", file=sys.stderr)
+    print("=" * 72, file=sys.stderr)
     for line in lines[-25:]:
-        print(f"  {line}")
+        print(f"  {line}", file=sys.stderr)
     return path
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="deterministic simulation runner")
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--seed", type=int, default=None,
                     help="run exactly this seed (default: random start seed)")
     ap.add_argument("--iterations", type=int, default=50,
                     help="how many consecutive seeds to run (default 50)")
     ap.add_argument("--soak", type=float, default=0.0,
                     help="keep running new seeds for this many wall seconds")
-    ap.add_argument("--agents", type=int, default=3)
+    ap.add_argument("--agents", type=int, default=3,
+                    help="simulated lock contenders per run (default 3)")
     ap.add_argument("--sim-seconds", type=float, default=3600.0,
                     help="simulated seconds per run (virtual: costs no wall time)")
-    ap.add_argument("--stale-sec", type=float, default=120.0)
-    ap.add_argument("--heartbeat-sec", type=float, default=30.0)
+    ap.add_argument("--stale-sec", type=float, default=120.0,
+                    help="simulated heartbeat age after which a lock is stale")
+    ap.add_argument("--heartbeat-sec", type=float, default=30.0,
+                    help="simulated heartbeat interval")
     ap.add_argument("--no-faults", action="store_true",
                     help="disable fault injection (happy path only)")
     ap.add_argument("--clock-skew", action="store_true",
@@ -119,10 +126,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--record", action="store_true",
                     help="append a failing seed to the regression list")
     ap.add_argument("--trace-dir", type=Path,
-                    default=Path(os.environ.get("DST_TRACE_DIR", str(DEFAULT_TRACE_DIR))))
+                    default=Path(os.environ.get("DST_TRACE_DIR", str(DEFAULT_TRACE_DIR))),
+                    help="where failure traces are dumped (env DST_TRACE_DIR)")
     ap.add_argument("--json", type=Path, default=None,
                     help="write a machine-readable summary here")
-    ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--quiet", action="store_true",
+                    help="only print failures and the final verdict")
     args = ap.parse_args(argv)
 
     cfg = config_from_args(args)

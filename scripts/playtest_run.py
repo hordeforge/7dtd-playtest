@@ -54,8 +54,28 @@ def client_log_for_compat(compat: Path) -> Path:
         / "output_log_client_7dtd_connect.txt"
     )
 
+
+def mod_version() -> str:
+    """Version declared by ModInfo.xml (single source of truth), "unknown" if absent."""
+    try:
+        text = (ROOT / "ModInfo.xml").read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    m = re.search(r'<Version value="([^"]+)"', text)
+    return m.group(1) if m else "unknown"
+
 def log(msg: str) -> None:
     print(f"[playtest-orch] {msg}", flush=True)
+
+
+def warn(msg: str) -> None:
+    """Recoverable problem: diagnostics belong on stderr, progress stays on stdout."""
+    print(f"[playtest-orch] warn: {msg}", file=sys.stderr, flush=True)
+
+
+def err(msg: str) -> None:
+    """Terminal harness error (nonzero exit follows)."""
+    print(f"[playtest-orch] {msg}", file=sys.stderr, flush=True)
 
 
 def pkill_patterns(patterns: list[str], sig: str = "-9") -> None:
@@ -353,7 +373,7 @@ def mute_client_audio_async() -> None:
         os.environ.get("SEVEN_DAYS_TO_DIE_CLIENT_MUTE_TIMEOUT", "60"),
     )
     if not helper.is_file():
-        log(f"client mute: helper missing ({helper}); skip")
+        warn(f"client mute: helper missing ({helper}); skip")
         return
     log(f"client mute: on (opt-out CLIENT_MUTE=0); polling up to {wait_s}s")
     try:
@@ -365,7 +385,7 @@ def mute_client_audio_async() -> None:
         )
         _MUTE_HELPER_PROCS.append(proc)
     except OSError as ex:
-        log(f"client mute: failed to start helper: {ex}")
+        warn(f"client mute: failed to start helper: {ex}")
 
 
 def start_client(
@@ -425,7 +445,7 @@ def ensure_loadgen_built() -> Path | None:
         return exe
     proj = LOADGEN / "src" / "LoadGen" / "LoadGen.csproj"
     if not proj.is_file():
-        log(f"loadgen project missing: {proj}")
+        warn(f"loadgen project missing: {proj}")
         return None
     log("building loadgen…")
     r = subprocess.run(
@@ -437,7 +457,7 @@ def ensure_loadgen_built() -> Path | None:
         errors="replace",
     )
     if r.returncode != 0:
-        log(f"loadgen build failed: {r.stderr[-400:]}")
+        warn(f"loadgen build failed: {r.stderr[-400:]}")
         return None
     return exe if exe.is_file() else None
 
@@ -494,7 +514,7 @@ def write_zdtd_apm_dump(
 ) -> bool:
     """Run short offline zdtd --ticks for APM text snapshot (docs/APM.md)."""
     if not zdtd.is_file():
-        log(f"apm dump: missing zdtd {zdtd}")
+        warn(f"apm dump: missing zdtd {zdtd}")
         return False
     map_dir = game_srv / "Data" / "Worlds" / "Navezgane"
     cmd = [
@@ -522,13 +542,13 @@ def write_zdtd_apm_dump(
             timeout=120,
         )
     except (OSError, subprocess.TimeoutExpired) as ex:
-        log(f"apm dump fail: {ex}")
+        warn(f"apm dump fail: {ex}")
         return False
     out = (r.stdout or "") + (r.stderr or "")
     # Fail closed: do not invent markers. Client would soft-pass a synthetic dump.
     has_marker = "zdtd-apm" in out or "wall_ns" in out or "tick_total" in out
     if not has_marker or not out.strip():
-        log(f"apm dump: no live markers in output (len={len(out)} rc={r.returncode})")
+        warn(f"apm dump: no live markers in output (len={len(out)} rc={r.returncode})")
         dump_path.parent.mkdir(parents=True, exist_ok=True)
         dump_path.write_text(
             "APM_DUMP_FAILED no markers from zdtd --ticks\n",
@@ -578,7 +598,7 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
         try:
             proc.wait(timeout=_STOP_KILL_WAIT_SEC)
         except subprocess.TimeoutExpired:
-            log(f"warn: stop_proc: pid {proc.pid} not reaped after SIGKILL")
+            warn(f"stop_proc: pid {proc.pid} not reaped after SIGKILL")
     fh = getattr(proc, "_log_fh", None)
     if fh:
         try:
@@ -664,7 +684,7 @@ class TelnetAdmin:
             log(f"telnet connected {self.host}:{self.port} banner={banner[:60]!r}")
             return True
         except OSError as ex:
-            log(f"telnet connect fail: {ex}")
+            warn(f"telnet connect fail: {ex}")
             self.close()
             return False
 
@@ -676,7 +696,7 @@ class TelnetAdmin:
             # zdtd admin is polled on the 20 Hz tick; allow a few frames.
             return self._recv(1.2)
         except OSError as ex:
-            log(f"telnet exec fail: {ex}")
+            warn(f"telnet exec fail: {ex}")
             return ""
 
     def clear_ai(self) -> None:
@@ -779,7 +799,7 @@ class TelnetAdmin:
         """Teleport every listed player to world coords. Returns how many cmds ran."""
         ids = self.list_player_ids()
         if not ids:
-            log(f"telnet teleport: no players from listplayers")
+            warn("telnet teleport: no players from listplayers")
             return 0
         n = 0
         for pid in ids:
@@ -877,7 +897,7 @@ def install_signal_handlers() -> None:
             signal.signal(sig, _exit_fast)
         except (ValueError, OSError) as ex:
             # ValueError: main() driven from a non-main thread; keep running.
-            log(f"warn: cannot install {name} handler: {ex}")
+            warn(f"cannot install {name} handler: {ex}")
 
 
 def fresh_save(userdata: Path, game_name: str) -> None:
@@ -944,7 +964,22 @@ def suite_wants_host_fixtures(suite: str) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="stock-client playtest orchestrator")
+    ap = argparse.ArgumentParser(
+        description="stock-client playtest orchestrator",
+        epilog=(
+            "examples:\n"
+            "  playtest_run.py --suite smoke\n"
+            "  playtest_run.py --server zdtd --port 27025\n"
+            "  playtest_run.py --no-server --skip-clean\n"
+            "exit codes: 0 all cases pass, 1 case failures, 2 harness error\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument(
+        "--version",
+        action="version",
+        version=f"playtest_run.py {mod_version()}",
+    )
     ap.add_argument(
         "--server",
         choices=("stock", "zdtd"),
@@ -980,18 +1015,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--admin-port", type=int, default=8081, help="telnet/admin port")
     ap.add_argument(
-        "--zdtd", type=Path, default=Path(os.environ.get("ZDTD", str(DEFAULT_ZDTD)))
+        "--zdtd",
+        type=Path,
+        default=Path(os.environ.get("ZDTD", str(DEFAULT_ZDTD))),
+        help="zdtd server binary (env ZDTD)",
     )
-    ap.add_argument("--game-srv", type=Path, default=DEFAULT_GAME_SRV)
+    ap.add_argument(
+        "--game-srv",
+        type=Path,
+        default=DEFAULT_GAME_SRV,
+        help="stock dedicated server install dir",
+    )
     ap.add_argument(
         "--userdata",
         type=Path,
         default=Path(os.environ.get("RE_DEDICATED_USERDATA", str(DEFAULT_USERDATA))),
+        help="stock dedicated userdata dir (env RE_DEDICATED_USERDATA)",
     )
     ap.add_argument(
         "--timeout",
         type=float,
         default=float(os.environ.get("PLAYTEST_TIMEOUT_SEC", "900")),
+        help="harness wall-clock timeout in seconds (env PLAYTEST_TIMEOUT_SEC)",
     )
     ap.add_argument(
         "--rejoin-setup-suite",
@@ -1017,15 +1062,25 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(
             os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest"))
         ),
+        help="report/server log dir (env LOGDIR)",
     )
-    ap.add_argument("--skip-clean", action="store_true")
+    ap.add_argument(
+        "--skip-clean",
+        action="store_true",
+        help="do not pkill leftover game processes before start",
+    )
     ap.add_argument(
         "--kill-wine", action="store_true", help="also kill wineserver (disrupts Steam)"
     )
     ap.add_argument(
         "--no-server", action="store_true", help="use already-running server"
     )
-    ap.add_argument("--client-log", type=Path, default=CLIENT_LOG)
+    ap.add_argument(
+        "--client-log",
+        type=Path,
+        default=CLIENT_LOG,
+        help="client output log to parse for results",
+    )
     ap.add_argument(
         "--peer-client-name",
         default=os.environ.get("PLAYTEST_PEER_CLIENT_NAME", ""),
@@ -1130,17 +1185,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.server == "zdtd" and not args.no_server and not args.zdtd.is_file():
-        log(f"missing zdtd binary: {args.zdtd}")
+        err(f"missing zdtd binary: {args.zdtd}")
         return 2
     if args.server == "stock" and not args.no_server:
         if not (args.game_srv / "7DaysToDieServer.x86_64").is_file():
-            log(f"missing stock dedicated under {args.game_srv}")
+            err(f"missing stock dedicated under {args.game_srv}")
             return 2
     if not (CONNECT / "scripts" / "launch_client.sh").is_file():
-        log(f"missing connect launcher under {CONNECT}")
+        err(f"missing connect launcher under {CONNECT}")
         return 2
     if peer_client_name and not args.peer_client_compat.is_dir():
-        log(f"peer compat profile is missing or not a directory: {args.peer_client_compat}")
+        err(f"peer compat profile is missing or not a directory: {args.peer_client_compat}")
         return 2
 
     server_proc = None
@@ -1165,11 +1220,11 @@ def main(argv: list[str] | None = None) -> int:
             playtest_lock.acquire(lock_session, path=lock_path)
         except playtest_lock.PlaytestLockError as ex:
             holder = ex.held_by or "unknown"
-            log(
+            err(
                 f"refusing start: {ex} "
                 f"(held_by={holder} reason={ex.reason} file={lock_path})"
             )
-            log(
+            err(
                 "see AGENTS.md — Playtest / live-client exclusivity; "
                 "set PLAYTEST_LOCK_FILE / PLAYTEST_SESSION_ID to coordinate"
             )
@@ -1182,7 +1237,7 @@ def main(argv: list[str] | None = None) -> int:
         lock_heartbeat = playtest_lock.HeartbeatThread(
             lock_session,
             path=lock_path,
-            on_error=lambda ex: log(f"warn: lock heartbeat: {ex}"),
+            on_error=lambda ex: warn(f"lock heartbeat: {ex}"),
         )
         lock_heartbeat.start()
 
@@ -1198,7 +1253,7 @@ def main(argv: list[str] | None = None) -> int:
                 if playtest_lock.tcp_port_in_use(p)
             ]
             if busy:
-                log(
+                err(
                     f"refusing start: TCP port(s) still in use after clean: {busy} "
                     f"(another dedicated/zdtd or leftover process). "
                     f"Stop it or pick different --port/--admin-port."
@@ -1219,7 +1274,7 @@ def main(argv: list[str] | None = None) -> int:
                                 p.unlink()
                                 log(f"fresh-save removed {p}")
                             except OSError as ex:
-                                log(f"fresh-save warn {p}: {ex}")
+                                warn(f"fresh-save: could not remove {p}: {ex}")
                     # Drop chunk overlays so dig/place start from map baseline.
                     for ch in wpath.glob("c_*.zch*"):
                         try:
@@ -1232,13 +1287,13 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 args.client_log.write_text("", encoding="utf-8")
             except OSError as ex:
-                log(f"warn: could not truncate client log: {ex}")
+                warn(f"could not truncate client log: {ex}")
         if peer_client_log is not None:
             try:
                 peer_client_log.parent.mkdir(parents=True, exist_ok=True)
                 peer_client_log.write_text("", encoding="utf-8")
             except OSError as ex:
-                log(f"warn: could not truncate peer client log: {ex}")
+                warn(f"could not truncate peer client log: {ex}")
 
         # Telnet/admin surface, needed by start_stock_dedicated (config password)
         # and every barrier handler below. Assigned once, before first use.
@@ -1262,11 +1317,11 @@ def main(argv: list[str] | None = None) -> int:
                 # Navezgane load: up to ~10 min cold
                 if not wait_file_contains(ready_log, "StartGame done", timeout=600):
                     if server_proc.poll() is not None:
-                        log(
+                        err(
                             f"stock dedicated exited early code={server_proc.returncode}"
                         )
                         if ready_log.is_file():
-                            log(
+                            err(
                                 "tail server log:\n"
                                 + "\n".join(
                                     ready_log.read_text(encoding="utf-8", errors="replace").splitlines()[
@@ -1275,7 +1330,7 @@ def main(argv: list[str] | None = None) -> int:
                                 )
                             )
                         return 2
-                    log("warn: no StartGame done yet; server still running, proceeding")
+                    warn("no StartGame done yet; server still running, proceeding")
                 else:
                     log("stock dedicated ready (StartGame done)")
             else:
@@ -1291,7 +1346,7 @@ def main(argv: list[str] | None = None) -> int:
                     if server_proc.poll() is not None:
                         log(f"zdtd exited early code={server_proc.returncode}")
                         return 2
-                    log("warn: no tick=20Hz; proceeding")
+                    warn("no tick=20Hz; proceeding")
                 else:
                     log("zdtd ready (tick=20Hz)")
 
@@ -1475,7 +1530,7 @@ def main(argv: list[str] | None = None) -> int:
                                 tn.close()
                                 barrier_counts["rejoin_setup_done"] = hits
                         else:
-                            log(f"warn: {rejoin_setup_barrier}: telnet connect fail; retry")
+                            warn(f"{rejoin_setup_barrier}: telnet connect fail; retry")
                     setup_parsed = parse_client_log(text)
                     if setup_parsed.get("done") is not None:
                         log(
@@ -1545,7 +1600,7 @@ def main(argv: list[str] | None = None) -> int:
                     },
                 )
                 write_junit(junit_path, args.suite, results, summary)
-                log(f"FAIL harness: {rejoin_label} setup incomplete")
+                err(f"FAIL harness: {rejoin_label} setup incomplete")
                 return 2
 
             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
@@ -1601,7 +1656,7 @@ def main(argv: list[str] | None = None) -> int:
                 if wait_file_contains(ready_log, "StartGame done", timeout=600):
                     log("stock dedicated ready after rejoin restart")
                 else:
-                    log("warn: no StartGame done after rejoin restart; proceeding")
+                    warn("no StartGame done after rejoin restart; proceeding")
             elif args.server == "zdtd" and not args.no_server:
                 server_proc = start_zdtd(
                     args.zdtd,
@@ -1614,7 +1669,7 @@ def main(argv: list[str] | None = None) -> int:
                 if wait_file_contains(server_log, "tick=20Hz", timeout=60):
                     log("zdtd ready after rejoin restart (tick=20Hz)")
                 else:
-                    log("warn: no tick=20Hz after rejoin restart; proceeding")
+                    warn("no tick=20Hz after rejoin restart; proceeding")
             if args.client_log.is_file():
                 try:
                     args.client_log.write_text("", encoding="utf-8")
@@ -1688,7 +1743,7 @@ def main(argv: list[str] | None = None) -> int:
                         x, y, z = args.rejoin_teleport
                         log(f"provider rejoin teleport complete → {x:g} {y:g} {z:g}")
                     else:
-                        log("warn: provider rejoin teleport: no joined player yet; retry")
+                        warn("provider rejoin teleport: no joined player yet; retry")
 
                 if want_fixtures:
                     # spawn_zombie (may fire more than once: combat + sleeper_wake)
@@ -1836,7 +1891,7 @@ def main(argv: list[str] | None = None) -> int:
                         log_path=args.logdir / "loadgen_peer.log",
                     )
                     if loadgen_proc is None:
-                        log("warn: loadgen peer start failed; will retry next poll")
+                        warn("loadgen peer start failed; will retry next poll")
                         break
                     barrier_counts["spawn_loadgen_peer"] += 1
 
@@ -1850,7 +1905,7 @@ def main(argv: list[str] | None = None) -> int:
                         log_path=args.logdir / "loadgen_bots.log",
                     )
                     if loadgen_proc is None:
-                        log("warn: loadgen bots start failed; will retry next poll")
+                        warn("loadgen bots start failed; will retry next poll")
                         break
                     barrier_counts["spawn_loadgen_bots"] += 1
 
@@ -1863,7 +1918,7 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     if not tn.connect():
-                        log(f"warn: chat_echo:{token} telnet connect fail; retry")
+                        warn(f"chat_echo:{token} telnet connect fail; retry")
                         continue
                     for cmd in (f"say {token}", f'say "{token}"'):
                         r = tn.exec(cmd)
@@ -1896,7 +1951,7 @@ def main(argv: list[str] | None = None) -> int:
                                 log(f"telnet spawn vehicle {cls} near players units~={n}")
                             tn.close()
                         else:
-                            log(f"warn: spawn_vehicle:{cls} telnet connect fail; retry")
+                            warn(f"spawn_vehicle:{cls} telnet connect fail; retry")
                             break
                         vehicle_spawns_fired[cls] = vehicle_spawns_fired.get(cls, 0) + 1
 
@@ -1907,12 +1962,12 @@ def main(argv: list[str] | None = None) -> int:
                     if tn.connect():
                         n = tn.teleport_players_to(520, 62, 950)
                         if n == 0:
-                            log("warn: teleport_persist_pad: no player ids yet; retry")
+                            warn("teleport_persist_pad: no player ids yet; retry")
                             tn.close()
                             break
                         tn.close()
                     else:
-                        log("warn: teleport_persist_pad: telnet connect fail; retry")
+                        warn("teleport_persist_pad: telnet connect fail; retry")
                         break
                     barrier_counts["teleport_persist_pad"] += 1
 
@@ -1927,7 +1982,7 @@ def main(argv: list[str] | None = None) -> int:
                         run_id=apm_run_id,
                     )
                     if not ok:
-                        log("warn: apm dump write failed; retry next poll")
+                        warn("apm dump write failed; retry next poll")
                         break
                     barrier_counts["apm_dump"] += 1
 
@@ -1969,7 +2024,7 @@ def main(argv: list[str] | None = None) -> int:
                     x, y, z = args.peer_client_teleport
                     log(f"stock peer teleport complete players={moved} → {x:g} {y:g} {z:g}")
                 else:
-                    log("warn: stock peer teleport: waiting for both joined players")
+                    warn("stock peer teleport: waiting for both joined players")
 
             if client_proc is not None and client_proc.poll() is not None:
                 time.sleep(2)
@@ -2061,7 +2116,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"
-            log(f"FAIL harness: no DONE from {missing} playtest mod")
+            err(f"FAIL harness: no DONE from {missing} playtest mod")
             if summary:
                 log(f"partial summary={summary}")
             for r in results:
@@ -2080,7 +2135,7 @@ def main(argv: list[str] | None = None) -> int:
                 ):
                     hits = [ln for ln in cl.splitlines() if key in ln]
                     if hits:
-                        log(f"client log '{key}' ({len(hits)}): {hits[-3:]}")
+                        err(f"client log '{key}' ({len(hits)}): {hits[-3:]}")
             exit_code = 2
         else:
             if summary:
@@ -2144,9 +2199,9 @@ def main(argv: list[str] | None = None) -> int:
                 playtest_lock.release(lock_session, path=lock_path)
                 log(f"playtest lock released session={lock_session}")
             except playtest_lock.PlaytestLockError as ex:
-                log(f"warn: playtest lock release refused: {ex}")
+                warn(f"playtest lock release refused: {ex}")
             except OSError as ex:
-                log(f"warn: playtest lock release failed: {ex}")
+                warn(f"playtest lock release failed: {ex}")
 
 
 if __name__ == "__main__":

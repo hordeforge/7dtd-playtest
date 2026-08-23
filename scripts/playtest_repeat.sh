@@ -23,15 +23,26 @@ ORCH_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --laps) LAPS="$2"; shift 2 ;;
-    --suite) SUITE="$2"; shift 2 ;;
-    --logdir) REPORT_DIR="$2"; shift 2 ;;
+    --laps|--suite|--logdir)
+      [[ $# -ge 2 ]] || { echo "playtest_repeat: $1 requires a value" >&2; exit 2; }
+      case "$1" in
+        --laps) LAPS="$2" ;;
+        --suite) SUITE="$2" ;;
+        --logdir) REPORT_DIR="$2" ;;
+      esac
+      shift 2
+      ;;
     *) ORCH_ARGS+=("$1"); shift ;;
   esac
 done
 
 if [[ ! -x "$ORCH" ]]; then
   echo "playtest_repeat: orchestrator not found at $ORCH" >&2
+  exit 2
+fi
+
+if [[ ! "$LAPS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "playtest_repeat: laps must be a positive integer, got '$LAPS' (--laps N or PLAYTEST_LAPS)" >&2
   exit 2
 fi
 
@@ -66,7 +77,7 @@ print(int(s.get("pass", 0)), int(s.get("fail", 0)), int(s.get("skip", 0)))
 for lap in $(seq 1 "$LAPS"); do
   echo "=== lap $lap/$LAPS ==="
   if ! uv run --locked --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
-    echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)"
+    echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)" >&2
     continue
   fi
   latest="$(latest_report)"

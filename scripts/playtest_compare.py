@@ -75,12 +75,20 @@ def newest_report(d: Path) -> Path | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--stock", type=Path, default=None)
-    ap.add_argument("--zdtd", type=Path, default=None)
-    ap.add_argument("--stock-dir", type=Path, default=None)
-    ap.add_argument("--zdtd-dir", type=Path, default=None)
-    ap.add_argument("--out", type=Path, default=Path("."))
+    ap = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--stock", type=Path, default=None,
+                    help="stock side input: report JSON or client log file")
+    ap.add_argument("--zdtd", type=Path, default=None,
+                    help="zdtd side input: report JSON or client log file")
+    ap.add_argument("--stock-dir", type=Path, default=None,
+                    help="diff the newest report-*.json under this stock dir")
+    ap.add_argument("--zdtd-dir", type=Path, default=None,
+                    help="diff the newest report-*.json under this zdtd dir")
+    ap.add_argument("--out", type=Path, default=Path("."),
+                    help="directory for playtest-compare.{md,json} (default .)")
     ap.add_argument("--require-fresh-minutes", type=int, default=0,
                     help="refuse to diff a side whose run is older than this "
                          "many minutes (0 disables the check)")
