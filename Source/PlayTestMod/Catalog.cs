@@ -2245,7 +2245,7 @@ namespace ZdtdPlaytest
                 var b = ctx.World.GetBlock(ctx.TargetBlock);
                 string cd;
                 int claims = Helpers.CountLocalLandClaims(out cd);
-                bool blockOk = b.type != 0 && (ctx.WasBlockType == 0 || b.type == ctx.WasBlockType || b.type != 0);
+                bool blockOk = b.type != 0;
                 bool claimOk = claims > ctx.IntA && ctx.IntA >= 0;
                 // Re-seed once if still air.
                 if (b.type == 0 && elapsed > 2f && elapsed < 3f)

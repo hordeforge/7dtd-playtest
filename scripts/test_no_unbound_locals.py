@@ -131,14 +131,6 @@ def _stores_loads(scope: ast.AST) -> tuple[dict[str, int], dict[str, int]]:
 def find_violations(tree: ast.Module) -> list[str]:
     problems: list[str] = []
 
-    module_stores: dict[str, int] = {}
-    module_scope = ast.Module(body=tree.body, type_ignores=[])
-    m_stores, _ = _stores_loads(module_scope)
-    module_stores.update(m_stores)
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            module_stores.setdefault(node.name, node.lineno)
-
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -151,8 +143,6 @@ def find_violations(tree: ast.Module) -> list[str]:
             if name not in stores:
                 # Module-level global or builtin: fine unless shadowed later,
                 # which the stores map would have captured.
-                if name in module_stores:
-                    continue
                 continue
             if load_line < stores[name]:
                 problems.append(
