@@ -129,9 +129,11 @@ class Trace:
     """Recorded action history. Two runs of one seed must produce one digest;
     a divergent replay is diffed line by line against this."""
 
-    def __init__(self, limit: int = 200_000) -> None:
+    def __init__(self) -> None:
         self.events: list[TraceEvent] = []
-        self.limit = limit
+        # Runaway-actor cap: enough events for any real failure trace without
+        # letting a livelocked simulation grow memory unbounded.
+        self.limit = 200_000
 
     def record(self, t: float, actor: str, kind: str, **detail: Any) -> TraceEvent:
         ev = TraceEvent(t=t, actor=actor, kind=kind, detail=detail)
@@ -180,7 +182,6 @@ class Simulation:
         self._seq = 0
         self._invariants: list[tuple[str, Callable[[Simulation], None]]] = []
         self.steps = 0
-        self.actors_finished = 0
         # Which modeled situations this run actually reached. A seed count is
         # meaningless without knowing the scenarios were hit at all.
         self.coverage: set[str] = set()
@@ -235,7 +236,6 @@ class Simulation:
                 self.record(item.actor_name, "invariant_violated", detail=str(ex))
                 raise
             except StopIteration:
-                self.actors_finished += 1
                 self.record(item.actor_name, "actor_done")
                 self.check_invariants()
                 continue

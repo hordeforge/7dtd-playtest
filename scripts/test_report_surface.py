@@ -319,7 +319,7 @@ _JUNIT_CHARS = [
     "﻿",
     " ",  # noqa: RUF001 (NBSP is a deliberate fuzz input)
     "é́",
-    "‮rtl‭",
+    "‮rtl‭",  # noqa: PLE2502 (bidi overrides are a deliberate fuzz input)
     "🧟",
     "</testsuite><!--",
     '="',

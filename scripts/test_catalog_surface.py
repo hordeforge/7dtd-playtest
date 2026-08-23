@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Structural tests: demo catalog ships live cases; residual infra cases are live too."""
+"""Structural tests: demo catalog ships live cases; residual infra cases are
+live too; the host fixture arm-list matches Catalog barrier emissions."""
 from __future__ import annotations
 
 import re
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +142,77 @@ def persist_pad_from_orchestrator(src: str) -> tuple[int, int, int] | None:
     return (x, y, z)
 
 
+def suite_names_from_catalog(src: str) -> set[str]:
+    m = re.search(r"static readonly string\[\] SuiteNames\s*=\s*\{([^}]*)\}", src, re.S)
+    assert m, "Catalog.cs lost the SuiteNames table"
+    return set(re.findall(r'"([a-z0-9_]+)"', m.group(1)))
+
+
+def expand_alias_ids_from_catalog(src: str) -> set[str]:
+    """Alias labels accepted by Catalog.ExpandSuites (case labels in its switch)."""
+    start = src.index("public static string[] ExpandSuites")
+    end = src.index("static void AddUnique", start)
+    body = src[start:end]
+    return set(re.findall(r'case "([a-z0-9_]+)":', body))
+
+
+def append_suite_map(src: str) -> dict[str, list[str]]:
+    """Map each concrete AppendSuite case to the Add* methods it composes.
+
+    Most cases call one Add method; benchmark composes four. The default arm
+    (external scenario providers) has no built-in body and is omitted.
+    """
+    start = src.index("public static void AppendSuite")
+    end = src.index("static CaseDef Live", start)
+    body = src[start:end]
+    marks = [(m.start(), m.group(1)) for m in re.finditer(r'case "([a-z0-9_]+)":', body)]
+    marks.append((len(body), ""))
+    result: dict[str, list[str]] = {}
+    for (s, suite), (e, _) in pairwise(marks):
+        adds = re.findall(r"\bAdd([A-Z]\w*)\s*\(", body[s:e])
+        if adds:
+            result[suite] = adds
+    return result
+
+
+def add_method_barriers(src: str) -> dict[str, set[str]]:
+    """Attribute every Report.Barrier literal in Catalog.cs to its Add method.
+
+    Catalog.cs declares the Add* methods sequentially and only case bodies
+    emit barriers, so the nearest preceding `static void AddX(` header is the
+    owner. Prefix only (before any ':' or concatenation): parameterized names
+    like "chat_echo:<token>" still match their host BARRIER_NAMES entry.
+    """
+    headers = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r"\bstatic void Add([A-Z]\w*)\s*\(", src)
+    ]
+    emissions = [
+        (m.start(), m.group(1))
+        for m in re.finditer(r'Report\.Barrier\(\s*"([A-Za-z0-9_]+)', src)
+    ]
+    assert emissions, "Catalog.cs lost every Report.Barrier emission"
+    out: dict[str, set[str]] = {}
+    for pos, prefix in emissions:
+        owner = None
+        for hpos, name in headers:
+            if hpos < pos:
+                owner = name
+            else:
+                break
+        assert owner, f"Report.Barrier({prefix!r}) before any Add method header"
+        out.setdefault(owner, set()).add(prefix)
+    return out
+
+
+def quoted_ids_after_assignment(src: str, var: str) -> set[str]:
+    """Parse quoted ids from a host table whose literal closes on a bare `)` line."""
+    m = re.search(re.escape(var) + r"\b[^\n]*=", src)
+    assert m, f"playtest_run.py lost the {var} table"
+    tail = src[m.end() :]
+    return set(re.findall(r'"([a-z0-9_]+)"', tail[: tail.index("\n)")]))
+
+
 def main() -> int:
     assert CATALOG.is_file(), f"missing {CATALOG}"
     assert SCENARIOS.is_file(), f"missing {SCENARIOS}"
@@ -206,6 +279,53 @@ def main() -> int:
         f"playtest_run.py PERSIST_PAD_XYZ {orch_pad}"
     )
 
+    # Cross-language fixture contract: the host arms telnet fixtures only for
+    # suites listed in playtest_run.py FIXTURE_SUITE_IDS, while Catalog.cs
+    # decides per suite which cases emit barrier lines. A suite that emits a
+    # fixture-serviced barrier without being listed runs telnet-free and its
+    # cases hang on a barrier no host ever services, so pin the two tables
+    # together like every other surface.
+    #
+    # Deliberately NOT required in FIXTURE_SUITE_IDS (each has its own
+    # unconditional host path instead of the want_fixtures loop):
+    #   persist_setup_done - serviced by the dedicated rejoin flow
+    #     (playtest_run.py opens TelnetAdmin itself; SUITE=persist never
+    #     sets want_fixtures);
+    #   teleport_persist_pad, apm_dump - serviced in the poll loop outside
+    #     `if want_fixtures` (apm also preseeds ZDTD_APM_DUMP env by suite
+    #     token, independent of this list).
+    exempt_barriers = {
+        "persist_setup_done",
+        "teleport_persist_pad",
+        "apm_dump",
+    }
+    barrier_names = quoted_ids_after_assignment(orch, "BARRIER_NAMES")
+    fixture_ids = quoted_ids_after_assignment(orch, "FIXTURE_SUITE_IDS")
+    assert "spawn_zombie" in barrier_names and "kill_player" in barrier_names, (
+        "BARRIER_NAMES parse drifted; check playtest_run.py table shape"
+    )
+    suite_adds = append_suite_map(cat)
+    method_barriers = add_method_barriers(cat)
+    fixture_gated = barrier_names - exempt_barriers
+    need_fixtures = sorted(
+        suite
+        for suite, adds in suite_adds.items()
+        if set().union(*(method_barriers.get(a, set()) for a in adds)) & fixture_gated
+    )
+    unlisted = [s for s in need_fixtures if s not in fixture_ids]
+    assert not unlisted, (
+        "Catalog suites emit fixture-serviced barriers but are missing from "
+        f"playtest_run.py FIXTURE_SUITE_IDS (their barriers would never fire): "
+        f"{unlisted}"
+    )
+    known_suites = suite_names_from_catalog(cat)
+    aliases = expand_alias_ids_from_catalog(cat)
+    unknown_fixture = sorted(fixture_ids - known_suites - aliases)
+    assert not unknown_fixture, (
+        f"playtest_run.py FIXTURE_SUITE_IDS lists ids unknown to Catalog.cs "
+        f"(typo or removed suite): {unknown_fixture}"
+    )
+
     for name in (
         "kill_fixture_zombie",
         "spawn_zombie",
@@ -234,6 +354,10 @@ def main() -> int:
     print("OK residual 13 ids are Live:", ", ".join(RESIDUAL_MUST_BE_LIVE[:4]), "…")
     print("OK orchestrator has persist/loadgen/apm barriers")
     print("OK persist pad matches Catalog.cs PersistPlayerPos:", cat_pad)
+    print(
+        "OK fixture suites pinned to Catalog barrier emissions:",
+        ", ".join(need_fixtures),
+    )
     return 0
 
 

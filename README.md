@@ -2,6 +2,12 @@
 
 > **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
 
+![CI](https://github.com/hordeforge/7dtd-playtest/actions/workflows/ci.yml/badge.svg)
+![license](https://img.shields.io/github/license/hordeforge/7dtd-playtest)
+![release](https://img.shields.io/github/v/release/hordeforge/7dtd-playtest)
+![languages](https://img.shields.io/github/languages/count/hordeforge/7dtd-playtest)
+![top language](https://img.shields.io/github/languages/top/hordeforge/7dtd-playtest)
+
 Stock-client **gameplay automation** for 7 Days to Die servers (EAC off). Works against the **stock dedicated server** (the default) and against **zdtd-server** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs, waits for server-visible state where it matters, and emits structured scenario test results for a host orchestrator.
 
 Host-side concurrency (the exclusivity lock) is covered by deterministic

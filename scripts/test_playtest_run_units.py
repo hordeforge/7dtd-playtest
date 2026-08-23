@@ -25,6 +25,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
@@ -612,6 +613,33 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
     assert zdtd.list_player_ids() == [107], zdtd.list_player_ids()
     assert zdtd.sent == ["listplayers", "list"], zdtd.sent
 
+    # Persist flow: every listed player is teleported to the pad and the
+    # command reaches the wire in the raw PERSIST_PAD_COORDS form (the same
+    # numbers spawnentityat consumers use), so a formatting drift cannot
+    # strand players off-pad with an opaque "far from pad" failure.
+    tp = CannedTelnet(
+        [
+            "Total of 2 in the game\n'maci' (id=171, pos=(0, 0, 0))\n"
+            "'ghost' (id=172, pos=(0, 0, 0))",
+            "teleported",
+            "teleported",
+        ]
+    )
+    assert tp.teleport_players_to(520, 62, 950) == 2, f"sent={tp.sent}"
+    assert tp.sent == [
+        "listplayers",
+        "teleportplayer 171 520 62 950",
+        "teleportplayer 172 520 62 950",
+    ], f"pad coords must reach the wire verbatim: {tp.sent}"
+
+    # Nobody online: warn + no teleport commands, never a blind send.
+    errbuf = io.StringIO()
+    with contextlib.redirect_stderr(errbuf):
+        empty = CannedTelnet(["", ""])
+        assert empty.teleport_players_to(520, 62, 950) == 0
+    assert empty.sent == ["listplayers", "list"], empty.sent
+    assert "no players from listplayers" in errbuf.getvalue(), errbuf.getvalue()
+
 
 def test_write_stock_config_restricts_file_mode() -> None:
     """The generated serverconfig carries TelnetPassword: it must not inherit
@@ -696,6 +724,59 @@ def test_client_compat_follows_the_install_library() -> None:
     assert playtest_run.client_compat_for_game(game, env={"COMPAT": str(override)}) == override
     print("PASS client_compat_follows_library prefix derived from the library")
 
+def test_write_stock_config_activates_commented_userdata_folder() -> None:
+    """Stock ships UserDataFolder commented out. Rewriting the value inside
+    that comment leaves the server saving under its default tree, so
+    --fresh-save wiped nothing and state carried over between runs (the
+    regression documented at the write_stock_config call site). Both shapes
+    must yield an ACTIVE property pointing at the resolved --userdata."""
+    ud = "userdata"
+
+    commented_only = (
+        "<ServerSettings>\n"
+        '  <!-- <property name="UserDataFolder" value="/default/7DaysToDie"/> -->\n'
+        '  <property name="GameWorld" value="Navezgane"/>\n'
+        "</ServerSettings>\n"
+    )
+    active_stale = (
+        "<ServerSettings>\n"
+        '  <property name="UserDataFolder" value="/stale/path"/>\n'
+        '  <property name="GameWorld" value="Navezgane"/>\n'
+        "</ServerSettings>\n"
+    )
+    with tempfile.TemporaryDirectory() as td_str:
+        for label, src in (
+            ("commented-out", commented_only),
+            ("active-stale", active_stale),
+        ):
+            side = Path(td_str) / label
+            side.mkdir()
+            src_cfg = side / "serverconfig.xml"
+            src_cfg.write_text(src, encoding="utf-8")
+            out_cfg = side / "out" / "serverconfig_playtest.xml"
+            userdata = side / ud
+            playtest_run.write_stock_config(
+                src_cfg,
+                out_cfg,
+                userdata,
+                world_name="Navezgane",
+                game_name="PlaytestNav",
+                port=26900,
+                telnet_port=8081,
+                telnet_password="pw",
+            )
+            want_ud = str(userdata.resolve())
+            root = ElementTree.parse(out_cfg).getroot()
+            props = {p.get("name"): p.get("value") for p in root.iter("property")}
+            assert props.get("UserDataFolder") == want_ud, (
+                f"{label}: UserDataFolder must be active and point at "
+                f"{want_ud}, got {props.get('UserDataFolder')!r}"
+            )
+            assert '<!-- <property name="UserDataFolder"' not in out_cfg.read_text(
+                encoding="utf-8"
+            ), f"{label}: commented form survived next to the active property"
+    print("PASS stock_config_userdata_folder commented form activated, stale value rewritten")
+
 
 def main() -> int:
     failures = 0
@@ -731,6 +812,10 @@ def main() -> int:
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
         ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
+        (
+            "stock_config_userdata_folder",
+            test_write_stock_config_activates_commented_userdata_folder,
+        ),
     ):
         try:
             fn()

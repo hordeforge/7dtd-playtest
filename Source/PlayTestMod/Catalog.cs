@@ -171,9 +171,11 @@ namespace ZdtdPlaytest
 
         static CaseDef Live(string suite, string id, string[] tags, Action<CaseCtx> act,
             Func<CaseCtx, bool> wait = null, Func<CaseCtx, bool> assert = null,
-            float timeout = 8f, string fail = "timeout", float pause = 0.5f)
+            float timeout = 8f, string fail = "timeout", float pause = 0.5f,
+            PlayerGate gate = PlayerGate.LivePlayer, bool noAutoHeal = false)
         {
-            return CaseDef.Live(suite, id, tags, act, wait, assert, timeout, fail, pause);
+            return CaseDef.Live(suite, id, tags, act, wait, assert, timeout, fail, pause,
+                gate, noAutoHeal);
         }
 
         static CaseDef Defer(string suite, string id, string[] tags, string reason)
@@ -276,10 +278,14 @@ namespace ZdtdPlaytest
                 try
                 {
                     ulong t = ctx.World.worldTime;
-                    Helpers.DecodeWorldTime(t, out int day, out int hour, out int minute);
-                    ctx.Detail = "day=" + day + " " + hour.ToString("00") + ":" + minute.ToString("00")
-                        + " raw=" + t;
-                    ctx.PlaceBlockType = day >= 0 ? 1 : 0;
+                    bool ok = Helpers.DecodeWorldTime(t, out int day, out int hour, out int minute);
+                    ctx.Detail = ok
+                        ? "day=" + day + " " + hour.ToString("00") + ":" + minute.ToString("00")
+                            + " raw=" + t
+                        : "clock decode failed raw=" + t;
+                    // Decode failure must FAIL (assert wants 1), not read as a
+                    // valid morning clock.
+                    ctx.PlaceBlockType = ok ? 1 : 0;
                 }
                 catch (Exception ex)
                 {
@@ -1800,17 +1806,21 @@ namespace ZdtdPlaytest
                     Helpers.TrySetWorldTime(ctx.World, 22000UL);
                 }
                 ulong now = ctx.World.worldTime;
-                Helpers.DecodeWorldTime(now, out int day, out int hour, out int minute);
-                bool night = hour >= 18 || hour < 5 || (now >= 18000UL && now < 100000UL);
+                bool decoded = Helpers.DecodeWorldTime(now, out int day, out int hour, out int minute);
+                // Night by decoded clock; the raw-range term is the documented
+                // degraded mode when GameUtils decode is unavailable (detail
+                // shows it so a pass is never silently built on garbage).
+                bool nightByClock = decoded && (hour >= 18 || hour < 5);
+                bool night = nightByClock || (now >= 18000UL && now < 100000UL);
                 if (night && ctx.PlaceBlockType == 0)
                 {
                     ctx.PlaceBlockType = 1;
-                    ctx.IntA = day;
-                    ctx.IntB = (hour >= 18 || hour < 5) ? hour : 22;
+                    ctx.IntA = decoded ? day : -1;
+                    ctx.IntB = nightByClock ? hour : 22;
                     Report.Barrier("settime_day");
                     Helpers.TrySetWorldTime(ctx.World, 8000UL);
-                    ctx.Detail = "night day=" + day + " hour=" + hour
-                        + " raw=" + now + " restoring day";
+                    ctx.Detail = "night decoded=" + (decoded ? 1 : 0) + " day=" + ctx.IntA
+                        + " hour=" + ctx.IntB + " raw=" + now + " restoring day";
                     return false;
                 }
                 if (ctx.PlaceBlockType == 1)
@@ -1820,18 +1830,20 @@ namespace ZdtdPlaytest
                         + " nowH=" + hour + " raw=" + now + " t=" + elapsed.ToString("0.0");
                     return true;
                 }
-                ctx.Detail = "day=" + day + " " + hour.ToString("00") + ":" + minute.ToString("00")
+                ctx.Detail = "decoded=" + (decoded ? 1 : 0) + " day=" + day + " "
+                    + hour.ToString("00") + ":" + minute.ToString("00")
                     + " raw=" + now + " night=" + night + " t=" + elapsed.ToString("0.0");
                 return false;
             }, assert: ctx =>
             {
                 bool ok = ctx.PlaceBlockType == 1 && (ctx.IntB >= 18 || ctx.IntB < 5);
-                Helpers.DecodeWorldTime(ctx.World.worldTime, out int day, out int hour, out int minute);
+                bool decodedNow = Helpers.DecodeWorldTime(ctx.World.worldTime, out int day, out int hour, out int minute);
                 // Leave morning for economy.
                 Helpers.TrySetWorldTime(ctx.World, 8000UL);
                 Report.Barrier("settime_day");
                 ctx.Detail = "nightDay=" + ctx.IntA + " nightHour=" + ctx.IntB
                     + " nowDay=" + day + " now=" + hour.ToString("00") + ":" + minute.ToString("00")
+                    + " decoded=" + (decodedNow ? 1 : 0)
                     + " t0=" + ctx.WorldTime0 + " rawNow=" + ctx.World.worldTime;
                 return ok;
             }, timeout: 14f, fail: "worldTime not night after settime barrier", pause: 0.5f));
@@ -3550,7 +3562,8 @@ namespace ZdtdPlaytest
                 ctx.Detail = "dead=" + dead + " hp="
                     + (p != null ? p.Health.ToString() : "null");
                 return dead;
-            }, timeout: 20f, fail: "player did not die", pause: 0.5f));
+            }, timeout: 20f, fail: "player did not die", pause: 0.5f,
+                gate: PlayerGate.AllowDead));
 
             q.Add(Live(suite, "player_respawn", new[] { "combat", "player", "demo" }, ctx =>
             {
@@ -3604,7 +3617,8 @@ namespace ZdtdPlaytest
                 ctx.Detail = "alive=" + ok + " hp=" + (p != null ? p.Health.ToString() : "null")
                     + " spawned=" + spawned;
                 return ok;
-            }, timeout: 25f, fail: "player did not respawn", pause: 0.5f));
+            }, timeout: 25f, fail: "player did not respawn", pause: 0.5f,
+                gate: PlayerGate.AllowDead));
         }
 
         // ── persist setup (phase A: mutate world, then host save+rejoin) ──
@@ -3636,7 +3650,8 @@ namespace ZdtdPlaytest
                 var b = ctx.World.GetBlock(PersistDigBlock);
                 ctx.Detail = "type=" + b.type;
                 return b.type == 0 || b.isair;
-            }, timeout: 8f, fail: "setup dig not air", pause: 0.2f));
+            }, timeout: 8f, fail: "setup dig not air", pause: 0.2f,
+                gate: PlayerGate.WorldOnly));
 
             q.Add(Live(suite, "persist_setup_inv", new[] { "persist", "inv" }, ctx =>
             {
@@ -3731,7 +3746,8 @@ namespace ZdtdPlaytest
                 var b = ctx.World.GetBlock(PersistChestBlock);
                 ctx.Detail = "type=" + b.type;
                 return b.type != 0;
-            }, timeout: 8f, fail: "setup chest missing", pause: 0.2f));
+            }, timeout: 8f, fail: "setup chest missing", pause: 0.2f,
+                gate: PlayerGate.WorldOnly));
 
             q.Add(Live(suite, "persist_setup_blockmeta", new[] { "persist", "world" }, ctx =>
             {
@@ -3778,7 +3794,7 @@ namespace ZdtdPlaytest
             {
                 Report.Barrier("persist_setup_done");
                 ctx.Detail = "checkpoint barriers emitted";
-            }, pause: 0.5f));
+            }, pause: 0.5f, gate: PlayerGate.WorldOnly));
         }
 
         // ── persist verify (phase B: after host save + client rejoin) ─────
@@ -3873,7 +3889,8 @@ namespace ZdtdPlaytest
                     + " padArea=" + padArea + " ok=" + (ctx.PlaceBlockType == 1)
                     + " at " + PersistDigBlock;
                 return chunkOk && air && padArea && ctx.PlaceBlockType == 1;
-            }, timeout: 12f, fail: "dig cell not air (or chunk/pad fixtures missing) after rejoin", pause: 0.3f));
+            }, timeout: 12f, fail: "dig cell not air (or chunk/pad fixtures missing) after rejoin", pause: 0.3f,
+                gate: PlayerGate.WorldOnly));
 
             q.Add(Live(suite, "inv_survives_rejoin", new[] { "persist", "inv" }, ctx =>
             {
@@ -3917,7 +3934,8 @@ namespace ZdtdPlaytest
                 ctx.PlaceBlockType = (b.type != 0 || te) ? 1 : 0;
                 ctx.Detail = "type=" + b.type + " te=" + te + " class=" + teClass;
             }, assert: ctx => ctx.PlaceBlockType == 1,
-                fail: "chest TE missing after rejoin", pause: 0.3f));
+                fail: "chest TE missing after rejoin", pause: 0.3f,
+                gate: PlayerGate.WorldOnly));
 
             q.Add(Live(suite, "blockmeta_survives", new[] { "persist", "world" }, ctx =>
             {
@@ -3930,7 +3948,8 @@ namespace ZdtdPlaytest
             {
                 // Residual claim is block *meta* (damage) survives, not merely solid type.
                 return ctx.PlaceBlockType == 1 && ctx.IntA > 0;
-            }, fail: "damaged block missing or undamaged after rejoin", pause: 0.3f));
+            }, fail: "damaged block missing or undamaged after rejoin", pause: 0.3f,
+                gate: PlayerGate.WorldOnly));
         }
 
         // ── multiplayer (loadgen peer + stock client) ────────────────────
@@ -4191,7 +4210,8 @@ namespace ZdtdPlaytest
                 ctx.Detail = "peers=" + peers + " peak=" + ctx.IntA + " alive=" + alive
                     + " hp=" + (ctx.Player != null ? ctx.Player.Health : -1);
                 return alive && (peers > 0 || ctx.IntA > 0);
-            }, timeout: 40f, fail: "loadgen bots not visible with playtest client", pause: 0.4f));
+            }, timeout: 40f, fail: "loadgen bots not visible with playtest client", pause: 0.4f,
+                noAutoHeal: true));
         }
 
         /// <summary>Set lock via TEFeatureLockable / ILockable / SetLocked. Never treats SetModified as lock.</summary>
@@ -4376,7 +4396,7 @@ namespace ZdtdPlaytest
                 ctx.Detail = $"request bot near {ctx.StartPos}";
             }, wait: ctx =>
             {
-                // After host spawns `bot player <name>`, a fresh bot should appear within 12-42m ring
+                // After host spawns `bot player <name>`, a fresh bot should appear within the 10-55m ring
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 EntityAlive best = null; float bestD = float.MaxValue;
                 for (int i = 0; i < ctx.World.Entities.list.Count; i++)
@@ -4396,7 +4416,7 @@ namespace ZdtdPlaytest
                 }
                 ctx.Detail = $"no bot near t={elapsed:0.0}";
                 return false;
-            }, assert: ctx => ctx.FloatA >= 10f && ctx.FloatA <= 55f, timeout: 22f, fail: "no bot spawned in 12-42m ring near player (bot player)", pause: 0.4f));
+            }, assert: ctx => ctx.FloatA >= 10f && ctx.FloatA <= 55f, timeout: 22f, fail: "no bot spawned in 10-55m ring near player (bot player)", pause: 0.4f));
         }
 
         static bool elapsedCheck(CaseCtx ctx, float want)
@@ -4450,7 +4470,7 @@ namespace ZdtdPlaytest
                 ctx.Detail = "alive=" + ok + " hp=" + (p != null ? p.Health : -1)
                     + " pos=" + (p != null ? p.GetPosition().ToString() : "null");
                 return ok;
-            }));
+            }, noAutoHeal: true));
         }
 
         static void AddSoakLong(List<CaseDef> q, string suite)
@@ -4502,7 +4522,8 @@ namespace ZdtdPlaytest
                 ctx.Detail = "t=" + elapsed.ToString("0.0") + " digs=" + ctx.IntA
                     + " alive=" + alive + " hp=" + (ctx.Player != null ? ctx.Player.Health : -1);
                 return ok;
-            }, timeout: SoakSec + 60f, fail: "soak <15m or dig ticks low", pause: 0.5f));
+            }, timeout: SoakSec + 60f, fail: "soak <15m or dig ticks low", pause: 0.5f,
+                noAutoHeal: true));
         }
 
         static string ResolveApmDumpPath()

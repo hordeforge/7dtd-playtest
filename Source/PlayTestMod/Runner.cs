@@ -28,6 +28,21 @@ namespace ZdtdPlaytest
     }
 
     /// <summary>
+    /// How much of a live player a case needs. The runner's dead/missing-player
+    /// recovery consults this per case instead of hard-coded case ids, so a new
+    /// death-observing or world-only case is data on the CaseDef.
+    /// </summary>
+    public enum PlayerGate
+    {
+        /// <summary>Default: player must be alive with Health &gt; 0 to run.</summary>
+        LivePlayer,
+        /// <summary>Death/respawn observation: runs as soon as the player is resolvable.</summary>
+        AllowDead,
+        /// <summary>Touches only World data (blocks / tile entities); runs without a usable player.</summary>
+        WorldOnly,
+    }
+
+    /// <summary>
     /// One step in a scripted demo / suite. External <see cref="IScenarioProvider"/>
     /// mods should build cases with <see cref="Live"/> / <see cref="Defer"/> rather
     /// than assigning fields by hand.
@@ -40,6 +55,10 @@ namespace ZdtdPlaytest
         /// <summary>If true, record skip immediately (deferred / needs admin / fixture).</summary>
         public bool Deferred;
         public string DeferReason = "";
+        /// <summary>Player gate: how alive the player must be for this case to run.</summary>
+        public PlayerGate Gate = PlayerGate.LivePlayer;
+        /// <summary>Never force-respawn/heal mid-case (survival claims would soft-pass).</summary>
+        public bool NoAutoHeal;
         public Action<CaseCtx> Act;
         public Func<CaseCtx, bool> Wait;
         public Func<CaseCtx, bool> Assert;
@@ -72,7 +91,9 @@ namespace ZdtdPlaytest
             Func<CaseCtx, bool> assert = null,
             float timeout = 8f,
             string fail = "timeout",
-            float pause = 0.5f)
+            float pause = 0.5f,
+            PlayerGate gate = PlayerGate.LivePlayer,
+            bool noAutoHeal = false)
         {
             if (act == null && wait == null && assert == null)
                 throw new ArgumentException(
@@ -96,6 +117,8 @@ namespace ZdtdPlaytest
                 TimeoutSec = timeout,
                 FailDetail = fail,
                 PauseAfterSec = pause,
+                Gate = gate,
+                NoAutoHeal = noAutoHeal,
             };
         }
 
@@ -311,21 +334,14 @@ namespace ZdtdPlaytest
             _ctx.Player = ResolveLocalPlayer(world) ?? _ctx.Player;
 
             // Death/respawn must not freeze the suite (early return forever).
-            // Finale cases intentionally observe death / drive respawn.
-            string curId = (_caseIndex >= 0 && _caseIndex < _queue.Count)
-                ? (_queue[_caseIndex].Id ?? "") : "";
-            bool deathCase = curId == "player_death_screen" || curId == "player_respawn";
+            // Per-case tolerance is data on the CaseDef (Gate / NoAutoHeal),
+            // not id lists here.
+            var curDef = (_caseIndex >= 0 && _caseIndex < _queue.Count) ? _queue[_caseIndex] : null;
+            bool deathCase = curDef != null && curDef.Gate == PlayerGate.AllowDead;
             // Survival claims: do not auto-heal mid-case (would soft-pass death under load).
-            bool survivalCase = curId == "bots_plus_playtest" || curId == "soak_15min_host"
-                || curId == "soak_still_alive";
+            bool survivalCase = curDef != null && curDef.NoAutoHeal;
             // World-only cases only touch World.GetBlock / TE; allow dead or unspawned.
-            bool worldOnlyPersist = curId == "dig_survives_rejoin"
-                || curId == "te_survives_rejoin"
-                || curId == "blockmeta_survives"
-                || curId == "persist_setup_dig"
-                || curId == "persist_setup_te"
-                || curId == "persist_setup_blockmeta"
-                || curId == "persist_setup_done";
+            bool worldOnlyPersist = curDef != null && curDef.Gate == PlayerGate.WorldOnly;
             // IsSpawned() lags after rejoin/heal; Health>0 + entity is enough to run cases.
             bool live = _ctx.Player != null
                 && !_ctx.Player.IsDead()
@@ -391,6 +407,10 @@ namespace ZdtdPlaytest
                         if (missingFor >= 8f)
                         {
                             Report.Info("player dead too long; finishing suite early");
+                            // Abort bypasses FinishCase, so stop the drive here too:
+                            // the PMC patches key off Active alone and would keep
+                            // injecting inputs after the run is over.
+                            try { LocomotionDrive.Stop(_ctx?.Player); } catch { /* */ }
                             while (_caseIndex + 1 < _queue.Count)
                             {
                                 _caseIndex++;
@@ -623,10 +643,11 @@ namespace ZdtdPlaytest
             }
 
             player = ResolveLocalPlayer(world) ?? player;
-            // Heal between cases, except the death-screen act: leave HP as-is so
-            // the host kill barrier drops a mortal player.
+            // Heal between cases, except AllowDead cases: leave HP as-is so the
+            // death screen can observe the kill and respawn drives its own flow
+            // (its act re-establishes life itself).
             var def = _queue[_caseIndex];
-            if (def.Id != "player_death_screen")
+            if (def.Gate != PlayerGate.AllowDead)
                 EnsurePlayerHealthy(player);
 
             _ctx = new CaseCtx
