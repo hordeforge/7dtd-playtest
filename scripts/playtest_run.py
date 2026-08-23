@@ -20,6 +20,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
@@ -286,6 +287,36 @@ def write_stock_config(
         warn(f"could not restrict serverconfig permissions to 0600: {ex}")
 
 
+def _popen_to_logfile(
+    cmd: list[str],
+    log_path: Path,
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.Popen:
+    """Start a detached process with stdout+stderr redirected into ``log_path``.
+
+    The handle is attached as ``_log_fh`` for stop_proc to close. If the
+    spawn itself fails (missing binary, exec error), the already-opened
+    descriptor is closed here instead of leaking until interpreter exit.
+    """
+    fh = open(log_path, "w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            cwd=cwd,
+            env=env,
+        )
+    except OSError:
+        fh.close()
+        raise
+    proc._log_fh = fh  # type: ignore[attr-defined]
+    return proc
+
+
 def start_stock_dedicated(
     game_srv: Path,
     userdata: Path,
@@ -360,15 +391,7 @@ def start_stock_dedicated(
         f"-configfile={cfg_out}",
     ]
     log("start stock dedicated: " + " ".join(cmd))
-    fh = open(server_log, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=fh,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        cwd=str(game_srv),
-    )
-    proc._log_fh = fh  # type: ignore[attr-defined]
+    proc = _popen_to_logfile(cmd, server_log, cwd=str(game_srv))
     proc._unity_log = unity_log  # type: ignore[attr-defined]
     return proc, unity_log
 
@@ -400,15 +423,7 @@ def start_zdtd(
         str(admin_port),
     ]
     log("start zdtd: " + " ".join(cmd))
-    fh = open(server_log, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=fh,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    proc._log_fh = fh  # type: ignore[attr-defined]
-    return proc
+    return _popen_to_logfile(cmd, server_log)
 
 
 # Detached mute helpers started per client launch. They self-exit after their
@@ -501,16 +516,9 @@ def start_client(
     client_launch_log.parent.mkdir(parents=True, exist_ok=True)
     role = "scenario" if run_suite else "stock-peer"
     log(f"start client role={role} suite={suite or '(none)'} connect={env['7DTD_CONNECT']}")
-    fh = open(client_launch_log, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        ["bash", str(launch)],
-        stdout=fh,
-        stderr=subprocess.STDOUT,
-        env=env,
-        start_new_session=True,
-        cwd=str(CONNECT),
+    proc = _popen_to_logfile(
+        ["bash", str(launch)], client_launch_log, cwd=str(CONNECT), env=env
     )
-    proc._log_fh = fh  # type: ignore[attr-defined]
     # Belt-and-suspenders: connect mutes itself; also start poll from orch.
     mute_client_audio_async()
     return proc
@@ -568,16 +576,7 @@ def start_loadgen(
         "0.0",
     ]
     log(f"start loadgen count={count} litenet={litenet} timeout_ms={timeout_ms}")
-    fh = open(log_path, "w", encoding="utf-8")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=fh,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        cwd=str(LOADGEN),
-    )
-    proc._log_fh = fh  # type: ignore[attr-defined]
-    return proc
+    return _popen_to_logfile(cmd, log_path, cwd=str(LOADGEN))
 
 
 def write_zdtd_apm_dump(
@@ -980,15 +979,26 @@ def fresh_save(userdata: Path, game_name: str) -> None:
     if not saves.is_dir():
         return
     removed = 0
+    failed = 0
     for world_dir in saves.iterdir():
         if not world_dir.is_dir():
             continue
         target = world_dir / game_name
         if target.is_dir():
             shutil.rmtree(target, ignore_errors=True)
+            if target.exists():
+                # A surviving save would silently poison the run: dig/place
+                # would then fail on the previous run's terrain, not on the
+                # server. Say so instead of logging a false "removed".
+                failed += 1
+                warn(
+                    f"fresh-save: could not remove {target}; "
+                    "stale save will be reused"
+                )
+                continue
             removed += 1
             log(f"fresh-save removed {target}")
-    if removed == 0:
+    if removed == 0 and failed == 0:
         log(f"fresh-save: no existing save named {game_name}")
 
 
@@ -1597,8 +1607,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.client_log.is_file():
                 try:
                     args.client_log.write_text("", encoding="utf-8")
-                except OSError:
-                    pass
+                except OSError as ex:
+                    warn(f"could not truncate client log: {ex}")
             # Fresh readers for the new log generation: the scan must hold only
             # setup-phase events, not bytes from before the truncation.
             client_tail = LogTail(args.client_log)
@@ -1810,8 +1820,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.client_log.is_file():
                 try:
                     args.client_log.write_text("", encoding="utf-8")
-                except OSError:
-                    pass
+                except OSError as ex:
+                    warn(f"could not truncate client log: {ex}")
             # Fresh readers + seen counts for the verify generation: the old
             # log's barrier lines were already serviced and must neither
             # re-fire nor leak into the final parsed report.
@@ -1870,6 +1880,8 @@ def main(argv: list[str] | None = None) -> int:
                             # Do NOT enable dm/god here: finale player_death_screen needs
                             # a real kill, and god mode blocked telnet kill entirely.
                             tn.close()
+                        else:
+                            warn("post-ready clear_ai: telnet connect fail")
                         cleaned_ai = True
 
                 if ready_seen and not rejoin_teleport_done:
@@ -1892,25 +1904,29 @@ def main(argv: list[str] | None = None) -> int:
                         < barrier_seen["spawn_zombie"]
                     ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            n = tn.spawn_near_players("zombieBoe", per=1)
-                            if n == 0:
-                                time.sleep(1.0)
-                                tn.spawn_near_players("zombieBoe", per=1)
-                            tn.close()
+                        if not tn.connect():
+                            warn("spawn_zombie: telnet connect fail; retry next poll")
+                            break
+                        n = tn.spawn_near_players("zombieBoe", per=1)
+                        if n == 0:
+                            time.sleep(1.0)
+                            tn.spawn_near_players("zombieBoe", per=1)
+                        tn.close()
                         barrier_counts["spawn_zombie"] += 1
 
                     while barrier_counts["bot_spawn"] < barrier_seen["bot_spawn"]:
                         # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if needed
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            out = tn.exec("bot list")
-                            # Count bots from bot list output (lines with "Bot ")
-                            n = len(re.findall(r"Bot ", out))
-                            if n < 4:
-                                r = tn.exec("bot count 6")
-                                log(f"telnet bot count 6 -> {r[:120]!r}")
-                            tn.close()
+                        if not tn.connect():
+                            warn("bot_spawn: telnet connect fail; retry next poll")
+                            break
+                        out = tn.exec("bot list")
+                        # Count bots from bot list output (lines with "Bot ")
+                        n = len(re.findall(r"Bot ", out))
+                        if n < 4:
+                            r = tn.exec("bot count 6")
+                            log(f"telnet bot count 6 -> {r[:120]!r}")
+                        tn.close()
                         barrier_counts["bot_spawn"] += 1
 
                     while (
@@ -1918,16 +1934,18 @@ def main(argv: list[str] | None = None) -> int:
                         < barrier_seen["bot_player_near"]
                     ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            pids = tn.list_player_ids()
-                            if pids:
-                                ident = str(pids[0])
-                                r = tn.exec(f"bot player {ident} 1")
-                                log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
-                            else:
-                                r = tn.exec("bot spawn 1")
-                                log(f"telnet bot spawn 1 -> {r[:120]!r}")
-                            tn.close()
+                        if not tn.connect():
+                            warn("bot_player_near: telnet connect fail; retry next poll")
+                            break
+                        pids = tn.list_player_ids()
+                        if pids:
+                            ident = str(pids[0])
+                            r = tn.exec(f"bot player {ident} 1")
+                            log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
+                        else:
+                            r = tn.exec("bot spawn 1")
+                            log(f"telnet bot spawn 1 -> {r[:120]!r}")
+                        tn.close()
                         barrier_counts["bot_player_near"] += 1
 
                     while (
@@ -1935,24 +1953,28 @@ def main(argv: list[str] | None = None) -> int:
                         < barrier_seen["kill_fixture_zombie"]
                     ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            tn.kill_non_player_ai()
-                            tn.close()
+                        if not tn.connect():
+                            warn("kill_fixture_zombie: telnet connect fail; retry next poll")
+                            break
+                        tn.kill_non_player_ai()
+                        tn.close()
                         barrier_counts["kill_fixture_zombie"] += 1
 
                     while barrier_counts["kill_player"] < barrier_seen["kill_player"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            # Kill the human player entity for death-screen case (not AI).
-                            out = tn.exec("listplayers")
-                            pids = [
-                                int(x)
-                                for x in re.findall(r"id\s*=\s*(\d+)", out, flags=re.I)
-                            ]
-                            for pid in pids[:1]:
-                                r = tn.exec(f"kill {pid}")
-                                log(f"telnet kill_player {pid} → {r[:80]!r}")
-                            tn.close()
+                        if not tn.connect():
+                            warn("kill_player: telnet connect fail; retry next poll")
+                            break
+                        # Kill the human player entity for death-screen case (not AI).
+                        out = tn.exec("listplayers")
+                        pids = [
+                            int(x)
+                            for x in re.findall(r"id\s*=\s*(\d+)", out, flags=re.I)
+                        ]
+                        for pid in pids[:1]:
+                            r = tn.exec(f"kill {pid}")
+                            log(f"telnet kill_player {pid} → {r[:80]!r}")
+                        tn.close()
                         barrier_counts["kill_player"] += 1
 
                     # Cap night sets: re-barrier spam was flipping the world back to 22:00
@@ -1963,11 +1985,13 @@ def main(argv: list[str] | None = None) -> int:
                         < barrier_seen["settime_bloodmoon"]
                     ):
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            # Day1 22:00 only (not day-7 BM horde).
-                            r = tn.exec("settime 22000")
-                            log(f"telnet settime 22000 → {r[:120]!r}")
-                            tn.close()
+                        if not tn.connect():
+                            warn("settime_bloodmoon: telnet connect fail; retry next poll")
+                            break
+                        # Day1 22:00 only (not day-7 BM horde).
+                        r = tn.exec("settime 22000")
+                        log(f"telnet settime 22000 → {r[:120]!r}")
+                        tn.close()
                         barrier_counts["settime_bloodmoon"] += 1
                     if barrier_seen["settime_bloodmoon"] > barrier_counts["settime_bloodmoon"]:
                         # Swallow extras past the cap so they never re-fire later.
@@ -1977,40 +2001,46 @@ def main(argv: list[str] | None = None) -> int:
 
                     while barrier_counts["settime_day"] < barrier_seen["settime_day"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            # Morning restore; always last after any night set in this poll.
-                            r = tn.exec("settime 8000")
-                            log(f"telnet settime 8000 (day) → {r[:120]!r}")
-                            # Clear AI again after night so leftovers do not down the player.
-                            tn.clear_ai()
-                            tn.close()
+                        if not tn.connect():
+                            warn("settime_day: telnet connect fail; retry next poll")
+                            break
+                        # Morning restore; always last after any night set in this poll.
+                        r = tn.exec("settime 8000")
+                        log(f"telnet settime 8000 (day) → {r[:120]!r}")
+                        # Clear AI again after night so leftovers do not down the player.
+                        tn.clear_ai()
+                        tn.close()
                         barrier_counts["settime_day"] += 1
 
                     while barrier_counts["spawn_vehicle"] < barrier_seen["spawn_vehicle"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            # Same path as zombies: spawnentity <playerId> <class>
-                            n = tn.spawn_near_players("vehicleBicycle", per=1)
-                            if n == 0:
-                                for cmd in (
-                                    "spawnentityat vehicleBicycle 520 62 950",
-                                    "se vehicleBicycle",
-                                ):
-                                    r = tn.exec(cmd)
-                                    log(f"telnet vehicle {cmd} → {r[:80]!r}")
-                            else:
-                                log(f"telnet spawn vehicle near players units~={n}")
-                            tn.close()
+                        if not tn.connect():
+                            warn("spawn_vehicle: telnet connect fail; retry next poll")
+                            break
+                        # Same path as zombies: spawnentity <playerId> <class>
+                        n = tn.spawn_near_players("vehicleBicycle", per=1)
+                        if n == 0:
+                            for cmd in (
+                                "spawnentityat vehicleBicycle 520 62 950",
+                                "se vehicleBicycle",
+                            ):
+                                r = tn.exec(cmd)
+                                log(f"telnet vehicle {cmd} → {r[:80]!r}")
+                        else:
+                            log(f"telnet spawn vehicle near players units~={n}")
+                        tn.close()
                         barrier_counts["spawn_vehicle"] += 1
 
                     while barrier_counts["spawn_trader"] < barrier_seen["spawn_trader"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            n = tn.spawn_near_players("npcTraderJoel", per=1)
-                            if n == 0:
-                                n = tn.spawn_near_players("npcTraderBob", per=1)
-                            log(f"telnet spawn trader near players units~={n}")
-                            tn.close()
+                        if not tn.connect():
+                            warn("spawn_trader: telnet connect fail; retry next poll")
+                            break
+                        n = tn.spawn_near_players("npcTraderJoel", per=1)
+                        if n == 0:
+                            n = tn.spawn_near_players("npcTraderBob", per=1)
+                        log(f"telnet spawn trader near players units~={n}")
+                        tn.close()
                         barrier_counts["spawn_trader"] += 1
 
                 # Multi-peer / chat / APM barriers (stock or zdtd).
@@ -2345,4 +2375,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception:
+        # main() documents 2 = harness error. An unhandled crash must not fall
+        # through to Python's default exit code 1, which means playtest
+        # assertion failures. The finally inside main() has already stopped
+        # runtimes and released the lock by the time we get here.
+        err("harness crashed: unhandled exception (exit 2)")
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(2)

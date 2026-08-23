@@ -130,6 +130,8 @@ namespace ZdtdPlaytest
         static float _waitUntil;
         static float _readySince = -1f;
         static bool _readyLogged;
+        /// <summary>One-shot guard so a throwing LocomotionDrive.Tick warns once, not per frame.</summary>
+        static bool _locomotionFaultLogged;
         static int _benchmarkLaps = 1;
         /// <summary>When player is null/dead mid-suite, count unscaled time to avoid hang.</summary>
         static float _playerMissingSince = -1f;
@@ -251,7 +253,18 @@ namespace ZdtdPlaytest
             if (world == null) return;
 
             // Keep locomotion applied on every gmUpdate while drive is active.
-            try { LocomotionDrive.Tick(); } catch { /* */ }
+            // A throwing Tick must not take down the runner, but it also must
+            // not vanish: every walk-driven case would then fail with an
+            // opaque "position never reached" and no cause. Warn once.
+            try { LocomotionDrive.Tick(); }
+            catch (Exception ex)
+            {
+                if (!_locomotionFaultLogged)
+                {
+                    _locomotionFaultLogged = true;
+                    Log.Warning("[7dtd-playtest] locomotion tick failed (further failures silent): " + ex.Message);
+                }
+            }
 
             if (_phase == Phase.WaitReady)
             {
