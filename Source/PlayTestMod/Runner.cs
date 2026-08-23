@@ -54,6 +54,16 @@ namespace ZdtdPlaytest
         /// built-in catalog and by external scenario providers. <paramref name="tags"/>
         /// is informational only (catalog listing) and may be omitted.
         /// </summary>
+        /// <remarks>
+        /// Fail-fast at queue build: a case without <paramref name="act"/>,
+        /// <paramref name="wait"/>, or <paramref name="assert"/> would record a
+        /// green pass while running nothing, so that combination throws
+        /// <see cref="ArgumentException"/> naming the case. Exceptions thrown
+        /// from the callbacks fail the case (detail names stage + exception
+        /// type); they never take down the runner.
+        /// </remarks>
+        /// <exception cref="ArgumentException">No callback supplied.</exception>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> ≤ 0.</exception>
         public static CaseDef Live(
             string suite,
             string id,
@@ -65,6 +75,15 @@ namespace ZdtdPlaytest
             string fail = "timeout",
             float pause = 0.5f)
         {
+            if (act == null && wait == null && assert == null)
+                throw new ArgumentException(
+                    "CaseDef.Live(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") has no act, wait, or assert callback; it would "
+                    + "record a pass while running nothing");
+            if (!(timeout > 0f))
+                throw new ArgumentOutOfRangeException(nameof(timeout), timeout,
+                    "CaseDef.Live(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") timeout must be > 0 seconds");
             return new CaseDef
             {
                 Suite = suite,

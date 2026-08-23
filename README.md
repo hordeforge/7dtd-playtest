@@ -220,7 +220,7 @@ queue.Add(CaseDef.Live(suite, "my_wave", new[] { "bench" },
     act: ctx => { /* setup */ },
     wait: ctx => /* server-visible predicate */,
     assert: ctx => /* ok? */,
-    timeout: 120f,   // case Wait budget (seconds); default 8
+    timeout: 120f,   // case Wait budget (seconds; must be > 0); default 8
     fail: "wave did not finish",
     pause: 0.5f));
 
@@ -239,6 +239,22 @@ Helpers.TryEquipItemType(ctx.Player, itemType);
 Helpers.PlayerInVehicle(ctx.Player, vehicle);
 Helpers.TryEnterVehicle(ctx.Player, vehicle, out var detail);
 ```
+
+### Provider error behavior
+
+- Exceptions thrown from `act` / `wait` / `assert` fail that case only
+  (FAIL row, then the suite continues); the detail names stage and
+  exception type (`act exception NullReferenceException: …`). They never
+  take down the runner or the game.
+- A provider whose constructor, `SuiteIds`, or `AppendSuite` throws is
+  skipped with a `[7dtd-playtest] scenario provider …` log line. A suite
+  that then produces zero cases is recorded FAIL (`unknown or empty
+  suite`) with `DONE exit_hint=1`, never a silent green run.
+- `CaseDef.Live` validates at call time (fail-fast): a case with no
+  `act`, `wait`, or `assert` at all would record a pass while running
+  nothing, and `timeout <= 0` has no meaning; both throw immediately.
+- Diagnostics: `Report.Info("…")` emits a `[7dtd-playtest]` human line
+  plus a JSON `"t":"log"` event under the stable prefix.
 
 #### Barriers the stock host answers
 
@@ -275,7 +291,8 @@ Public surface for providers: `CaseDef.Live` / `CaseDef.Defer`, `CaseCtx`,
 | `Detail` | Optional scratch string; appended to FAIL detail on timeout/failure |
 | `TargetEntityId` | Entity id for combat fixtures (ranged target etc.) |
 | `BenchmarkLap` | Lap number parsed from the `suite@N` label (0 outside laps) |
-| `WasBlockType`, `PlaceBlockType`, `IntA`, `IntB`, `FloatA`, `FloatB`, `TargetBlock`, `WorldTime0` | Built-in catalog scratch fields; providers may reuse them or capture closure locals instead |
+| `CaseStartUnscaled` | `Time.unscaledTime` when the case started; use for elapsed budgets in `wait` predicates (`Time.unscaledTime - ctx.CaseStartUnscaled`) |
+| `WasBlockType`, `PlaceBlockType`, `IntA`, `IntB`, `IntC`, `FloatA`, `FloatB`, `TargetBlock`, `WorldTime0` | Built-in catalog scratch fields; providers may reuse them or capture closure locals instead |
 
 ### Suite environment (stock dedicated + connect)
 

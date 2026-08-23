@@ -227,6 +227,21 @@ def main() -> int:
     # Long-timeout Live factory parameter still present.
     assert "timeout" in live_body or "TimeoutSec = timeout" in live_body
 
+    # Fail-fast construction: a case with no callback would record a green
+    # pass while running nothing, and a non-positive timeout has no meaning.
+    assert "throw new ArgumentException" in live_body, (
+        "CaseDef.Live must reject a case with no act/wait/assert"
+    )
+    assert "throw new ArgumentOutOfRangeException" in live_body, (
+        "CaseDef.Live must reject timeout <= 0"
+    )
+
+    # Provider error-surface docs: exception behavior + diagnostics helper.
+    for needle in ("CaseStartUnscaled", "Report.Info", "Provider error behavior"):
+        assert needle in readme, (
+            f"README must document provider surface detail: {needle}"
+        )
+
     print("OK external scenario-provider surface")
     print("OK public CaseDef.Live / CaseDef.Defer factories")
     print("OK Live is non-deferred; Defer sets Deferred+reason")

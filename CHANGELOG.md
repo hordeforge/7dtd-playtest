@@ -61,8 +61,23 @@ unchanged.
   `--world` now costs a copy-back; an unwritable quarantine keeps data in
   place and warns about stale reuse. README gains a "State, backups, and
   recovery" section (state inventory, RPO/RTO stance, restore steps).
+- README provider docs now cover `CaseCtx.CaseStartUnscaled` and `IntC`
+  (previously public but undocumented), a "Provider error behavior"
+  section (callback exceptions fail only their case; provider/suite
+  exceptions surface as log lines and FAIL rows), and `Report.Info` for
+  diagnostics under the stable prefix.
 
 ### Changed
+
+- `CaseDef.Live` now fails fast at queue build: a case with no `act`,
+  `wait`, or `assert` callback (it would record a green pass while
+  running nothing) throws `ArgumentException`, and `timeout <= 0` throws
+  `ArgumentOutOfRangeException`, both naming the case. Provider
+  `AppendSuite` calls are wrapped by discovery, so a rejected case
+  surfaces as a `[7dtd-playtest] scenario provider …` log line plus the
+  existing zero-cases FAIL row instead of a lying pass; built-in catalog
+  cases all supply callbacks and positive timeouts, so no call site
+  changes.
 
 - Requesting a suite that produces zero cases (typo'd id, uninstalled
   provider) is now a recorded failure instead of a silent green run: the
