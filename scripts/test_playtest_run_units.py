@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import io
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -670,6 +671,59 @@ def test_write_stock_config_restricts_file_mode() -> None:
     print("PASS stock_config_permissions generated config is user-only")
 
 
+def test_client_install_is_discovered_from_steam_libraries() -> None:
+    """A library on another disk is read out of Steam's own catalogue.
+
+    Hardcoding a library is what sends a run at the wrong install, or at none:
+    the launcher then exits with "Game not found" into a log the orchestrator
+    is not reading yet, and the run spends its whole timeout waiting.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        home = pathlib.Path(tmp)
+        native = home / ".local/share/Steam/steamapps"
+        (native / "common").mkdir(parents=True)
+        game = home / "second-disk/Steam/steamapps/common/7 Days To Die"
+        game.mkdir(parents=True)
+        (game / playtest_run.CLIENT_EXECUTABLE).write_text("", encoding="utf-8")
+        library = home / "second-disk/Steam"
+        (native / "libraryfolders.vdf").write_text(
+            '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"' + str(library) + '"\n\t}\n}\n',
+            encoding="utf-8",
+        )
+        found = playtest_run.client_game_dir(env={}, home=home)
+        assert found == game, f"expected {game}, got {found}"
+    print("PASS client_install_discovery found via libraryfolders.vdf")
+
+
+def test_no_client_install_is_a_refusal_not_a_guess() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = pathlib.Path(tmp)
+        (home / ".local/share/Steam/steamapps/common").mkdir(parents=True)
+        assert playtest_run.client_game_dir(env={}, home=home) is None
+    print("PASS client_install_refusal no install found reports None")
+
+
+def test_game_env_wins_over_discovery() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = pathlib.Path(tmp)
+        explicit = home / "explicit"
+        found = playtest_run.client_game_dir(env={"GAME": str(explicit)}, home=home)
+        assert found == explicit, found
+    print("PASS client_install_env_wins GAME overrides discovery")
+
+
+def test_client_compat_follows_the_install_library() -> None:
+    """The prefix belongs to the library the client is in, not to a fixed one."""
+    game = pathlib.Path("/data/games/Steam/steamapps/common/7 Days To Die")
+    compat = playtest_run.client_compat_for_game(game, env={})
+    expected = pathlib.Path(
+        "/data/games/Steam/steamapps/compatdata/" + playtest_run.STEAM_APPID
+    )
+    assert compat == expected, compat
+    override = pathlib.Path("/elsewhere/prefix")
+    assert playtest_run.client_compat_for_game(game, env={"COMPAT": str(override)}) == override
+    print("PASS client_compat_follows_library prefix derived from the library")
+
 def test_write_stock_config_activates_commented_userdata_folder() -> None:
     """Stock ships UserDataFolder commented out. Rewriting the value inside
     that comment leaves the server saving under its default tree, so
@@ -749,6 +803,10 @@ def main() -> int:
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
         ("wait_file_contains", test_wait_file_contains_incremental),
+        ("client_install_discovery", test_client_install_is_discovered_from_steam_libraries),
+        ("client_install_refusal", test_no_client_install_is_a_refusal_not_a_guess),
+        ("client_install_env_wins", test_game_env_wins_over_discovery),
+        ("client_compat_follows_library", test_client_compat_follows_the_install_library),
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),

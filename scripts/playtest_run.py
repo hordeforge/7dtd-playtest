@@ -52,6 +52,20 @@ DEFAULT_COMPAT = (
 )
 
 
+CLIENT_EXECUTABLE = "7DaysToDie.exe"
+# Steam's own standard roots, not anyone's particular install: the native data
+# directory, the two symlinks Steam maintains, and the Flatpak sandbox's copy.
+# Libraries outside these — a second disk, a home-relative games folder — are
+# not guessed at; they are read out of steamapps/libraryfolders.vdf below,
+# which is where Steam itself records them.
+STEAM_ROOTS = (
+    ".local/share/Steam",
+    ".steam/steam",
+    ".steam/root",
+    ".var/app/com.valvesoftware.Steam/data/Steam",
+)
+
+
 def client_log_for_compat(compat: Path) -> Path:
     """Stock launch_client.sh's game log location for one Proton profile."""
     return (
@@ -61,7 +75,74 @@ def client_log_for_compat(compat: Path) -> Path:
     )
 
 
-CLIENT_LOG = client_log_for_compat(DEFAULT_COMPAT)
+def steam_library_dirs(home: Path | None = None) -> list[Path]:
+    """Every `steamapps` directory Steam knows about, in discovery order.
+
+    Read from `steamapps/libraryfolders.vdf` under each standard Steam root,
+    because a library on a second disk or under a different home directory is
+    ordinary and unguessable. Parsed with a `"path"` scan rather than a real
+    VDF parser: the file is small, the key is stable, and a dependency for one
+    field would be its own maintenance.
+    """
+    base = Path.home() if home is None else home
+    libraries: list[Path] = []
+    for root in STEAM_ROOTS:
+        steamapps = base / root / "steamapps"
+        if steamapps.is_dir() and steamapps not in libraries:
+            libraries.append(steamapps)
+        catalog = steamapps / "libraryfolders.vdf"
+        try:
+            text = catalog.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in re.finditer(r'"path"\s+"([^"]+)"', text):
+            candidate = Path(match.group(1)) / "steamapps"
+            if candidate.is_dir() and candidate not in libraries:
+                libraries.append(candidate)
+    return libraries
+
+
+def client_game_dir(env: dict[str, str] | None = None, home: Path | None = None) -> Path | None:
+    """The client install launch_client.sh will use, resolved its way.
+
+    `GAME` wins, because that is the variable the launcher reads. Otherwise the
+    install is *found*: each Steam library is searched for a directory holding
+    the client executable. Resolving it here is what lets the orchestrator
+    refuse before starting anything, rather than leaving a caller who exported
+    nothing — or exported only SEVEN_DAYS_TO_DIE_DIR, which the launcher does
+    not read — to wait out the whole timeout on a client that exited
+    immediately with "Game not found" into a log nobody was reading yet.
+
+    None means no client install was found, which is a refusal, not a guess.
+    """
+    environment = os.environ if env is None else env
+    configured = (environment.get("GAME") or "").strip()
+    if configured:
+        return Path(configured)
+    for steamapps in steam_library_dirs(home):
+        common = steamapps / "common"
+        if not common.is_dir():
+            continue
+        for entry in sorted(common.iterdir()):
+            if (entry / CLIENT_EXECUTABLE).is_file():
+                return entry
+    return None
+
+
+def client_compat_for_game(game: Path, env: dict[str, str] | None = None) -> Path:
+    """The Proton prefix for a client install, derived as the launcher derives it."""
+    environment = os.environ if env is None else env
+    configured = (environment.get("COMPAT") or "").strip()
+    if configured:
+        return Path(configured)
+    text = str(game)
+    marker = "/steamapps/common/"
+    if marker in text:
+        library = text[: text.index(marker)] + "/steamapps"
+        return Path(library) / "compatdata" / STEAM_APPID
+    return DEFAULT_COMPAT
+
+
 
 # Server-authoritative persist pad: every rejoin/persist flow teleports players
 # here before saveworld so the saved position is known and walkable. Tuple for
@@ -1431,8 +1512,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--client-log",
         type=Path,
-        default=CLIENT_LOG,
-        help="client output log to parse for results",
+        default=None,
+        help="client output log to parse for results "
+        "(default: the log under the discovered client install's Proton prefix)",
     )
     ap.add_argument(
         "--peer-client-name",
@@ -1559,6 +1641,37 @@ def main(argv: list[str] | None = None) -> int:
     if not (CONNECT / "scripts" / "launch_client.sh").is_file():
         err(f"missing connect launcher under {CONNECT}")
         return 2
+    # The client install is preflighted for the same reason the dedicated
+    # server above is. launch_client.sh resolves it from GAME and exits with
+    # "Game not found" into its own launch log, which nothing here reads until
+    # the run is over, so a caller who forgot to export GAME saw a client that
+    # simply never appeared and a harness that spent its whole timeout budget
+    # waiting for a log the launcher never opened.
+    game_dir = client_game_dir()
+    if game_dir is None:
+        err(
+            f"no client install found: no Steam library holds a {CLIENT_EXECUTABLE}. "
+            "launch_client.sh reads GAME (not SEVEN_DAYS_TO_DIE_DIR), so export "
+            "GAME=<client install> before running, and COMPAT too when the Proton "
+            "prefix is not beside it."
+        )
+        return 2
+    if not game_dir.is_dir():
+        err(
+            f"missing client install at {game_dir} (from GAME). launch_client.sh reads "
+            "GAME, not SEVEN_DAYS_TO_DIE_DIR; point it at the client install."
+        )
+        return 2
+    if not (game_dir / CLIENT_EXECUTABLE).is_file():
+        err(f"{game_dir} holds no {CLIENT_EXECUTABLE}; GAME must name the client install")
+        return 2
+    # The log to parse belongs to the prefix of *that* install. Defaulting it
+    # from a fixed library instead means a caller on any other layout parses a
+    # file the launcher never writes, and reads an empty run as a failed one.
+    if args.client_log is None:
+        args.client_log = client_log_for_compat(client_compat_for_game(game_dir))
+    log(f"client install {game_dir}")
+    log(f"client log {args.client_log}")
     if peer_client_name and not args.peer_client_compat.is_dir():
         err(f"peer compat profile is missing or not a directory: {args.peer_client_compat}")
         return 2

@@ -443,6 +443,23 @@ Legacy log prefix `[zdtd-playtest]` may appear in older builds; new code emits
 `SUMMARY` / `DONE` / `barrier` tokens are part of the contract. Optional host
 reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 
+### Which client install a run uses
+
+`launch_client.sh` reads **`GAME`** — not `SEVEN_DAYS_TO_DIE_DIR`, which it
+ignores. When `GAME` is unset the orchestrator discovers the install by reading
+Steam's own `steamapps/libraryfolders.vdf` under each standard Steam root and
+taking the first library whose `common/` holds a `7DaysToDie.exe`, so a library
+on a second disk works with no environment at all. `COMPAT` is derived from
+whichever install is chosen, and `--client-log` defaults to the log inside that
+prefix.
+
+Both are preflighted before anything starts. An install that cannot be found,
+or a `GAME` naming a directory with no client executable, is a startup error
+(exit 2) naming the variable. Without that check the launcher exits with
+`Game not found` into its own launch log, which nothing reads until the run is
+over, and the harness spends its whole timeout waiting for a client log that
+was never going to appear.
+
 ## Manual / pair launch
 
 ```bash
