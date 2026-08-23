@@ -27,7 +27,12 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_lock
-from playtest_log import barrier_hits_prefix, parse_client_log  # noqa: E402
+from playtest_log import (  # noqa: E402
+    ClientLogScan,
+    LogTail,
+    barrier_hits_prefix,
+    parse_client_log,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
