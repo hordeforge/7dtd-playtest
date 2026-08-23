@@ -229,7 +229,7 @@ def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
     return False
 
 
-def _literal_replacement(replacement: str):
+def _literal_replacement(replacement: str) -> Callable[[re.Match[str]], str]:
     """re.sub replacer that inserts ``replacement`` without backslash escapes."""
 
     def _sub(_m: re.Match[str]) -> str:
@@ -1908,7 +1908,7 @@ def main(argv: list[str] | None = None) -> int:
                             f"fail={setup_parsed.get('summary', {}).get('fail')}"
                         )
                         break
-                if client_proc is not None and client_proc.poll() is not None:
+                if client_proc.poll() is not None:
                     time.sleep(1)
                     if client_scan.result().get("done") is not None:
                         log(f"{rejoin_label} setup DONE (client exited)")

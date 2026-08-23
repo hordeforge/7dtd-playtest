@@ -34,7 +34,7 @@ starts processes, and the world asserts on every scheduler step after.
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -216,7 +216,7 @@ class SimStorage(pl.LockStorage):
     def mkdir_parents(self, path: Path) -> None:
         return None
 
-    def exclusive(self, path: Path, fn) -> None:
+    def exclusive(self, path: Path, fn: Callable[[], None]) -> None:
         if self.locked_by is not None:
             # The scheduler never resumes another actor inside a critical
             # section, so this can only mean the model itself is broken.
@@ -239,7 +239,11 @@ class SimEnv(pl.LockEnv):
         super().__init__(storage=storage)
         self.sim = sim
         self.cfg = cfg
-        self.storage: SimStorage = storage
+        # The lock reaches the simulated filesystem through the inherited
+        # ``storage`` port (typed LockStorage); this alias keeps the
+        # fault-injection calls below precisely typed without narrowing a
+        # mutable base-class attribute.
+        self.sim_storage = storage
         self._entropy = sim.rng.stream("entropy")
         self._pids = sim.rng.stream("pid")
         self.skew: dict[str, float] = {}
@@ -265,7 +269,7 @@ class SimEnv(pl.LockEnv):
     def bind(self, actor: str) -> None:
         """Point the clock/entropy at whichever agent is currently running."""
         self.actor = actor
-        self.storage.actor = actor
+        self.sim_storage.actor = actor
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +353,7 @@ class Agent:
     def _died(self) -> bool:
         """Did a fault just kill this process? Never inferable from a caught
         exception: the code under test is allowed to swallow those."""
-        return self.env.storage.take_death(self.name)
+        return self.env.sim_storage.take_death(self.name)
 
     # -- lifecycle -----------------------------------------------------
     def run(self) -> Iterator[float]:
@@ -365,7 +369,7 @@ class Agent:
             if self.rng.chance(f.stale_release):
                 self._stale_release()
             if self.rng.chance(f.external_corruption):
-                self.env.storage.corrupt_in_place(LOCK_PATH)
+                self.env.sim_storage.corrupt_in_place(LOCK_PATH)
             try:
                 state = pl.acquire(
                     self.session,
@@ -678,7 +682,9 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
         # Sessions rotate after each crash/release; keep I4's set current.
         original_new_session = pl.new_session_id
 
-        def tracking_new_session(prefix: str = "playtest", *, env=None) -> str:
+        def tracking_new_session(
+            prefix: str = "playtest", *, env: pl.LockEnv | None = None
+        ) -> str:
             sid = original_new_session(prefix, env=env)
             sim.known_sessions.add(sid)  # type: ignore[attr-defined]
             return sid

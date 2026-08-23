@@ -18,10 +18,11 @@ dev = [
 package = false
 
 # Lint gate (make lint): defect-oriented rules only. E/W/F/I/B/SIM/UP/RUF plus
-# the free strictness of C4/RET/A/DTZ/FA (all zero findings today). Style
-# suites that would fight the hand-rolled gate scripts (D, ANN, S, TRY) are
-# deliberately not selected. Lines hard-capped at 100 so two copies fit
-# side-by-side.
+# the free strictness of C4/RET/A/DTZ/FA and the error-only subsets of pylint
+# (PLE), pep8-naming-adjacent (RSE), import hygiene (TID), __slots__ (SLOT) and
+# isinstance/issubclass traps (YTT). Style suites that would fight the
+# hand-rolled gate scripts (D, ANN, S, TRY) are deliberately not selected.
+# Lines hard-capped at 100 so two copies fit side-by-side.
 [tool.ruff]
 line-length = 100
 src = ["scripts"]
@@ -41,14 +42,35 @@ select = [
     "A",   # builtin shadowing
     "DTZ", # naive datetime
     "FA",  # future annotations
+    "PLE", # pylint errors only (used-before-assignment, ...)
+    "RSE", # unnecessary paren on raised exception
+    "TID", # tidy imports (no relative-import tricks)
+    "SLOT",# manual __slots__ subclassing of immutable types
+    "YTT", # truthy tests on sys/typing internals
 ]
 
 # Type gate (make typecheck). Baseline strictness the tree passes today;
-# ratchet up as annotations spread.
+# ratchet up as annotations spread. disallow_untyped_defs is next (23 gaps);
+# disallow_any_generics after that (30).
 [tool.mypy]
 python_version = "3.11"
 files = ["scripts"]
 check_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+warn_return_any = true
 warn_unused_ignores = true
 warn_redundant_casts = true
+warn_unreachable = true
+strict_equality = true
+strict_equality_for_none = true
 no_implicit_optional = true
+no_implicit_reexport = true
+extra_checks = true
+enable_error_code = [
+    "possibly-undefined",
+    "ignore-without-code",
+    "truthy-bool",
+    "unimported-reveal",
+    "deprecated",
+]
