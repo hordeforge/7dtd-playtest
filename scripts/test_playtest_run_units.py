@@ -473,6 +473,78 @@ def test_config_summary_redacts_telnet_password() -> None:
     print("PASS config_summary_redaction effective options logged, password redacted")
 
 
+def test_telnet_admin_ai_and_player_parsing() -> None:
+    """TelnetAdmin's parsers decide which entities die on the live server: a
+    regression either kills the player entity or clears nothing, and neither
+    is visible until a real suite runs. Text in, entity ids out (docstring
+    contract: shared AI keyword table, stock `listplayers` / zdtd `list`
+    styles, `(entity N)` console form, non-positive ids dropped)."""
+    tn = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    listents_out = "\n".join(
+        (
+            "2. zombieSteve (id=3877, pos=(520.0, 62.0, 950.0))",
+            "3. zombieYo (ID=3878)",
+            "4. animalStag (id=3890)",
+            "5. bandit (id=3901)",
+            "zombieBoe",
+            "Remote 'maci' (id=171, hp=100)",
+        )
+    )
+    assert tn._ai_entity_ids(listents_out) == ["3877", "3878", "3890"], (
+        f"AI table picked wrong entities: {tn._ai_entity_ids(listents_out)}"
+    )
+
+    class CannedTelnet(playtest_run.TelnetAdmin):
+        """Replays canned server replies instead of opening a socket."""
+
+        def __init__(self, replies: list[str]) -> None:
+            self._replies = list(replies)
+            self.sent: list[str] = []
+            self.host = ""
+            self.port = 0
+            self.password = ""
+            self._sock = None
+
+        def exec(self, cmd: str) -> str:
+            self.sent.append(cmd)
+            return self._replies.pop(0)
+
+        def _recv(self, settle: float) -> str:
+            return ""  # the lag re-read after a complete reply sees no more data
+
+    # kill_non_player_ai must kill exactly the listed non-player AI ids and
+    # never fall back to killall-style behavior while players are alive.
+    # Reply order matches the call order: listents first, then listplayers.
+    killer = CannedTelnet(
+        [
+            "2. zombieSteve (id=3877)\n3. animalStag (id=3890)",
+            "Total of 1 in the game\n'maci' (id=171, pos=(520.0, 62.0, 950.0))",
+            "killed 3877",
+            "killed 3890",
+        ]
+    )
+    assert killer.kill_non_player_ai() == 2, (
+        f"killed~={killer.sent} (player or fallback kill leaked in)"
+    )
+    assert killer.sent == [
+        "listents",
+        "listplayers",
+        "kill 3877",
+        "kill 3890",
+    ], f"unexpected commands sent: {killer.sent}"
+
+    # zdtd style: listplayers is unknown, `list` answers with (entity N);
+    # id=0 entries must be dropped, duplicates collapsed.
+    zdtd = CannedTelnet(
+        [
+            "unknown command: listplayers",
+            "(entity 107) maci\n(entity 0) ghost\n(entity 107) dup",
+        ]
+    )
+    assert zdtd.list_player_ids() == [107], zdtd.list_player_ids()
+    assert zdtd.sent == ["listplayers", "list"], zdtd.sent
+
+
 def test_write_stock_config_restricts_file_mode() -> None:
     """The generated serverconfig carries TelnetPassword: it must not inherit
     a world-readable umask."""
@@ -525,6 +597,7 @@ def main() -> int:
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
+        ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
         ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
     ):
         try:

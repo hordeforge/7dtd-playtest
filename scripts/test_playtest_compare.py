@@ -10,10 +10,16 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOL = ROOT / "scripts" / "playtest_compare.py"
+_SCRIPTS = ROOT / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+import playtest_run  # noqa: E402
+
+TOOL = _SCRIPTS / "playtest_compare.py"
 
 STOCK_LOG = (
     "[7dtd-playtest] PASS smoke/join detail=ok\n"
@@ -62,7 +68,11 @@ def test_identical_sides_have_no_findings(tmp_path):
     r = _run(tmp_path, STOCK_LOG, STOCK_LOG)
     assert r.returncode == 0, r.stderr
     payload = json.loads((tmp_path / "out" / "playtest-compare.json").read_text(encoding="utf-8"))
+    assert payload["compared"] is True
     assert payload["findings"] == []
+    # Identical sides must still be diffed case by case, not collapsed away.
+    assert {c["case"] for c in payload["cases"]} == {"smoke/join", "smoke/enter"}
+    assert payload["stock"]["summary"] == {"pass": 1, "fail": 1, "skip": 0}
 
 
 def test_report_json_wall_axis(tmp_path):
@@ -195,6 +205,85 @@ def test_newest_report_picks_greatest_name_on_mtime_tie(tmp_path):
         os.utime(d / name, (stamp, stamp))
     picked = mod.newest_report(d)
     assert picked is not None and picked.name == "report-200.json"
+
+
+def test_orchestrator_report_diffs_through_dir_mode(tmp_path):
+    """Producer→consumer contract, end to end: a report written by the
+    orchestrator's real write_report must be found by newest_report's
+    report-*.json glob, pass --require-fresh-minutes, and diff per case.
+
+    Every other test here hand-builds its fixture JSONs; without this test a
+    rename of a payload field or the report filename in playtest_run would
+    keep all gates green and only surface as exit 2 on a live compare run.
+    """
+    now = int(time.time())
+
+    def write(side: Path, name_epoch: int, server: str, ran_epoch: int | None) -> None:
+        side.mkdir(parents=True)
+        payload = {
+            "server": server,
+            "suite": "smoke",
+            "summary": {"pass": 1, "fail": 1, "skip": 0},
+            "done": {"exit_hint": 0},
+            "results": [
+                {"status": "PASS", "case": "smoke/join", "detail": "ok"},
+                {"status": "FAIL", "case": "smoke/enter", "detail": "denied"},
+            ],
+            "wall_sec": 12.5,
+            "ran_epoch": ran_epoch,
+        }
+        playtest_run.write_report(side / f"report-{name_epoch}.json", payload)
+
+    stock = tmp_path / "stock"
+    zdtd = tmp_path / "zdtd"
+    write(stock, now, "stock", now)
+    # zdtd side omits ran_epoch on purpose: freshness must fall back to the
+    # report-<epoch>.json filename (ran_epoch_of), as with older reports.
+    write(zdtd, now + 1, "zdtd", None)
+
+    out = tmp_path / "out"
+    r = subprocess.run(
+        [sys.executable, str(TOOL), "--stock-dir", str(stock), "--zdtd-dir", str(zdtd),
+         "--out", str(out), "--require-fresh-minutes", "60"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
+    assert payload["compared"] is True
+    assert payload["findings"] == [], payload["findings"]
+    assert payload["stock"]["wall"] == 12.5 and payload["zdtd"]["wall"] == 12.5
+    assert payload["stock"]["summary"] == {"pass": 1, "fail": 1, "skip": 0}
+    # Filename-epoch fallback kept both sides fresh (not "unknown").
+    assert payload["stock"]["ranAtUtc"] != "unknown"
+    assert payload["zdtd"]["ranAtUtc"] != "unknown"
+
+
+def test_no_results_on_either_side_refuses(tmp_path):
+    """Two live logs that contain no result lines at all are not an empty
+    diff: refuse loudly instead of writing a zero-case comparison."""
+    noise = "[game] boot noise, no playtest events\n"
+    r = _run(tmp_path, noise, noise)
+    assert r.returncode == 1, r.stderr
+    assert "no playtest result lines" in r.stderr
+    assert not (tmp_path / "out" / "playtest-compare.json").exists()
+
+
+def test_orchestrator_payload_keys_match_consumer_contract():
+    """Structural drift guard for the report JSON boundary.
+
+    playtest_compare.load_results reads results/summary/wall_sec/server/
+    ran_epoch out of payloads that main() builds inline in playtest_run.py,
+    and newest_report globs report-<epoch>.json. The behavioral round-trip is
+    covered by test_orchestrator_report_diffs_through_dir_mode; this pin
+    catches a plain key/filename rename on the producer side, which no
+    hand-built fixture can see.
+    """
+    src = (_SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
+    for key in ('"results"', '"summary"', '"server"', '"wall_sec"', '"ran_epoch"'):
+        assert key in src, f"producer payload lost consumer key {key}"
+    assert 'report-{int(time.time())}.json' in src, (
+        "producer report filename no longer matches newest_report's glob"
+    )
 
 
 if __name__ == "__main__":
