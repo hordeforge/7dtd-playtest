@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
 CONNECT = WORKSPACE / "7dtd-fastconnect"
 LOADGEN = WORKSPACE / "7dtd-loadgen"
-DEFAULT_ZDTD = WORKSPACE / "zdtd" / "zig-out" / "bin" / "zdtd"
+DEFAULT_ZDTD = WORKSPACE / "zdtd-server" / "zig-out" / "bin" / "zdtd"
 DEFAULT_GAME_SRV = (
     Path.home() / ".local/share/Steam/steamapps/common/7 Days to Die Dedicated Server"
 )
@@ -1355,7 +1355,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--world",
         type=Path,
-        default=WORKSPACE / "zdtd" / "worlds" / "playtest_auto",
+        default=WORKSPACE / "zdtd-server" / "worlds" / "playtest_auto",
         help="zdtd save dir only (ignored for stock)",
     )
     ap.add_argument(

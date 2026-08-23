@@ -8,7 +8,7 @@ Host-side concurrency (the exclusivity lock) is covered by deterministic
 simulation: `make dst`, documented in **[DST.md](DST.md)**.
 
 Join/auto-connect is **not** here: install [`../7dtd-fastconnect/`](../7dtd-fastconnect/)
-as well. Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server-server/docs/CLIENT_PLAYTEST.md).
+as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).
 
 ## Requirements
 
@@ -20,7 +20,7 @@ as well. Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-serve
 - `7dtd-fastconnect` installed
 - Game: `~/.local/share/Steam/steamapps/common/7 Days To Die` (`GAME=`)
 - Only for zdtd-target runs (`playtest-zdtd`, `playtest-apm`): built `zdtd`
-  at `../zdtd-server-server/zig-out/bin/zdtd`
+  at `../zdtd-server/zig-out/bin/zdtd`
 - Only for the `bot` suite: server-side `BotMod` in the dedicated's `Mods/`
   (provides the `bot` telnet commands the orchestrator drives)
 - Host Python via **`uv`**, pinned to CPython 3.13 by `.python-version`
@@ -118,7 +118,7 @@ in the log without rerunning with `--help`.
 | Env | Default | Meaning |
 |---|---|---|
 | `PLAYTEST_SERVER` | `stock` | Server backend, `stock` or `zdtd` (`--server`) |
-| `ZDTD` | `../zdtd-server-server/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
+| `ZDTD` | `../zdtd-server/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
 | `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
 | `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |
 | `PLAYTEST_TIMEOUT_SEC` | `900` | Harness wall-clock timeout in seconds > 0 (`--timeout`). Invalid values are a harness error (exit 2) naming the variable |

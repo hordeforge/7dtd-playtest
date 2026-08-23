@@ -3,7 +3,7 @@
 Built-in **demo mode** and **benchmark** style suites for the stock client
 against a real server (default: stock dedicated Navezgane).
 
-Design: [`../zdtd-server-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server-server/docs/CLIENT_PLAYTEST.md)  
+Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md)  
 Code: `Source/PlayTestMod/Catalog.cs`
 
 ## How to think about this
