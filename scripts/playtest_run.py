@@ -10,6 +10,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -27,10 +28,11 @@ from xml.sax.saxutils import escape as xml_escape
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import playtest_lock
+import playtest_lock  # noqa: E402
 from playtest_log import (  # noqa: E402
     ClientLogScan,
     LogTail,
+    TailSource,
     barrier_hits_prefix,
 )
 
@@ -89,7 +91,7 @@ def positive_seconds(text: str) -> float:
     try:
         val = float(text)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}")
+        raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}") from None
     if not math.isfinite(val) or val <= 0:
         raise argparse.ArgumentTypeError(
             f"must be a finite number of seconds > 0, got {text!r}"
@@ -118,7 +120,7 @@ def tcp_port(text: str) -> int:
     try:
         val = int(text)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"not a port number: {text!r}")
+        raise argparse.ArgumentTypeError(f"not a port number: {text!r}") from None
     if not 1 <= val <= 65535:
         raise argparse.ArgumentTypeError(f"port out of range 1..65535: {val}")
     return val
@@ -332,7 +334,8 @@ def _popen_to_logfile(
     spawn itself fails (missing binary, exec error), the already-opened
     descriptor is closed here instead of leaking until interpreter exit.
     """
-    fh = open(log_path, "w", encoding="utf-8")
+    # Long-lived by design: the handle rides on proc._log_fh and stop_proc closes it.
+    fh = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
     try:
         proc = subprocess.Popen(
             cmd,
@@ -703,20 +706,17 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):
-        try:
+        # A process already gone mid-teardown must not fail the others.
+        with contextlib.suppress(Exception):
             proc.terminate()
-        except Exception:
-            pass
     try:
         proc.wait(timeout=_STOP_TERM_WAIT_SEC)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 proc.kill()
-            except Exception:
-                pass
         # SIGKILL needs its own reap: without wait() the killed child stays a
         # zombie until this orchestrator exits.
         try:
@@ -725,10 +725,8 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
             warn(f"stop_proc: pid {proc.pid} not reaped after SIGKILL")
     fh = getattr(proc, "_log_fh", None)
     if fh:
-        try:
+        with contextlib.suppress(Exception):
             fh.close()
-        except Exception:
-            pass
 
 
 def write_report(path: Path, payload: dict) -> None:
@@ -983,10 +981,8 @@ class TelnetAdmin:
 
     def close(self) -> None:
         if self._sock:
-            try:
+            with contextlib.suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
             self._sock = None
 
 
@@ -1007,10 +1003,9 @@ def install_signal_handlers() -> None:
         for name in sig_names:
             s = getattr(signal, name, None)
             if s is not None:
-                try:
+                # Re-registering can fail once the interpreter is tearing down.
+                with contextlib.suppress(ValueError, OSError):
                     signal.signal(s, signal.SIG_IGN)
-                except (ValueError, OSError):
-                    pass
         raise SystemExit(128 + signum)
 
     for name in sig_names:
@@ -1051,10 +1046,8 @@ def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
             warn(f"artifact prune skipped ({ex}); old {pattern} will accumulate")
             continue
         for old in entries[:-keep]:
-            try:
+            with contextlib.suppress(OSError):
                 old.unlink()
-            except OSError:
-                pass
 
 
 def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
@@ -1068,10 +1061,8 @@ def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
         if old.is_dir():
             shutil.rmtree(old, ignore_errors=True)
         else:
-            try:
+            with contextlib.suppress(OSError):
                 old.unlink()
-            except OSError:
-                pass
 
 
 def _quarantine_entry(qroot: Path, label: str) -> Path | None:
@@ -1307,7 +1298,7 @@ def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:
     )
 
 
-def pump_log_tail(tail: LogTail, scan: ClientLogScan) -> str:
+def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
     """Drain newly appended complete lines through the shared line parser.
 
     Returns the new text so per-line greps in the caller see exactly what was
@@ -1691,9 +1682,9 @@ def main(argv: list[str] | None = None) -> int:
                             err(
                                 "tail server log:\n"
                                 + "\n".join(
-                                    ready_log.read_text(encoding="utf-8", errors="replace").splitlines()[
-                                        -40:
-                                    ]
+                                    ready_log.read_text(
+                                        encoding="utf-8", errors="replace"
+                                    ).splitlines()[-40:]
                                 )
                             )
                         return 2
@@ -1844,7 +1835,8 @@ def main(argv: list[str] | None = None) -> int:
                                 n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
                                 if n == 0:
                                     log(
-                                        "warn: teleport_persist_pad: no player ids yet; retry next poll"
+                                        "warn: teleport_persist_pad: no player ids"
+                                        "; retry next poll"
                                     )
                                     tn.close()
                                     break
@@ -1867,7 +1859,8 @@ def main(argv: list[str] | None = None) -> int:
                                 n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
                             if n == 0:
                                 log(
-                                    f"warn: {rejoin_setup_barrier}: no player ids yet; retry next poll"
+                                    f"warn: {rejoin_setup_barrier}: no player ids"
+                                    "; retry next poll"
                                 )
                                 tn.close()
                             else:

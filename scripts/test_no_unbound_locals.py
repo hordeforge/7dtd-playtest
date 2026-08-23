@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -43,7 +44,7 @@ NESTED_SCOPES = (
 )
 
 
-def _scope_nodes(scope: ast.AST) -> ast.AST:
+def _scope_nodes(scope: ast.AST) -> Iterator[ast.AST]:
     """Yield nodes belonging to ``scope`` itself, not nested scopes."""
     body: list[ast.stmt] | None = getattr(scope, "body", None)
     if body is None:
@@ -58,17 +59,17 @@ def _scope_nodes(scope: ast.AST) -> ast.AST:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for d in node.args.defaults:
                     stack.extend(ast.walk(d))
-                for d in node.args.kw_defaults:
-                    if d is not None:
-                        stack.extend(ast.walk(d))
+                for dk in node.args.kw_defaults:
+                    if dk is not None:
+                        stack.extend(ast.walk(dk))
                 for dec in node.decorator_list:
                     stack.extend(ast.walk(dec))
             elif isinstance(node, ast.Lambda):
                 for d in node.args.defaults:
                     stack.extend(ast.walk(d))
-                for d in node.args.kw_defaults:
-                    if d is not None:
-                        stack.extend(ast.walk(d))
+                for dk in node.args.kw_defaults:
+                    if dk is not None:
+                        stack.extend(ast.walk(dk))
             continue
         stack.extend(ast.iter_child_nodes(node))
 
@@ -110,7 +111,8 @@ def _stores_loads(scope: ast.AST) -> tuple[dict[str, int], dict[str, int]]:
             params.append(args.vararg)
         if args.kwarg:
             params.append(args.kwarg)
-        note([a.arg for a in params], scope.lineno, store=True)
+        # Module scopes carry no lineno; line 0 keeps them out of reports.
+        note([a.arg for a in params], getattr(scope, "lineno", 0), store=True)
 
     for node in _scope_nodes(scope):
         if isinstance(node, ast.Name):
@@ -122,9 +124,8 @@ def _stores_loads(scope: ast.AST) -> tuple[dict[str, int], dict[str, int]]:
             tgt = node.target
             if isinstance(tgt, ast.Name):
                 note([tgt.id], tgt.lineno, store=True)
-        elif isinstance(node, ast.ExceptHandler):
-            if node.name:
-                note([node.name], node.lineno, store=True)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            note([node.name], node.lineno, store=True)
     return stores, loads
 
 

@@ -28,7 +28,7 @@ import json
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from playtest_log import parse_client_log
@@ -70,7 +70,7 @@ def ran_epoch_of(path: Path, res: dict) -> float | None:
 def fmt_utc(epoch: float | None) -> str:
     if epoch is None:
         return "unknown"
-    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%MZ")
 
 
 def newest_report(d: Path) -> Path | None:
@@ -103,15 +103,20 @@ def main() -> int:
     args = ap.parse_args()
 
     stock_path, stock_flag = (
-        (args.stock, "--stock") if args.stock is not None
-        else ((newest_report(args.stock_dir), "--stock-dir") if args.stock_dir else (None, "--stock"))
+        (args.stock, "--stock")
+        if args.stock is not None
+        else (
+            (newest_report(args.stock_dir), "--stock-dir")
+            if args.stock_dir
+            else (None, "--stock")
+        )
     )
     zdtd_path, zdtd_flag = (
         (args.zdtd, "--zdtd") if args.zdtd is not None
         else ((newest_report(args.zdtd_dir), "--zdtd-dir") if args.zdtd_dir else (None, "--zdtd"))
     )
-    missing = [s for s, p in (("stock", stock_path), ("zdtd", zdtd_path)) if p is None]
-    if missing:
+    if stock_path is None or zdtd_path is None:
+        missing = [s for s, p in (("stock", stock_path), ("zdtd", zdtd_path)) if p is None]
         print(f"ERROR: no report found on the {', '.join(missing)} side; the side "
               "either failed to start or its logs were wiped before the run. "
               "Refusing to diff missing or stale evidence.",
@@ -155,7 +160,7 @@ def main() -> int:
             return 3
 
     def by_case(res):
-        out = {}
+        out: dict[str, list[dict]] = {}
         for r in res["results"]:
             case = r.get("case") or "?"
             out.setdefault(case, []).append(r)
@@ -210,7 +215,10 @@ def main() -> int:
     lines.append(f"| cases FAIL | {ss['fail']} | {zs['fail']} |")
     lines.append(f"| cases SKIP | {ss['skip']} | {zs['skip']} |")
     if wall["stock"] is not None or wall["zdtd"] is not None:
-        wf = lambda v: f"{v:.1f}" if v is not None else "n/a"
+
+        def wf(v: float | None) -> str:
+            return f"{v:.1f}" if v is not None else "n/a"
+
         lines.append(f"| wall time (s) | {wf(wall['stock'])} | {wf(wall['zdtd'])} |")
     if stock.get("nre_like") or zdtd.get("nre_like"):
         lines.append(f"| client NRE-like hits | {len(stock.get('nre_like', []))} | "

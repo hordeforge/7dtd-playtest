@@ -28,7 +28,7 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import playtest_run
+import playtest_run  # noqa: E402
 
 ROOT = _SCRIPTS.parent
 CATALOG_CS = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
@@ -414,7 +414,8 @@ def test_stop_proc_exited_child_closes_log_handle() -> None:
     proc = _spawn_detached("exit 0")
     while proc.poll() is None:
         time.sleep(0.02)
-    fh = tempfile.TemporaryFile()
+    # Raw handle on purpose: mirrors the orchestrator's proc._log_fh ownership.
+    fh = tempfile.TemporaryFile()  # noqa: SIM115
     try:
         proc._log_fh = fh  # type: ignore[attr-defined]
         playtest_run.stop_proc(proc)
@@ -436,7 +437,7 @@ def test_reap_finished_helpers_drops_only_exited() -> None:
     playtest_run._MUTE_HELPER_PROCS[:] = [done, live]
     try:
         playtest_run.reap_finished_helpers()
-        assert playtest_run._MUTE_HELPER_PROCS == [live], (
+        assert [live] == playtest_run._MUTE_HELPER_PROCS, (
             "exited helpers must be reaped away; live ones kept"
         )
     finally:

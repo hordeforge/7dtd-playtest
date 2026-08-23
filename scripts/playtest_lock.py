@@ -34,8 +34,9 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_LOCK_REL = Path(".cache") / "7dtd-playtest" / "playtest_running"
@@ -247,7 +248,7 @@ def utc_now_iso(env: LockEnv | None = None) -> str:
 
 def format_utc(epoch: float) -> str:
     return (
-        datetime.fromtimestamp(epoch, timezone.utc)
+        datetime.fromtimestamp(epoch, UTC)
         .replace(microsecond=0)
         .isoformat()
         .replace("+00:00", "Z")
@@ -278,7 +279,7 @@ def parse_utc_timestamp(value: str | None) -> float | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.timestamp()
 
 
@@ -371,10 +372,8 @@ def write_lock(
         store.replace(tmp, path)
     finally:
         if store.exists(tmp):
-            try:
+            with suppress(OSError):
                 store.unlink(tmp)
-            except OSError:
-                pass
 
 
 def is_stale(
@@ -494,12 +493,9 @@ def can_start(
     probe = live_probe if live_probe is not None else default_live_runtime_running
     state = read_lock(path, env=e)
     if state.running and state.session and state.session != session:
-        if is_stale(state, max_age_sec=max_age_sec, env=e) and not probe():
-            return True
-        return False
-    if probe() and not (state.running and state.session == session):
-        return False
-    return True
+        # A foreign claim only frees up once stale AND no runtime is alive.
+        return is_stale(state, max_age_sec=max_age_sec, env=e) and not probe()
+    return not (probe() and not (state.running and state.session == session))
 
 
 def acquire(
@@ -550,27 +546,23 @@ def acquire(
                     held_by=state.session,
                     reason="foreign_holder",
                 )
-        if live and not (state.running and state.session == session):
-            # Free lock but client and/or dedicated already up.
-            if not (
-                state.running
-                and state.session
-                and state.session != session
-                and is_stale(state, max_age_sec=max_age_sec, env=e)
-            ):
-                raise PlaytestLockError(
-                    f"live playtest runtime (DaysToDie client and/or dedicated/"
-                    f"zdtd server) present; refusing start (file {path}"
-                    + (
-                        f", lock session={state.session}"
-                        if state.session
-                        else ", lock free"
-                    )
-                    + ")",
-                    held_by=state.session,
-                    reason="live_runtime",
-                )
-            # Stale foreign + live: already raised stale_but_live above.
+        # Free lock but client and/or dedicated already up: refuse unless the
+        # file also carries a stale foreign claim, which the block above
+        # already rejected as stale_but_live.
+        if live and not (state.running and state.session == session) and not (
+            state.running
+            and state.session
+            and state.session != session
+            and is_stale(state, max_age_sec=max_age_sec, env=e)
+        ):
+            raise PlaytestLockError(
+                f"live playtest runtime (DaysToDie client and/or dedicated/"
+                f"zdtd server) present; refusing start (file {path}"
+                + (f", lock session={state.session}" if state.session else ", lock free")
+                + ")",
+                held_by=state.session,
+                reason="live_runtime",
+            )
         now = utc_now_iso(e)
         # Preserve original acquired time on re-entrant refresh by same session.
         acq = (
@@ -730,15 +722,14 @@ class HeartbeatLoop:
         try:
             heartbeat(self.session, path=self.path, env=self.env)
             self.touches += 1
-        except BaseException as ex:  # noqa: BLE001 - report and keep trying
+        except BaseException as ex:
             self.errors += 1
             if isinstance(ex, PlaytestLockError) and ex.reason == "foreign_holder":
                 self.lost_claim = True
             if self.on_error is not None:
-                try:
+                # A misbehaving callback must not break the heartbeat loop.
+                with suppress(Exception):
                     self.on_error(ex)
-                except Exception:
-                    pass
         return True
 
 

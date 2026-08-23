@@ -125,7 +125,9 @@ that module, or the simulation stops covering it.
 ## Commands
 
 ```bash
-make test                 # offline gates, no game install needed
+make test                 # offline gates (lint + typecheck + suites), no game install needed
+make lint                 # ruff over scripts/ ([tool.ruff])
+make typecheck            # mypy over scripts/ ([tool.mypy])
 make test-one GATE=test_dst.py   # run one gate while iterating
 make check                # exactly what CI runs: test + dst DST_SEEDS=200
 make install              # build + install playtest mod
@@ -170,8 +172,15 @@ Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
 
 ## Offline gates (no game install)
 
-`make test` runs the ten offline gates on every push (CI:
-`.github/workflows/ci.yml`):
+`make test` runs lint + typecheck plus the ten offline suites on every push
+(CI: `.github/workflows/ci.yml`). The analysis gates come first and are
+blocking:
+
+0. ruff over `scripts/` (`make lint`, `[tool.ruff]` in pyproject.toml) and
+   mypy over `scripts/` (`make typecheck`, `[tool.mypy]`); both tools are
+   pinned in the dev dependency-group so local and CI versions match uv.lock.
+
+Then the ten suites:
 
 1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
    + counts total must equal Catalog.cs. A catalog addition that skips

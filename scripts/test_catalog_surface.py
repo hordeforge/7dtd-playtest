@@ -126,7 +126,8 @@ def persist_pad_from_catalog(src: str) -> tuple[int, int, int] | None:
     )
     if not m:
         return None
-    return tuple(int(float(g)) for g in m.groups())
+    x, y, z = (int(float(g)) for g in m.groups())
+    return (x, y, z)
 
 
 def persist_pad_from_orchestrator(src: str) -> tuple[int, int, int] | None:
@@ -135,7 +136,8 @@ def persist_pad_from_orchestrator(src: str) -> tuple[int, int, int] | None:
     )
     if not m:
         return None
-    return tuple(int(g) for g in m.groups())
+    x, y, z = (int(g) for g in m.groups())
+    return (x, y, z)
 
 
 def main() -> int:

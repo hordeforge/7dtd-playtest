@@ -177,7 +177,7 @@ def test_simulator_catches_planted_regressions() -> None:
         finally:
             setattr(pl, attr, original)
         planted.append((name, len(hits)))
-        _assert(hits, f"simulator missed planted bug: {name}")
+        _assert(len(hits) > 0, f"simulator missed planted bug: {name}")
 
     _assert(pl.acquire is real_acquire, "acquire not restored")
     _assert(pl.write_lock is real_write, "write_lock not restored")

@@ -39,7 +39,7 @@ MAX_SEED = 2**64 - 1
 def derive_seed(seed: int, label: str) -> int:
     """Stable child seed. Uses sha256, not hash(), which is PYTHONHASHSEED
     dependent and would make runs irreproducible across processes."""
-    digest = hashlib.sha256(f"{seed}:{label}".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"{seed}:{label}".encode()).digest()
     return int.from_bytes(digest[:8], "big")
 
 

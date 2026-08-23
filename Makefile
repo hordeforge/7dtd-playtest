@@ -33,7 +33,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help build install uninstall clean test test-one check dst dst-soak playtest playtest-smoke \
+.PHONY: help build install uninstall clean test test-one lint typecheck check dst dst-soak playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
@@ -41,8 +41,10 @@ endif
 
 help:
 	@echo "Offline dev loop (no game install needed):"
-	@echo "  make test                        run all offline gates"
+	@echo "  make test                        run all offline gates (lint + typecheck + suites)"
 	@echo "  make test-one GATE=test_dst.py   run one gate (file name under scripts/)"
+	@echo "  make lint                        ruff over scripts/ ([tool.ruff] in pyproject.toml)"
+	@echo "  make typecheck                   mypy over scripts/ ([tool.mypy] in pyproject.toml)"
 	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
 	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
 	@echo "  make check                       everything CI runs: test + dst DST_SEEDS=200"
@@ -93,7 +95,16 @@ clean:
 # uv.lock disagree, so a build can never drift from the committed lock.
 UV := uv run --locked --project "$(ROOT)" python
 
-test:
+# Lint gate: ruff with the defect-oriented rule set from pyproject.toml
+# ([tool.ruff]). Same locked tool version locally and in CI.
+lint:
+	@cd "$(ROOT)" && uv run --locked ruff check scripts
+
+# Type gate: mypy baseline strictness from pyproject.toml ([tool.mypy]).
+typecheck:
+	@cd "$(ROOT)" && uv run --locked python -m mypy scripts
+
+test: lint typecheck
 	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"
 	$(UV) "$(ROOT)/scripts/test_version_surface.py"
 	$(UV) "$(ROOT)/scripts/test_scenario_provider_surface.py"

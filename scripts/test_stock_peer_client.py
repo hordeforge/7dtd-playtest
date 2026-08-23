@@ -2,7 +2,6 @@
 """Structural regression checks for passive stock-peer orchestration."""
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = (ROOT / "scripts" / "playtest_run.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -21,7 +20,7 @@ checks = [
         and "must be provided together" in RUNNER,
     ),
     require(
-        "peer gets a distinct stock Local identity", 
+        "peer gets a distinct stock Local identity",
         '"7DTD_PLAYER_NAME": peer_client_name' in RUNNER,
     ),
     require(

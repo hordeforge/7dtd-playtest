@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -439,10 +440,8 @@ class Agent:
             if self.rng.chance(f.agent_crash):
                 self._die("crash_holding")
                 return
-            try:
+            with suppress(SimCrash):
                 loop.tick(self.sim.clock.now())
-            except SimCrash:
-                pass
             if self._died():
                 self._die("crash_in_heartbeat")
                 return
@@ -692,7 +691,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
             sim.known_sessions.add(sid)  # type: ignore[attr-defined]
             return sid
 
-        pl.new_session_id = tracking_new_session  # type: ignore[assignment]
+        pl.new_session_id = tracking_new_session
         try:
             for i, a in enumerate(agents):
                 sim.spawn(a.name, a.run(), delay=i * 0.5)
@@ -702,7 +701,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
             except InvariantViolation as ex:
                 violation = str(ex)
         finally:
-            pl.new_session_id = original_new_session  # type: ignore[assignment]
+            pl.new_session_id = original_new_session
     finally:
         pl.set_env(previous)
 

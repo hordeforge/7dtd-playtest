@@ -21,14 +21,15 @@ import io
 import random
 import sys
 import tempfile
+from itertools import pairwise
 from pathlib import Path
 from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import playtest_log
-import playtest_run
+import playtest_log  # noqa: E402
+import playtest_run  # noqa: E402
 
 
 def test_write_junit_escapes_log_derived_attributes() -> None:
@@ -209,7 +210,7 @@ _JUNK_LINES = [
     "NullReferenceException: Object reference not set",
     "chat: player said <script>alert('&\"')</script>",
     "\x01\x02\x1f[7dtd-playtest]\x7fcontrol soup",
-    "ünïcödé　全角 combining é́ emoji 🧟 BOM ﻿ NBSP x",
+    "ünïcödé　全角 combining é́ emoji 🧟 BOM ﻿ NBSP x",
     "[7dtd-playtest] " + "{" + "}" * 400,
     "[" + "9" * 300 + "] PASS x/y " + "=" * 500,
 ]
@@ -316,7 +317,7 @@ _JUNIT_CHARS = [
     "\n",
     "\r",
     "﻿",
-    " ",
+    " ",  # noqa: RUF001 (NBSP is a deliberate fuzz input)
     "é́",
     "‮rtl‭",
     "🧟",
@@ -355,12 +356,12 @@ def test_fuzz_write_junit_roundtrips_hostile_strings() -> None:
         for seed in range(50):
             rng = random.Random(1000 + seed)
 
-            def nasty() -> str:
-                return "".join(rng.choice(_JUNIT_CHARS) for _ in range(rng.randrange(0, 8)))
+            def nasty(r: random.Random) -> str:
+                return "".join(r.choice(_JUNIT_CHARS) for _ in range(r.randrange(0, 8)))
 
-            case = f"s/{nasty()}c{nasty()}"
-            detail = nasty()
-            suite = nasty()
+            case = f"s/{nasty(rng)}c{nasty(rng)}"
+            detail = nasty(rng)
+            suite = nasty(rng)
             status = rng.choice(_JUNIT_STATUSES)
             path = Path(td) / f"junit-{seed}.xml"
             # write_junit logs every render; keep the 50 iterations quiet.
@@ -407,8 +408,11 @@ def test_write_junit_drops_xml_illegal_characters() -> None:
         playtest_run.write_junit(path, "smoke", results)
         root = ElementTree.parse(path).getroot()
         case = root.find("testcase")
+        assert case is not None, "rendered junit must contain a testcase"
         assert case.get("name") == "s/cx", f"NUL must be dropped: {case.get('name')!r}"
-        assert case.find("failure").get("message") == "hp=0", (
+        failure = case.find("failure")
+        assert failure is not None, "failed case must carry a failure element"
+        assert failure.get("message") == "hp=0", (
             "illegal controls must be dropped from detail"
         )
     print("PASS junit_illegal_chars NUL/control bytes dropped, document stays valid")
@@ -448,7 +452,7 @@ def test_incremental_scan_matches_whole_parse() -> None:
     cuts = (0, 13, 40, 41, 120, 121, 200, len(text))
     buf = ""
     scan = playtest_log.ClientLogScan()
-    for lo, hi in zip(cuts, cuts[1:]):
+    for lo, hi in pairwise(cuts):
         buf += text[lo:hi]
         cut = buf.rfind("\n")
         if cut < 0:

@@ -19,13 +19,14 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       # setup-uv caches uv's wheel/install store automatically on GitHub-hosted
       # runners (enable-cache defaults to auto), keyed off the uv.lock file.
-      # The offline gates need no game install: catalog<->SCENARIOS surface
-      # (live rows + counts total), mod version/changelog sync, the
-      # scenario-provider env surface, the stock-peer orchestration surface,
-      # the host lock, the deterministic simulation, the orchestrator
-      # local-init order gate, the orchestrator report/log surface, the
-      # orchestrator pure-logic units, and the compare diff (pytest via uv).
-      # The mod build itself is not
+      # `make test` = ruff lint + mypy typecheck (both pinned in the dev
+      # dependency-group, configured in pyproject.toml) plus the offline
+      # suites: catalog<->SCENARIOS surface (live rows + counts total), mod
+      # version/changelog sync, the scenario-provider env surface, the
+      # stock-peer orchestration surface, the host lock, the deterministic
+      # simulation, the orchestrator local-init order gate, the orchestrator
+      # report/log surface, the orchestrator pure-logic units, and the
+      # compare diff (pytest via uv). The mod build itself is not
       # CI-able (references game DLLs), but these gates catch the doc/catalog
       # drift that used to ship silently.
       - run: make test

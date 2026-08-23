@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Protocol
 
 RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
 SUMMARY_RE = re.compile(
@@ -179,6 +180,14 @@ def parse_client_log(text: str) -> dict:
         scan.feed_line(line)
         scan.feed_chunk(line)
     return scan.result()
+
+
+class TailSource(Protocol):
+    """Structural consumer view of :class:`LogTail` (poll-only)."""
+
+    def poll(self) -> str:
+        """Return only bytes appended since the previous call."""
+        ...
 
 
 class LogTail:

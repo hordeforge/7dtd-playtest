@@ -79,8 +79,12 @@ def test_report_json_wall_axis(tmp_path):
     """Report JSONs carry wall_sec; the diff surfaces it as a cost axis and
     labels the sides, never as a per-case finding."""
     def report(server: str, wall: float, passn: int) -> dict:
-        return {"server": server, "wall_sec": wall, "summary": {"pass": passn, "fail": 0, "skip": 0},
-                "results": [{"case": "bench/x", "status": "PASS", "detail": "ok"}]}
+        return {
+            "server": server,
+            "wall_sec": wall,
+            "summary": {"pass": passn, "fail": 0, "skip": 0},
+            "results": [{"case": "bench/x", "status": "PASS", "detail": "ok"}],
+        }
 
     s = tmp_path / "stock.json"
     z = tmp_path / "zdtd.json"
@@ -189,7 +193,8 @@ def test_stale_report_refuses_diff(tmp_path):
                 "results": [{"case": "smoke/join", "status": "PASS"}]}
     s = tmp_path / "stock" / f"report-{old}.json"
     z = tmp_path / "zdtd" / f"report-{old}.json"
-    s.parent.mkdir(); z.parent.mkdir()
+    s.parent.mkdir()
+    z.parent.mkdir()
     s.write_text(json.dumps(report("stock")), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
     out = tmp_path / "out"
@@ -237,6 +242,7 @@ def test_newest_report_picks_greatest_name_on_mtime_tie(tmp_path):
     from importlib.util import module_from_spec, spec_from_file_location
 
     spec = spec_from_file_location("playtest_compare", TOOL)
+    assert spec is not None and spec.loader is not None, f"cannot load tool: {TOOL}"
     mod = module_from_spec(spec)
     spec.loader.exec_module(mod)
     d = tmp_path / "stock"
@@ -339,6 +345,7 @@ def test_orchestrator_payload_keys_match_consumer_contract():
 
 
 if __name__ == "__main__":
-    import pytest
     import sys
+
+    import pytest
     sys.exit(pytest.main([__file__, "-q"]))

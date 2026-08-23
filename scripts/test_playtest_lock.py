@@ -188,7 +188,8 @@ def test_atomic_contention(tmp: Path) -> None:
     _assert(len(errors) == 1, f"exactly one refuse, got {errors!r}")
     holder = pl.read_lock(lock).session
     _assert(holder == winners[0], "file holder matches winner")
-    pl.release(holder, path=lock)
+    # _assert just proved equality with the winning session id (a str).
+    pl.release(winners[0], path=lock)
 
 
 def test_env_override_path(tmp: Path) -> None:
@@ -198,7 +199,7 @@ def test_env_override_path(tmp: Path) -> None:
     try:
         _assert(pl.default_lock_path() == lock, "env path honored")
         sid = pl.new_session_id("grok")
-        _assert(pl.SESSION_RE.match(sid), f"generated session shape: {sid}")
+        _assert(pl.SESSION_RE.match(sid) is not None, f"generated session shape: {sid}")
         pl.acquire(sid, live_probe=lambda: False)
         _assert(lock.is_file(), "wrote env path")
         pl.release(sid)
@@ -332,6 +333,7 @@ def test_sigterm_becomes_graceful_exit() -> None:
         errors="replace",
     )
     try:
+        assert proc.stdout is not None, "Popen was created with stdout=PIPE"
         line = proc.stdout.readline().strip()
         _assert(line == "armed", f"child did not arm handlers: {line!r}")
         proc.send_signal(signal.SIGTERM)
@@ -506,7 +508,7 @@ def main() -> int:
                     (tmp / name).mkdir(exist_ok=True)
                 fn()  # type: ignore[operator]
                 print(f"PASS {name}")
-            except Exception as ex:  # noqa: BLE001: report each test
+            except Exception as ex:
                 fails += 1
                 print(f"FAIL {name}: {ex}", file=sys.stderr)
 
