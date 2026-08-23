@@ -22,7 +22,8 @@ as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTES
   at `../zdtd/zig-out/bin/zdtd`
 - Only for the `bot` suite: server-side `BotMod` in the dedicated's `Mods/`
   (provides the `bot` telnet commands the orchestrator drives)
-- Host Python 3.11+ via **`uv`**
+- Host Python via **`uv`**, pinned to CPython 3.13 by `.python-version`
+  (uv fetches it automatically; gates must not rely on a newer interpreter)
 - dotnet SDK 8.0.x for the mod build (pinned by `global.json`; found on
   `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`)
 

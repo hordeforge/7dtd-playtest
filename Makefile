@@ -61,7 +61,7 @@ build:
 		echo "set GAME=/path/to/7 Days To Die (csproj needs its DLLs to reference)"; \
 		exit 2; }
 	dotnet build "$(ROOT)/Source/PlayTestMod/PlayTestMod.csproj" -c Release -v q \
-		-p:GameRoot="$(GAME)"
+		-p:GameRoot="$(GAME)" -p:RestoreLockedMode=true
 	cp -f "$(ROOT)/ModInfo.xml" "$(DIST)/"
 	@echo "OK → $(DIST)"
 

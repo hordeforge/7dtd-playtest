@@ -16,7 +16,10 @@
     <AssemblyName>7dtd-playtest</AssemblyName>
     <RootNamespace>ZdtdPlaytest</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>$(MSBuildThisFileDirectory)../../dist/7dtd-playtest/</OutputPath>
+    <!-- Only Release lands in the shippable dist/ directory; a Debug build
+         (IDE default) goes to bin/Debug instead of overwriting the artifact
+         that `make install` ships. -->
+    <OutputPath Condition="'$(Configuration)' == 'Release'">$(MSBuildThisFileDirectory)../../dist/7dtd-playtest/</OutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <!-- Reproducible artifact: identical bytes regardless of checkout path.
          Without PathMap the compiler bakes absolute source paths into the
@@ -34,6 +37,14 @@
          Build-only, never shipped. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
   </ItemGroup>
+  <PropertyGroup>
+    <!-- Record resolved packages (with content hashes) in a committed lock so
+         restore cannot drift with the feed. `make build` restores in locked
+         mode and fails if this file is missing or stale; after changing the
+         references above, regenerate it with `dotnet restore` (no flags) and
+         commit the updated packages.lock.json. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
   <PropertyGroup>
     <GameRoot Condition="'$(GameRoot)' == ''">$(HOME)/.local/share/Steam/steamapps/common/7 Days To Die</GameRoot>
     <GameManagedDir Condition="'$(GameManagedDir)' == ''">$(GameRoot)/7DaysToDie_Data/Managed</GameManagedDir>
