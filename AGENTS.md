@@ -188,10 +188,10 @@ Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
 8. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
    and serverconfig XML attribute escaping plus parser survival on malformed
    JSON events.
- 9. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
-    fresh-save removes only every world's copy of the named game save
-    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
-    hard-deleted).
+9. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
+   fresh-save removes only every world's copy of the named game save
+   (quarantined under `<logdir>/quarantine`, newest 5 kept, never
+   hard-deleted).
 10. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not

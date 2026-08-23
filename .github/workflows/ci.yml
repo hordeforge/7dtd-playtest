@@ -22,9 +22,10 @@ jobs:
       # The offline gates need no game install: catalog<->SCENARIOS surface
       # (live rows + counts total), mod version/changelog sync, the
       # scenario-provider env surface, the stock-peer orchestration surface,
-      # the host lock, the deterministic
-      # simulation, the orchestrator local-init order gate, and the compare
-      # diff (pytest via uv). The mod build itself is not
+      # the host lock, the deterministic simulation, the orchestrator
+      # local-init order gate, the orchestrator report/log surface, the
+      # orchestrator pure-logic units, and the compare diff (pytest via uv).
+      # The mod build itself is not
       # CI-able (references game DLLs), but these gates catch the doc/catalog
       # drift that used to ship silently.
       - run: make test

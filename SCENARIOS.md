@@ -50,7 +50,7 @@ Make:
 make playtest-demo
 make playtest-bench LAPS=3
 make playtest-gate
-make playtest-full            # long (95 cases); no persist/mp/apm/bot
+make playtest-full            # long (85 cases); no persist/mp/apm/bot
 make playtest SUITE=combat
 ```
 
@@ -143,11 +143,21 @@ make playtest SUITE=combat
 | `melee_damage_out` | live | combat, c2s, demo, melee | Setup near target; stock `UseHoldingItem`/`Attack`; HP drops |
 | `ranged_shot` | live | combat, c2s, demo, ranged | Pipe pistol + mag Meta; fire; Meta drop and/or target HP |
 | `zombie_death_loot` | live | combat, loot | Kill → ECD loot bag (RNG); controlled drop is `loot_bag_pickup` |
-| `player_death_screen` | live | combat, player | Admin kill player |
-| `player_respawn` | live | combat, player | After death |
 | `explosion_client` | live | combat, c2s | Soft block seed + melee damage/break (no admin Air clear) |
 | `sleeper_wake` | live | combat, sleeper | TriggerSleeperPose then ConditionalTriggerSleeperWakeUp |
 | `blood_moon_music` | live | combat, bm | Host settime night (observed hour) then restore day |
+
+---
+
+## finale — death / respawn (runs last in demo)
+
+Suite id `finale`. Death and respawn close the attract path so earlier
+suites stay healthy.
+
+| Case | Status | Tags | Notes |
+|---|---|---|---|
+| `player_death_screen` | live | combat, player, admin | Admin kill player |
+| `player_respawn` | live | combat, player | After death |
 
 ---
 
@@ -167,7 +177,6 @@ make playtest SUITE=combat
 | `chest_open_loot` | live | economy, te, admin | TE lock + loot |
 | `trader_stock_ui` | live | economy, trader | EntityTrader in range (+ TraderData) |
 | `trader_buy` | live | economy, trader | Coins spent + stock/goods change |
-| `lock_contention` | live | economy, te, mp | TE lock under loadgen peer |
 
 ---
 
@@ -182,7 +191,9 @@ make playtest SUITE=combat
 | `quest_kill_progress` | live | quest, combat | Phase/objective/state change after kill nudge |
 | `quest_turn_in` | live | quest, trader | CompleteQuest → Completed state |
 | `quest_nav_marker` | live | quest, ui | NavObjectManager register |
-| `shared_quest` | live | quest, mp | Quest active with loadgen peer |
+
+(`shared_quest` is documented under `mp`; it needs a peer fixture and the
+catalog registers it there.)
 
 ---
 

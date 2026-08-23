@@ -372,7 +372,7 @@ For one passive **stock** peer, provide both a distinct Local-platform player
 name and an already initialized, separate Proton compat profile. The runner
 starts that client without `PLAYTEST_*`, so it joins and remains in the world
 without executing a duplicate scenario suite. The connect mod reads the peer
-name from `ZDTD_PLAYER_NAME`; use a current `7dtd-connect` install that
+name from `7DTD_PLAYER_NAME`; use a current `7dtd-connect` install that
 supports that variable. This is a genuine second client, not a loadgen bot.
 The runner leaves one second between the two launches because the stock V3.1
 server has a 500 ms same-IP connection limiter; without that spacing the
@@ -464,7 +464,8 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 `.github/workflows/ci.yml` runs `make test` (the offline gates: catalog<->SCENARIOS
 surface incl. live rows + counts total, mod version/changelog sync, scenario-provider
 env surface, stock-peer orchestration surface, host lock, deterministic simulation,
-orchestrator local-init order, compare diff)
+orchestrator local-init order, report/log surface, orchestrator pure-logic units,
+compare diff)
 plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
 runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are

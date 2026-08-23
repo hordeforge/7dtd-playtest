@@ -134,8 +134,9 @@ dedicated server, telnet admin, loadgen) whose behaviour is the thing under
 test. Simulating it is only worth doing for the parts that are pure decisions
 about time and log content, and it would need its own seams first:
 
-1. A clock seam for the roughly forty `time.time()` / `time.sleep()` call sites
-   that drive timeouts, barrier waits, and phase deadlines.
+1. A clock seam for the roughly forty `time.time()` / `time.monotonic()` /
+   `time.sleep()` call sites that drive timeouts, barrier waits, and phase
+   deadlines.
 2. A process port (start / poll / stop / kill) with a simulated implementation,
    so crash-and-restart and slow-boot cases become reachable.
 3. A telnet port, so `TelnetAdmin` retries and partial reads can be modelled.

@@ -4,7 +4,7 @@
 Exit codes:
   0  all cases pass (DONE with fail=0)
   1  playtest assertion failures
-  2  harness error (no DONE, server/client fail, timeout)
+  2  harness error (no DONE, server/client fail, timeout, lock refused)
 """
 
 from __future__ import annotations
