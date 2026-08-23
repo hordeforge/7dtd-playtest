@@ -189,5 +189,5 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/maci0/7dtd-playtest/compare/v0.7.1...HEAD
-[0.7.1]: https://github.com/maci0/7dtd-playtest/releases/tag/v0.7.1
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.7.1
