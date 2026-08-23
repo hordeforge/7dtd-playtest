@@ -12,8 +12,10 @@ must service).
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -145,6 +147,76 @@ def test_fixture_gate_covers_every_barrier_emitting_suite() -> None:
     )
 
 
+def _spawn_detached(body: str) -> subprocess.Popen:
+    """Real child in its own session (same shape as orchestrator launches)."""
+    return subprocess.Popen(
+        ["bash", "-c", body],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def test_stop_proc_reaps_after_sigkill_escalation() -> None:
+    """A child that ignores SIGTERM gets SIGKILLed and then reaped: after
+    stop_proc the Popen must carry a returncode, not linger as a zombie."""
+    proc = _spawn_detached("trap '' TERM; sleep 30")
+    old_term = playtest_run._STOP_TERM_WAIT_SEC
+    old_kill = playtest_run._STOP_KILL_WAIT_SEC
+    playtest_run._STOP_TERM_WAIT_SEC = 0.3
+    playtest_run._STOP_KILL_WAIT_SEC = 0.3
+    try:
+        t0 = time.monotonic()
+        playtest_run.stop_proc(proc)
+        elapsed = time.monotonic() - t0
+    finally:
+        playtest_run._STOP_TERM_WAIT_SEC = old_term
+        playtest_run._STOP_KILL_WAIT_SEC = old_kill
+    assert proc.returncode is not None, (
+        "SIGKILL escalation must reap the child (returncode stays None on a zombie)"
+    )
+    assert elapsed < 5, f"stop_proc waited too long: {elapsed:.1f}s"
+    print("PASS stop_proc_sigkill_reap SIGKILLed child reaped, no zombie")
+
+
+def test_stop_proc_exited_child_closes_log_handle() -> None:
+    """stop_proc on an already-exited child must not raise and must close the
+    attached log handle (fd released deterministically)."""
+    proc = _spawn_detached("exit 0")
+    while proc.poll() is None:
+        time.sleep(0.02)
+    fh = tempfile.TemporaryFile()
+    try:
+        proc._log_fh = fh  # type: ignore[attr-defined]
+        playtest_run.stop_proc(proc)
+        assert fh.closed, "log handle of an exited child must be closed"
+    finally:
+        if not fh.closed:
+            fh.close()
+    print("PASS stop_proc_exited_child exited child reaped, log handle closed")
+
+
+def test_reap_finished_helpers_drops_only_exited() -> None:
+    """reap_finished_helpers removes exited detached helpers (no zombie pileup
+    during long soaks) and keeps live ones registered."""
+    done = _spawn_detached("exit 0")
+    while done.poll() is None:
+        time.sleep(0.02)
+    live = _spawn_detached("sleep 30")
+    saved = list(playtest_run._MUTE_HELPER_PROCS)
+    playtest_run._MUTE_HELPER_PROCS[:] = [done, live]
+    try:
+        playtest_run.reap_finished_helpers()
+        assert playtest_run._MUTE_HELPER_PROCS == [live], (
+            "exited helpers must be reaped away; live ones kept"
+        )
+    finally:
+        playtest_run._MUTE_HELPER_PROCS[:] = saved
+        live.kill()
+        live.wait()
+    print("PASS reap_finished_helpers exited helpers reaped, live ones kept")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -152,6 +224,9 @@ def main() -> int:
         ("fresh_save_no_saves_dir", test_fresh_save_without_saves_dir_is_noop),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
+        ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
+        ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
+        ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
     ):
         try:
             fn()

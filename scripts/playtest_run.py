@@ -314,6 +314,19 @@ def start_zdtd(
     return proc
 
 
+# Detached mute helpers started per client launch. They self-exit after their
+# poll window, but nothing else waits on them: without an explicit reap each
+# one lingers as a zombie for the rest of a long soak run.
+_MUTE_HELPER_PROCS: list[subprocess.Popen] = []
+
+
+def reap_finished_helpers() -> None:
+    """Reap exited detached helpers (mute audio) so they cannot accumulate."""
+    for p in _MUTE_HELPER_PROCS[:]:
+        if p.poll() is not None:
+            _MUTE_HELPER_PROCS.remove(p)
+
+
 def client_mute_enabled() -> bool:
     """Default on: mute client audio for automated runs (opt-out CLIENT_MUTE=0)."""
     raw = (
@@ -344,12 +357,13 @@ def mute_client_audio_async() -> None:
         return
     log(f"client mute: on (opt-out CLIENT_MUTE=0); polling up to {wait_s}s")
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             ["bash", str(helper), str(wait_s)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+        _MUTE_HELPER_PROCS.append(proc)
     except OSError as ex:
         log(f"client mute: failed to start helper: {ex}")
 
@@ -533,6 +547,12 @@ def write_zdtd_apm_dump(
     return dump_path.is_file() and dump_path.stat().st_size > 0
 
 
+# Bounded waits around each escalation step of stop_proc. Module-level so the
+# offline gate can shrink them instead of waiting out the production values.
+_STOP_TERM_WAIT_SEC = 8.0
+_STOP_KILL_WAIT_SEC = 8.0
+
+
 def stop_proc(proc: subprocess.Popen | None) -> None:
     if proc is None:
         return
@@ -544,7 +564,7 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
         except Exception:
             pass
     try:
-        proc.wait(timeout=8)
+        proc.wait(timeout=_STOP_TERM_WAIT_SEC)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -553,6 +573,12 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
                 proc.kill()
             except Exception:
                 pass
+        # SIGKILL needs its own reap: without wait() the killed child stays a
+        # zombie until this orchestrator exits.
+        try:
+            proc.wait(timeout=_STOP_KILL_WAIT_SEC)
+        except subprocess.TimeoutExpired:
+            log(f"warn: stop_proc: pid {proc.pid} not reaped after SIGKILL")
     fh = getattr(proc, "_log_fh", None)
     if fh:
         try:
@@ -1385,6 +1411,7 @@ def main(argv: list[str] | None = None) -> int:
             setup_deadline = time.time() + min(args.timeout, 300)
             last_setup_progress = 0.0
             while time.time() < setup_deadline:
+                reap_finished_helpers()
                 if args.client_log.is_file():
                     try:
                         text = args.client_log.read_text(encoding="utf-8", errors="replace")
@@ -1616,6 +1643,7 @@ def main(argv: list[str] | None = None) -> int:
             return not peer_client_suite or peer_parsed.get("done") is not None
 
         while time.time() < deadline:
+            reap_finished_helpers()
             text = ""
             if args.client_log.is_file():
                 try:
@@ -1793,6 +1821,14 @@ def main(argv: list[str] | None = None) -> int:
                         # Already running; consume this edge without restart.
                         barrier_counts["spawn_loadgen_peer"] += 1
                         continue
+                    if loadgen_proc is not None:
+                        # Prior instance already exited: release its log handle
+                        # before rebinding instead of waiting on GC.
+                        try:
+                            getattr(loadgen_proc, "_log_fh").close()
+                        except (OSError, AttributeError):
+                            pass
+                        loadgen_proc = None
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
                         count=1,
