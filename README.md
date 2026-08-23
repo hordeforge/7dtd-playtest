@@ -1,16 +1,14 @@
-# 7dtd-playtest
+# 🛡️ Vanguard (7DTD Playtest Runner)
 
-Stock-client **gameplay automation** for 7 Days to Die servers (EAC off).
-Works against the **stock dedicated server** (the default) and against
-**zdtd** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs,
-waits for server-visible state where it matters, and emits structured
-`[7dtd-playtest]` results for a host orchestrator.
+> **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
+
+Stock-client **gameplay automation** for 7 Days to Die servers (EAC off). Works against the **stock dedicated server** (the default) and against **zdtd-server** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs, waits for server-visible state where it matters, and emits structured scenario test results for a host orchestrator.
 
 Host-side concurrency (the exclusivity lock) is covered by deterministic
 simulation: `make dst`, documented in **[DST.md](DST.md)**.
 
-Join/auto-connect is **not** here: install [`../7dtd-connect/`](../7dtd-connect/)
-as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTEST.md).
+Join/auto-connect is **not** here: install [`../7dtd-fastconnect/`](../7dtd-fastconnect/)
+as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).
 
 ## Requirements
 
@@ -19,10 +17,10 @@ as well. Design: [`../zdtd/docs/CLIENT_PLAYTEST.md`](../zdtd/docs/CLIENT_PLAYTES
   Steam/Proton and the dedicated server is the Linux build.
 - Stock client V3.x, EAC off (`-noeac`)
 - `0_TFP_Harmony`
-- `7dtd-connect` installed
+- `7dtd-fastconnect` installed
 - Game: `~/.local/share/Steam/steamapps/common/7 Days To Die` (`GAME=`)
 - Only for zdtd-target runs (`playtest-zdtd`, `playtest-apm`): built `zdtd`
-  at `../zdtd/zig-out/bin/zdtd`
+  at `../zdtd-server/zig-out/bin/zdtd`
 - Only for the `bot` suite: server-side `BotMod` in the dedicated's `Mods/`
   (provides the `bot` telnet commands the orchestrator drives)
 - Host Python via **`uv`**, pinned to CPython 3.13 by `.python-version`
@@ -120,7 +118,7 @@ in the log without rerunning with `--help`.
 | Env | Default | Meaning |
 |---|---|---|
 | `PLAYTEST_SERVER` | `stock` | Server backend, `stock` or `zdtd` (`--server`) |
-| `ZDTD` | `../zdtd/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
+| `ZDTD` | `../zdtd-server/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
 | `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
 | `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |
 | `PLAYTEST_TIMEOUT_SEC` | `900` | Harness wall-clock timeout in seconds > 0 (`--timeout`). Invalid values are a harness error (exit 2) naming the variable |
@@ -134,7 +132,7 @@ warning on stderr instead of silently changing lock takeover timing.
 ### Client audio mute (default on)
 
 Automated client launches **mute the game process at the OS audio layer by
-default** (PipeWire/Pulse sink-input via `7dtd-connect` `launch_client.sh` +
+default** (PipeWire/Pulse sink-input via `7dtd-fastconnect` `launch_client.sh` +
 orchestrator helper). This does **not** change game client settings (no
 GamePrefs / in-game audio sliders). Independent of master volume. Requires
 `pactl` and `jq`.
@@ -310,7 +308,7 @@ The runner arms from the **first non-empty** of:
 
 `make playtest` / `scripts/playtest_run.py` set `PLAYTEST_SUITE`. Hosts that
 only set `ZDTD_PLAYTEST_SUITE` (e.g. Atomic `playtest-run.sh` via connect
-Proton) also arm correctly. Prefer **7dtd-connect** `launch_client.sh` so the
+Proton) also arm correctly. Prefer **7dtd-fastconnect** `launch_client.sh` so the
 variable reaches the game process (`steam -applaunch` often drops it).
 
 ### Fresh / disposable world (no OCR New Game)
@@ -342,7 +340,7 @@ Recovery facts:
 - **RPO/RTO:** run artifacts are reproducible output, not records of record.
   Losing them costs a suite re-run (RTO = suite wall time). The compare
   baselines are the only long-lived results, and git carries those. Nothing
-  here backs up sibling projects (`zdtd`, `7dtd-connect`) or game installs.
+  here backs up sibling projects (`zdtd`, `7dtd-fastconnect`) or game installs.
 - **Restore a wiped save:** `--fresh-save` no longer hard-deletes. The named
   stock save, zdtd `players.zsv`/`containers.zct`/`blockmeta.zbm`, chunk
   overlays, and the previous client log move into
@@ -393,7 +391,7 @@ For one passive **stock** peer, provide both a distinct Local-platform player
 name and an already initialized, separate Proton compat profile. The runner
 starts that client without `PLAYTEST_*`, so it joins and remains in the world
 without executing a duplicate scenario suite. The connect mod reads the peer
-name from `7DTD_PLAYER_NAME`; use a current `7dtd-connect` install that
+name from `7DTD_PLAYER_NAME`; use a current `7dtd-fastconnect` install that
 supports that variable. This is a genuine second client, not a loadgen bot.
 The runner leaves one second between the two launches because the stock V3.1
 server has a 500 ms same-IP connection limiter; without that spacing the
@@ -445,7 +443,7 @@ reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 # terminal 1: stock dedicated or zdtd
 # terminal 2 (connect preserves env into the game process):
 7DTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
-  ../7dtd-connect/scripts/launch_client.sh
+  ../7dtd-fastconnect/scripts/launch_client.sh
 # also accepted:
 # ZDTD_PLAYTEST_SUITE=smoke,core ...
 ```
