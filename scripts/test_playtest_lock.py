@@ -268,7 +268,9 @@ def test_playtest_run_wiring() -> None:
     _assert("HeartbeatThread" in src, "starts heartbeat thread")
     main_i = src.find("def main(")
     _assert(main_i >= 0, "main defined")
-    acq_in_main = src.find("playtest_lock.acquire", main_i)
+    # main() goes through the interrupt-safe wrapper; the wrapper itself
+    # calls playtest_lock.acquire with the undo-on-interrupt cleanup.
+    acq_in_main = src.find("acquire_exclusive_lock(", main_i)
     clean_in_main = src.find("clean_processes(", main_i)
     _assert(
         0 <= acq_in_main < clean_in_main,
@@ -278,6 +280,17 @@ def test_playtest_run_wiring() -> None:
     finally_i = src.rfind("finally:")
     rel_i = src.find("playtest_lock.release", finally_i if finally_i >= 0 else 0)
     _assert(finally_i >= 0 and rel_i > finally_i, "release in finally block")
+    # The teardown must disarm TERM/HUP before its first step: delivery while
+    # cleanup runs must not raise SystemExit mid-finally and skip the
+    # stop_proc/release statements below it (a live runtime would be stranded
+    # under a published claim).
+    disarm_i = src.find("_ignore_termination_signals()", finally_i)
+    hb_stop_i = src.find("lock_heartbeat.stop()", finally_i)
+    _assert(
+        0 <= disarm_i < hb_stop_i,
+        f"finally must disarm signals (at {disarm_i}) before teardown "
+        f"(stop at {hb_stop_i})",
+    )
     # Foreign refuse must not pkill: process teardown is gated on lock_held
     fin_body = src[finally_i : rel_i + 80]
     _assert(
@@ -343,6 +356,66 @@ def test_sigterm_becomes_graceful_exit() -> None:
             proc.kill()
             proc.wait()
     _assert(rc == 128 + signal.SIGTERM, f"exit {rc}, expected {128 + signal.SIGTERM}")
+
+
+def test_sigterm_during_cleanup_is_ignored(tmp: Path) -> None:
+    """SIGTERM delivered while the finally teardown is running must be
+    ignored, not converted into SystemExit from inside the cleanup.
+
+    Raising there skips the remaining teardown statements (stop_proc,
+    release) and strands a live runtime under a published claim. The child
+    models main()'s shape: handlers armed, claim taken, then a teardown body
+    that disarms first, does slow work, and releases.
+    """
+    lock = tmp / "playtest_running"
+    code = f"""\
+import sys, time
+from pathlib import Path
+sys.path.insert(0, {str(SCRIPTS)!r})
+import playtest_lock as pl, playtest_run
+playtest_run.install_signal_handlers()
+sid = 'sigterm-20260824-000000-000000000001'
+lock = Path({str(lock)!r})
+pl.acquire(sid, path=lock, live_probe=lambda: False)
+print('armed', flush=True)
+try:
+    pass
+finally:
+    # Teardown shape of playtest_run.main(): disarm first, then slow work.
+    playtest_run._ignore_termination_signals()
+    print('disarmed', flush=True)
+    time.sleep(2)  # window: SIGTERM lands mid-teardown here
+    pl.release(sid, path=lock)
+    print('released', flush=True)
+"""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        assert proc.stdout is not None, "Popen was created with stdout=PIPE"
+        _assert(proc.stdout.readline().strip() == "armed", "child did not arm")
+        # Wait until execution is already inside the disarmed teardown body,
+        # then fire: delivery must not abort the remaining steps.
+        _assert(proc.stdout.readline().strip() == "disarmed", "child not in teardown")
+        proc.send_signal(signal.SIGTERM)
+        rest = proc.stdout.read().split()
+        rc = proc.wait(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    _assert(rc == 0, f"cleanup aborted by signal: exit {rc}, tail {rest!r}")
+    _assert("released" in rest, f"release never ran, tail {rest!r}")
+    state = pl.read_lock(lock)
+    _assert(
+        not state.running and state.session is None,
+        f"claim survived interrupted-looking teardown: {state}",
+    )
 
 
 def test_parse_utc_timestamp_zones() -> None:
@@ -532,6 +605,10 @@ def main() -> int:
                 test_seconds_env_overrides_reject_non_finite,
             ),
             ("sigterm_becomes_graceful_exit", test_sigterm_becomes_graceful_exit),
+            (
+                "sigterm_during_cleanup_ignored",
+                lambda: test_sigterm_during_cleanup_is_ignored(tmp / "sigcleanup"),
+            ),
             (
                 "non_utf8_lock_bytes_survive_read",
                 lambda: test_non_utf8_lock_bytes_survive_read(tmp / "nonutf8"),

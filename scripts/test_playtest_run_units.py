@@ -24,12 +24,14 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import playtest_lock as pl  # noqa: E402
 import playtest_run  # noqa: E402
 
 ROOT = _SCRIPTS.parent
@@ -874,6 +876,73 @@ def test_write_stock_config_activates_commented_userdata_folder() -> None:
     print("PASS stock_config_userdata_folder commented form activated, stale value rewritten")
 
 
+def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
+    """A signal-driven SystemExit escaping after the claim was published must
+    not leave it standing: main() has not set lock_held yet, so its finally
+    would skip release and the orphan claim would sit unheartbeated until
+    the stale window passes, blocking every other agent."""
+    with tempfile.TemporaryDirectory(prefix="playtest-acq-") as td:
+        lock = Path(td) / "playtest_running"
+        sid = "grok-20260810-231500-a1b2c3d4e5f6"
+
+        # Captured before patching so the fake can publish a real claim
+        # without recursing into itself.
+        real_acquire = pl.acquire
+
+        def publish_then_die(
+            session: str,
+            *,
+            path: Path | None = None,
+            live_probe: Callable[[], bool] | None = None,
+            max_age_sec: float | None = None,
+            env: pl.LockEnv | None = None,
+        ) -> pl.LockState:
+            state = real_acquire(session, path=path, live_probe=live_probe)
+            if not (state.running and state.session == session):
+                raise AssertionError(f"fake acquire failed to publish: {state}")
+            # Model the signal landing after publication but before main()
+            # records lock_held.
+            raise SystemExit(128 + 15)
+
+        orig = pl.acquire
+        pl.acquire = publish_then_die
+        raised = False
+        try:
+            try:
+                playtest_run.acquire_exclusive_lock(sid, lock)
+            except SystemExit:
+                raised = True
+        finally:
+            pl.acquire = orig
+        assert raised, "interrupt must propagate out of acquire_exclusive_lock"
+        state = pl.read_lock(lock)
+        assert not state.running and state.session is None, (
+            f"published claim survived interrupt: {state}"
+        )
+    print("PASS acquire_exclusive_lock_undo interrupt releases published claim")
+
+
+def test_acquire_exclusive_lock_refusal_leaves_foreign_record() -> None:
+    """A refused acquire fails like a bare acquire and leaves the foreign
+    record exactly as it was: the interrupt-undo release refuses to write
+    for a session the file does not name."""
+    with tempfile.TemporaryDirectory(prefix="playtest-acqr-") as td:
+        lock = Path(td) / "playtest_running"
+        owner = "owner-20260810-000000-aaaaaaaaaaaa"
+        other = "other-20260810-000001-bbbbbbbbbbbb"
+        pl.acquire(owner, path=lock, live_probe=lambda: False)
+        try:
+            playtest_run.acquire_exclusive_lock(other, lock)
+            raise AssertionError("foreign acquire must refuse")
+        except pl.PlaytestLockError as ex:
+            assert ex.reason == "foreign_holder", f"reason={ex.reason}"
+        state = pl.read_lock(lock)
+        assert state.running and state.session == owner, (
+            f"refusal disturbed the foreign record: {state}"
+        )
+    print("PASS acquire_exclusive_lock_refusal foreign record untouched")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -915,6 +984,14 @@ def main() -> int:
         (
             "stock_config_userdata_folder",
             test_write_stock_config_activates_commented_userdata_folder,
+        ),
+        (
+            "acquire_exclusive_lock_undo",
+            test_acquire_exclusive_lock_undoes_published_claim_on_interrupt,
+        ),
+        (
+            "acquire_exclusive_lock_refusal",
+            test_acquire_exclusive_lock_refusal_leaves_foreign_record,
         ),
     ):
         try:

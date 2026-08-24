@@ -1127,6 +1127,24 @@ class TelnetAdmin:
             self._sock = None
 
 
+# Signals converted to SystemExit during normal operation and ignored during
+# teardown (see install_signal_handlers / main's finally).
+_TERMINATION_SIGNAL_NAMES = ("SIGTERM", "SIGHUP")
+
+
+def _ignore_termination_signals() -> None:
+    """Set SIG_IGN for both termination signals; safe to call anywhere.
+
+    Re-registering can fail once the interpreter is tearing down, hence the
+    suppression.
+    """
+    for name in _TERMINATION_SIGNAL_NAMES:
+        s = getattr(signal, name, None)
+        if s is not None:
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(s, signal.SIG_IGN)
+
+
 def install_signal_handlers() -> None:
     """Convert SIGTERM/SIGHUP into SystemExit so the finally-based cleanup runs.
 
@@ -1135,21 +1153,19 @@ def install_signal_handlers() -> None:
     while a live runtime blocks takeover (stale_but_live wedge). Raising
     SystemExit routes termination through main()'s finally, which stops the
     runtime processes and releases the exclusivity lock.
-    """
-    sig_names = ("SIGTERM", "SIGHUP")
 
+    Once that finally is running, both signals are ignored instead (see the
+    disarm at the top of the block): delivery there would raise SystemExit
+    from inside the cleanup itself and strand a live runtime under a
+    published claim.
+    """
     def _exit_fast(signum, _frame):
-        # A second hit during cleanup must not raise inside the finally block
-        # and skip stop_proc/release, so ignore repeats while we unwind.
-        for name in sig_names:
-            s = getattr(signal, name, None)
-            if s is not None:
-                # Re-registering can fail once the interpreter is tearing down.
-                with contextlib.suppress(ValueError, OSError):
-                    signal.signal(s, signal.SIG_IGN)
+        # Ignore repeats while we unwind so a second hit during cleanup
+        # cannot raise inside the finally block and skip stop_proc/release.
+        _ignore_termination_signals()
         raise SystemExit(128 + signum)
 
-    for name in sig_names:
+    for name in _TERMINATION_SIGNAL_NAMES:
         sig = getattr(signal, name, None)
         if sig is None:
             continue
@@ -1582,6 +1598,25 @@ def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> s
     return secrets.token_urlsafe(15)
 
 
+def acquire_exclusive_lock(session: str, path: Path) -> None:
+    """Acquire the exclusivity lock, undoing a published claim on interrupt.
+
+    A signal (SIGTERM/SIGHUP via the SystemExit conversion) or Ctrl+C landing
+    after ``playtest_lock.acquire`` has written our claim but before main()
+    records ``lock_held`` would otherwise exit without releasing: the orphan
+    claim then sits unheartbeated until the stale window passes, blocking
+    every other agent behind a run that is already dead. Release refuses to
+    write unless the file names us, so this undo is a no-op whenever the
+    acquire was refused or never wrote.
+    """
+    try:
+        playtest_lock.acquire(session, path=path)
+    except BaseException:
+        with contextlib.suppress(playtest_lock.PlaytestLockError, OSError):
+            playtest_lock.release(session, path=path)
+        raise
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="stock-client playtest orchestrator",
@@ -1858,7 +1893,7 @@ def main(argv: list[str] | None = None) -> int:
         # Exclusive live-client lock BEFORE clean_processes / launch so a second
         # orchestrator cannot wipe another agent's client. See AGENTS.md.
         try:
-            playtest_lock.acquire(lock_session, path=lock_path)
+            acquire_exclusive_lock(lock_session, lock_path)
         except playtest_lock.PlaytestLockError as ex:
             holder = ex.held_by or "unknown"
             err(
@@ -2749,6 +2784,12 @@ def main(argv: list[str] | None = None) -> int:
         log(f"exit={exit_code}")
         return exit_code
     finally:
+        # Disarm first. A TERM/HUP delivered while these cleanup steps run
+        # must be ignored, not converted into a SystemExit that aborts the
+        # remaining steps: skipping stop_proc/release strands a live runtime
+        # under a published claim (the stale_but_live wedge this handler set
+        # exists to prevent).
+        _ignore_termination_signals()
         # Only stop/kill processes when we held the exclusivity lock. A refused
         # acquire must not pkill another agent's client or dedicated server.
         if lock_heartbeat is not None:
