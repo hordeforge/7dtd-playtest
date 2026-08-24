@@ -550,6 +550,11 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 2. Your callback returns whether the scene is genuinely on screen — the items
    were given, the window opened, the camera arrived — and sets `ctx.Detail`
    to whatever context helps the person reading the frame.
+   If the subject has more than one side worth seeing, pass `onHold` and turn
+   it: a fixed camera photographs one face and says nothing about the rest,
+   which is how a garment can look missing for four runs while covering the
+   chest the whole time.
+
 3. Never assert how it *looks*. No fixture here can see; `CaseDef.Staged`'s
    assert only establishes that there was something to photograph.
 4. Photograph it with [`scripts/capture_frames.sh`](scripts/capture_frames.sh),

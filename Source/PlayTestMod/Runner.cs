@@ -151,6 +151,19 @@ namespace ZdtdPlaytest
         /// detail for the human reading the frame.
         /// </param>
         /// <param name="holdSeconds">How long to hold the scene still.</param>
+        /// <param name="onHold">
+        /// Optional, called every tick of the hold with the fraction elapsed,
+        /// 0 to 1. For a scene that must be seen from more than one side: a
+        /// single fixed camera photographs one face of a subject and quietly
+        /// says nothing about the others, which is how a garment can look
+        /// missing for four runs while covering the chest all along. Turn the
+        /// subject here and the frames become a turntable.
+        ///
+        /// A scene that holds genuinely still leaves this null. Throwing from
+        /// it does not fail the case: the scene was already staged and the
+        /// frames are already being taken, so the fault is logged and the hold
+        /// continues rather than discarding evidence that exists.
+        /// </param>
         public static CaseDef Staged(
             string suite,
             string id,
@@ -158,7 +171,8 @@ namespace ZdtdPlaytest
             Func<CaseCtx, bool> stage,
             float holdSeconds = 10f,
             string fail = null,
-            float pause = 0.5f)
+            float pause = 0.5f,
+            Action<CaseCtx, float> onHold = null)
         {
             if (stage == null)
                 throw new ArgumentException(
@@ -189,7 +203,16 @@ namespace ZdtdPlaytest
                     // the result photographs the disconnect dialog.
                     Report.Staged(id, ctx.Detail);
                 },
-                wait: ctx => Time.unscaledTime - ctx.FloatA >= holdSeconds,
+                wait: ctx =>
+                {
+                    float elapsed = Time.unscaledTime - ctx.FloatA;
+                    if (onHold != null)
+                    {
+                        try { onHold(ctx, Mathf.Clamp01(elapsed / holdSeconds)); }
+                        catch (Exception e) { Log.Warning("[7dtd-playtest] staged hold callback threw: " + e.Message); }
+                    }
+                    return elapsed >= holdSeconds;
+                },
                 assert: ctx => ctx.IntA == 1,
                 timeout: holdSeconds + 20f,
                 fail: fail ?? ("the " + id + " scene did not stage, so any frames taken during it "
