@@ -277,6 +277,51 @@ def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
     return False
 
 
+# Cold-load wait budgets for the two server backends, shared by the initial
+# start and the rejoin restart so one path cannot drift from the other again.
+STOCK_READY_TIMEOUT_SEC = 600.0
+ZDTD_READY_TIMEOUT_SEC = 60.0
+
+
+def wait_stock_dedicated_ready(proc: subprocess.Popen, unity_log: Path) -> bool:
+    """Wait for stock `StartGame done`; False when the dedicated exited first.
+
+    A backend that dies before becoming ready must fail the harness here on
+    every path that starts one: proceeding would only burn the wall clock on
+    a client that can never join.
+    """
+    if wait_file_contains(unity_log, "StartGame done", timeout=STOCK_READY_TIMEOUT_SEC):
+        log("stock dedicated ready (StartGame done)")
+        return True
+    if proc.poll() is not None:
+        err(f"stock dedicated exited early code={proc.returncode}")
+        if unity_log.is_file():
+            err(
+                "tail server log:\n"
+                + "\n".join(
+                    scrub(line)
+                    for line in unity_log.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()[-40:]
+                )
+            )
+        return False
+    warn("no StartGame done yet; server still running, proceeding")
+    return True
+
+
+def wait_zdtd_ready(proc: subprocess.Popen, server_log_path: Path) -> bool:
+    """Wait for zdtd `tick=20Hz`; False when zdtd exited before ticking."""
+    if wait_file_contains(server_log_path, "tick=20Hz", timeout=ZDTD_READY_TIMEOUT_SEC):
+        log("zdtd ready (tick=20Hz)")
+        return True
+    if proc.poll() is not None:
+        err(f"zdtd exited early code={proc.returncode}")
+        return False
+    warn("no tick=20Hz; proceeding")
+    return True
+
+
 def _literal_replacement(replacement: str) -> Callable[[re.Match[str]], str]:
     """re.sub replacer that inserts ``replacement`` without backslash escapes."""
 
@@ -1391,6 +1436,105 @@ def safe_barrier_param(value: str) -> bool:
     return bool(BARRIER_PARAM_RE.fullmatch(value))
 
 
+# Barrier service actions: one telnet session per fire, passed as the ``act``
+# callback of service_barrier. Module-level (they depend only on module
+# constants) so the poll loop does not rebuild closures every iteration and
+# each handler is named for the barrier it services.
+
+
+def barrier_tele_pad_and_save(tn: TelnetAdmin) -> bool:
+    if tn.teleport_players_to(*PERSIST_PAD_XYZ) == 0:
+        warn("teleport_persist_pad: no player ids; retry next poll")
+        return False
+    # Let server commit player position before later setup/save.
+    time.sleep(2.0)
+    tn.exec("saveworld")
+    return True
+
+
+def barrier_spawn_zombie(tn: TelnetAdmin) -> None:
+    n = tn.spawn_near_players("zombieBoe")
+    if n == 0:
+        time.sleep(1.0)
+        tn.spawn_near_players("zombieBoe")
+
+
+def barrier_ensure_bots(tn: TelnetAdmin) -> None:
+    # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if
+    # needed (lines with "Bot " in bot list).
+    out = tn.exec("bot list")
+    if len(re.findall(r"Bot ", out)) < 4:
+        r = tn.exec("bot count 6")
+        log(f"telnet bot count 6 -> {r[:120]!r}")
+
+
+def barrier_bot_near_player(tn: TelnetAdmin) -> None:
+    pids = tn.list_player_ids()
+    if pids:
+        ident = str(pids[0])
+        r = tn.exec(f"bot player {ident} 1")
+        log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
+    else:
+        r = tn.exec("bot spawn 1")
+        log(f"telnet bot spawn 1 -> {r[:120]!r}")
+
+
+def barrier_kill_fixtures(tn: TelnetAdmin) -> None:
+    tn.kill_non_player_ai()
+
+
+def barrier_kill_first_player(tn: TelnetAdmin) -> None:
+    # Kill the human player entity for the death-screen case (not AI). Shared
+    # parser: dedupes ids and also understands zdtd's "(entity N)" reply style.
+    pids = tn.list_player_ids()
+    for pid in pids[:1]:
+        r = tn.exec(f"kill {pid}")
+        log(f"telnet kill_player {pid} → {r[:80]!r}")
+
+
+def barrier_set_night(tn: TelnetAdmin) -> None:
+    # Day1 22:00 only (not day-7 BM horde).
+    r = tn.exec("settime 22000")
+    log(f"telnet settime 22000 → {r[:120]!r}")
+
+
+def barrier_set_morning(tn: TelnetAdmin) -> None:
+    # Morning restore; always last after any night set in this poll.
+    r = tn.exec("settime 8000")
+    log(f"telnet settime 8000 (day) → {r[:120]!r}")
+    # Clear AI again after night so leftovers do not down the player.
+    tn.clear_ai()
+
+
+def barrier_spawn_bicycle(tn: TelnetAdmin) -> None:
+    # Same path as zombies: spawnentity <playerId> <class>
+    n = tn.spawn_near_players("vehicleBicycle")
+    if n == 0:
+        for cmd in (
+            f"spawnentityat vehicleBicycle {PERSIST_PAD_COORDS}",
+            "se vehicleBicycle",
+        ):
+            r = tn.exec(cmd)
+            log(f"telnet vehicle {cmd} → {r[:80]!r}")
+    else:
+        log(f"telnet spawn vehicle near players units~={n}")
+
+
+def barrier_spawn_trader(tn: TelnetAdmin) -> None:
+    n = tn.spawn_near_players("npcTraderJoel")
+    if n == 0:
+        n = tn.spawn_near_players("npcTraderBob")
+    log(f"telnet spawn trader near players units~={n}")
+
+
+def barrier_teleport_to_pad(tn: TelnetAdmin) -> bool:
+    moved = tn.teleport_players_to(*PERSIST_PAD_XYZ)
+    if moved == 0:
+        warn("teleport_persist_pad: no player ids yet; retry")
+        return False
+    return True
+
+
 def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
     """Drain newly appended complete lines through the shared line parser.
 
@@ -1405,6 +1549,20 @@ def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
         scan.feed_line(line)
     scan.feed_chunk(chunk)
     return chunk
+
+
+def latest_playtest_crumb(chunk: str) -> str:
+    """Last orchestrator/connect line of one chunk, scrubbed for the terminal.
+
+    Shared by every throttled progress echo so the line filter cannot drift
+    between the rejoin-setup loop and the main poll loop.
+    """
+    crumbs = [
+        ln
+        for ln in chunk.splitlines()
+        if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
+    ]
+    return scrub(crumbs[-1][-160:]) if crumbs else ""
 
 
 def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> str:
@@ -1825,27 +1983,8 @@ def main(argv: list[str] | None = None) -> int:
                     telnet_port=args.admin_port,
                     telnet_password=telnet_password,
                 )
-                ready_log = unity_log
-                # Navezgane load: up to ~10 min cold
-                if not wait_file_contains(ready_log, "StartGame done", timeout=600):
-                    if server_proc.poll() is not None:
-                        err(
-                            f"stock dedicated exited early code={server_proc.returncode}"
-                        )
-                        if ready_log.is_file():
-                            err(
-                                "tail server log:\n"
-                                + "\n".join(
-                                    scrub(line)
-                                    for line in ready_log.read_text(
-                                        encoding="utf-8", errors="replace"
-                                    ).splitlines()[-40:]
-                                )
-                            )
-                        return 2
-                    warn("no StartGame done yet; server still running, proceeding")
-                else:
-                    log("stock dedicated ready (StartGame done)")
+                if not wait_stock_dedicated_ready(server_proc, unity_log):
+                    return 2
             else:
                 server_proc = start_zdtd(
                     args.zdtd,
@@ -1855,13 +1994,8 @@ def main(argv: list[str] | None = None) -> int:
                     args.game_srv,
                     server_log,
                 )
-                if not wait_file_contains(server_log, "tick=20Hz", timeout=60):
-                    if server_proc.poll() is not None:
-                        log(f"zdtd exited early code={server_proc.returncode}")
-                        return 2
-                    warn("no tick=20Hz; proceeding")
-                else:
-                    log("zdtd ready (tick=20Hz)")
+                if not wait_zdtd_ready(server_proc, server_log):
+                    return 2
 
         # zdtd admin TCP speaks the same command surface the orch uses for stock
         # telnet (listplayers/listents/kill/spawnentity/settime). Enable fixtures
@@ -1969,15 +2103,6 @@ def main(argv: list[str] | None = None) -> int:
             last_setup_progress = float("-inf")
             rejoin_setup_seen = 0
 
-            def tele_pad_and_save(tn: TelnetAdmin) -> bool:
-                if tn.teleport_players_to(*PERSIST_PAD_XYZ) == 0:
-                    log("warn: teleport_persist_pad: no player ids; retry next poll")
-                    return False
-                # Let server commit player position before later setup/save.
-                time.sleep(2.0)
-                tn.exec("saveworld")
-                return True
-
             while time.monotonic() < setup_deadline:
                 reap_finished_helpers()
                 chunk = pump_log_tail(client_tail, client_scan)
@@ -1985,13 +2110,9 @@ def main(argv: list[str] | None = None) -> int:
                     now = time.monotonic()
                     if now - last_setup_progress > 8:
                         last_setup_progress = now
-                        crumbs = [
-                            ln
-                            for ln in chunk.splitlines()
-                            if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
-                        ]
-                        if crumbs:
-                            log(f"setup progress: {scrub(crumbs[-1][-160:])}")
+                        crumb = latest_playtest_crumb(chunk)
+                        if crumb:
+                            log(f"setup progress: {crumb}")
                     add_barrier_hits(barrier_seen, chunk)
                     # The provider barrier name is arbitrary, so it cannot live
                     # in the fixed barrier_seen table; count it separately.
@@ -2002,7 +2123,7 @@ def main(argv: list[str] | None = None) -> int:
                             "teleport_persist_pad",
                             counts=barrier_counts,
                             seen=barrier_seen,
-                            act=tele_pad_and_save,
+                            act=barrier_tele_pad_and_save,
                         )
                     if rejoin_setup_seen > barrier_counts["rejoin_setup_done"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
@@ -2012,9 +2133,9 @@ def main(argv: list[str] | None = None) -> int:
                                 # Re-tele pad once more so last write before disconnect is pad pos.
                                 n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
                             if n == 0:
-                                log(
-                                    f"warn: {rejoin_setup_barrier}: no player ids"
-                                    "; retry next poll"
+                                warn(
+                                    f"{rejoin_setup_barrier}: no player ids; "
+                                    "retry next poll"
                                 )
                                 tn.close()
                             else:
@@ -2130,11 +2251,8 @@ def main(argv: list[str] | None = None) -> int:
                     telnet_port=args.admin_port,
                     telnet_password=telnet_password,
                 )
-                ready_log = unity_log
-                if wait_file_contains(ready_log, "StartGame done", timeout=600):
-                    log("stock dedicated ready after rejoin restart")
-                else:
-                    warn("no StartGame done after rejoin restart; proceeding")
+                if not wait_stock_dedicated_ready(server_proc, unity_log):
+                    return 2
             elif args.server == "zdtd" and not args.no_server:
                 server_proc = start_zdtd(
                     args.zdtd,
@@ -2144,10 +2262,8 @@ def main(argv: list[str] | None = None) -> int:
                     args.game_srv,
                     server_log,
                 )
-                if wait_file_contains(server_log, "tick=20Hz", timeout=60):
-                    log("zdtd ready after rejoin restart (tick=20Hz)")
-                else:
-                    warn("no tick=20Hz after rejoin restart; proceeding")
+                if not wait_zdtd_ready(server_proc, server_log):
+                    return 2
             truncate_file(args.client_log, "client log")
             # Fresh readers + fresh counter pair for the verify generation: the
             # old log's barrier lines were already serviced (or deliberately
@@ -2189,13 +2305,9 @@ def main(argv: list[str] | None = None) -> int:
                 now = time.monotonic()
                 if now - last_progress > 8:
                     last_progress = now
-                    crumbs = [
-                        ln
-                        for ln in chunk.splitlines()
-                        if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
-                    ]
-                    if crumbs:
-                        log(f"progress: {scrub(crumbs[-1][-160:])}")
+                    crumb = latest_playtest_crumb(chunk)
+                    if crumb:
+                        log(f"progress: {crumb}")
                 add_barrier_hits(barrier_seen, chunk)
 
                 if not ready_seen and "ready player=" in chunk:
@@ -2234,90 +2346,47 @@ def main(argv: list[str] | None = None) -> int:
 
                 if want_fixtures:
                     # spawn_zombie may fire more than once: combat + sleeper_wake.
-                    def spawn_zombie(tn: TelnetAdmin) -> None:
-                        n = tn.spawn_near_players("zombieBoe")
-                        if n == 0:
-                            time.sleep(1.0)
-                            tn.spawn_near_players("zombieBoe")
-
                     service_barrier(
                         "spawn_zombie",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=spawn_zombie,
+                        act=barrier_spawn_zombie,
                     )
-
-                    def ensure_bots(tn: TelnetAdmin) -> None:
-                        # BotMod auto-spawns TargetBotCount; ensure at least 6
-                        # via telnet if needed (lines with "Bot " in bot list).
-                        out = tn.exec("bot list")
-                        if len(re.findall(r"Bot ", out)) < 4:
-                            r = tn.exec("bot count 6")
-                            log(f"telnet bot count 6 -> {r[:120]!r}")
 
                     service_barrier(
                         "bot_spawn",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=ensure_bots,
+                        act=barrier_ensure_bots,
                     )
-
-                    def bot_near_player(tn: TelnetAdmin) -> None:
-                        pids = tn.list_player_ids()
-                        if pids:
-                            ident = str(pids[0])
-                            r = tn.exec(f"bot player {ident} 1")
-                            log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
-                        else:
-                            r = tn.exec("bot spawn 1")
-                            log(f"telnet bot spawn 1 -> {r[:120]!r}")
 
                     service_barrier(
                         "bot_player_near",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=bot_near_player,
+                        act=barrier_bot_near_player,
                     )
-
-                    def kill_fixtures(tn: TelnetAdmin) -> None:
-                        tn.kill_non_player_ai()
 
                     service_barrier(
                         "kill_fixture_zombie",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=kill_fixtures,
+                        act=barrier_kill_fixtures,
                     )
-
-                    def kill_first_player(tn: TelnetAdmin) -> None:
-                        # Kill the human player entity for the death-screen
-                        # case (not AI). Shared parser: dedupes ids and also
-                        # understands zdtd's "(entity N)" reply style.
-                        pids = tn.list_player_ids()
-                        for pid in pids[:1]:
-                            r = tn.exec(f"kill {pid}")
-                            log(f"telnet kill_player {pid} → {r[:80]!r}")
 
                     service_barrier(
                         "kill_player",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=kill_first_player,
+                        act=barrier_kill_first_player,
                     )
-
-                    # Cap night sets: re-barrier spam was flipping the world back to 22:00
-                    # after settime_day and killing the player in economy cases.
-                    def set_night(tn: TelnetAdmin) -> None:
-                        # Day1 22:00 only (not day-7 BM horde).
-                        r = tn.exec("settime 22000")
-                        log(f"telnet settime 22000 → {r[:120]!r}")
 
                     service_barrier(
                         "settime_bloodmoon",
                         counts=barrier_counts,
                         seen=barrier_seen,
                         cap=SETTIME_BLOODMOON_MAX_FIRES,
-                        act=set_night,
+                        act=barrier_set_night,
                     )
                     if (
                         barrier_counts["settime_bloodmoon"] >= SETTIME_BLOODMOON_MAX_FIRES
@@ -2330,51 +2399,25 @@ def main(argv: list[str] | None = None) -> int:
                             "settime_bloodmoon"
                         ]
 
-                    def set_morning(tn: TelnetAdmin) -> None:
-                        # Morning restore; always last after any night set in this poll.
-                        r = tn.exec("settime 8000")
-                        log(f"telnet settime 8000 (day) → {r[:120]!r}")
-                        # Clear AI again after night so leftovers do not down the player.
-                        tn.clear_ai()
-
                     service_barrier(
                         "settime_day",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=set_morning,
+                        act=barrier_set_morning,
                     )
-
-                    def spawn_bicycle(tn: TelnetAdmin) -> None:
-                        # Same path as zombies: spawnentity <playerId> <class>
-                        n = tn.spawn_near_players("vehicleBicycle")
-                        if n == 0:
-                            for cmd in (
-                                f"spawnentityat vehicleBicycle {PERSIST_PAD_COORDS}",
-                                "se vehicleBicycle",
-                            ):
-                                r = tn.exec(cmd)
-                                log(f"telnet vehicle {cmd} → {r[:80]!r}")
-                        else:
-                            log(f"telnet spawn vehicle near players units~={n}")
 
                     service_barrier(
                         "spawn_vehicle",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=spawn_bicycle,
+                        act=barrier_spawn_bicycle,
                     )
-
-                    def spawn_trader(tn: TelnetAdmin) -> None:
-                        n = tn.spawn_near_players("npcTraderJoel")
-                        if n == 0:
-                            n = tn.spawn_near_players("npcTraderBob")
-                        log(f"telnet spawn trader near players units~={n}")
 
                     service_barrier(
                         "spawn_trader",
                         counts=barrier_counts,
                         seen=barrier_seen,
-                        act=spawn_trader,
+                        act=barrier_spawn_trader,
                     )
 
                 # Multi-peer / chat / APM barriers (stock or zdtd).
@@ -2483,18 +2526,11 @@ def main(argv: list[str] | None = None) -> int:
                         act=spawn_class_vehicle,
                     )
 
-                def teleport_to_pad(tn: TelnetAdmin) -> bool:
-                    moved = tn.teleport_players_to(*PERSIST_PAD_XYZ)
-                    if moved == 0:
-                        warn("teleport_persist_pad: no player ids yet; retry")
-                        return False
-                    return True
-
                 service_barrier(
                     "teleport_persist_pad",
                     counts=barrier_counts,
                     seen=barrier_seen,
-                    act=teleport_to_pad,
+                    act=barrier_teleport_to_pad,
                 )
 
                 while barrier_counts["apm_dump"] < barrier_seen["apm_dump"]:
@@ -2689,8 +2725,7 @@ def main(argv: list[str] | None = None) -> int:
             if slowest:
                 log("slowest: " + ", ".join(f"{c}={ms:.0f}ms" for c, ms in slowest[:5]))
             if nre or peer_nre:
-                log(
-                    "warn: "
+                warn(
                     f"primary={len(nre)} peer={len(peer_nre)} "
                     "NRE/underrun-like client lines (see report)"
                 )
