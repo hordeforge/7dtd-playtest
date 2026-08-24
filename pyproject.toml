@@ -48,6 +48,8 @@ select = [
     "TID", # tidy imports (no relative-import tricks)
     "SLOT",# manual __slots__ subclassing of immutable types
     "YTT", # truthy tests on sys/typing internals
+    "PGH", # no blanket noqa / bare type: ignore (suppression hygiene)
+    "T10", # no debugger imports/breakpoints in shipped orchestrator code
 ]
 
 # Type gate (make typecheck). Baseline strictness the tree passes today;
@@ -73,6 +75,8 @@ warn_redundant_casts = true
 warn_unreachable = true
 strict_equality = true
 strict_equality_for_none = true
+disallow_any_unimported = true
+disallow_untyped_globals = true
 no_implicit_optional = true
 no_implicit_reexport = true
 extra_checks = true

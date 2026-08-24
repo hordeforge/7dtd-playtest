@@ -20,6 +20,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Changed
+
+- Static-analysis gates tightened where the tree already passes: ruff now
+  enforces PGH (no blanket `# noqa` / bare `type: ignore`) and T10 (no
+  debugger imports or breakpoints) over `scripts/`; mypy gains
+  `disallow_any_unimported`. Three `type: ignore[attr-defined]` suppressions
+  in `dst_sim.py` were removed by returning the invariant session set from
+  `install_invariants` instead of monkey-patching it onto `Simulation`.
+
 ### Fixed
 
 - The orchestrator now announces a dedicated/zdtd backend that exits after
