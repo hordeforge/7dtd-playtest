@@ -2564,8 +2564,11 @@ def main(argv: list[str] | None = None) -> int:
         # Poll budget on the monotonic clock so a wall-clock step (NTP or
         # manual) during a long soak cannot hang or truncate the run.
         deadline = time.monotonic() + args.timeout
-        # soak_long needs ≥15 min wall + setup; bump default timeout.
-        if "soak_long" in args.suite:
+        # soak_long needs ≥15 min wall + setup; bump default timeout. Whole-
+        # token match (same , ; space delimiters as Catalog.ExpandSuites, see
+        # suite_wants_host_fixtures): a provider suite whose name merely
+        # contains "soak_long" must not silently inflate the run budget.
+        if "soak_long" in re.split(r"[,;\s]+", args.suite.lower()):
             deadline = time.monotonic() + max(args.timeout, 1100.0)
             log(f"soak_long timeout deadline wall_s>={int(deadline - time.monotonic())}")
         last_progress = float("-inf")

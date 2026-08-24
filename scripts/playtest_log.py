@@ -47,12 +47,19 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
 def barrier_line_hits(blob: str, name: str) -> int:
     """Count human `barrier <name>` lines in ``blob`` (whole-name match).
 
+    Anchored to the stable ``[7dtd-playtest]`` prefix like every other
+    contract regex (RESULT_RE, SUMMARY_RE, DONE_RE, barrier_hits_prefix):
+    only Report.Barrier emissions may count toward servicing an admin
+    action, never a game/chat/mod line that merely contains the words.
+
     Report.Barrier also emits JSON with the same name; summing both
     double-fires handlers (e.g. kills bots). The whole-name match keeps
     "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
     lines, which are collected separately via barrier_hits_prefix.
     """
-    return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
+    return len(
+        re.findall(rf"\[7dtd-playtest\]\s+barrier {re.escape(name)}(?![\w:])", blob)
+    )
 
 
 def add_barrier_hits(totals: dict[str, int], blob: str) -> None:

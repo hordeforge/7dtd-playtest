@@ -444,6 +444,11 @@ def test_incremental_scan_matches_whole_parse() -> None:
         "[7dtd-playtest] barrier spawn_zombie\n"
         "[7dtd-playtest] barrier spawn_vehicle:gyrocopter\n"
         "[7dtd-playtest] barrier chat_echo:token1\n"
+        # Barrier counting is anchored to the stable prefix: a foreign line
+        # (game echo, chat text, another mod's log) that merely contains the
+        # words must never service an admin action.
+        "[chat] player said: barrier kill_player\n"
+        "barrier spawn_trader without any prefix\n"
         "[7dtd-playtest] SUMMARY pass=1 fail=0 skip=0\n"
         "[7dtd-playtest] DONE exit_hint=0\n"
     )
@@ -475,6 +480,8 @@ def test_incremental_scan_matches_whole_parse() -> None:
     assert totals["spawn_zombie"] == 1, totals
     # Parameterised lines must not count toward the bare name.
     assert totals["spawn_vehicle"] == 0, totals
+    # Unprefixed look-alike lines must not count toward any barrier.
+    assert totals["kill_player"] == 0 and totals["spawn_trader"] == 0, totals
     print("PASS incremental_scan chunked feed equals whole-log parse and counts")
 
 
