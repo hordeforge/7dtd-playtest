@@ -9,14 +9,12 @@ shipped C#; it does not reimplement the probe.
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "Source" / "PlayTestMod" / "MiningProbe.cs"
 HELPERS = ROOT / "Source" / "PlayTestMod" / "Helpers.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
-PROVIDER_TEST = ROOT / "scripts" / "test_scenario_provider_surface.py"
 README = ROOT / "README.md"
 SCENARIOS = ROOT / "SCENARIOS.md"
 MAKEFILE = ROOT / "Makefile"
@@ -42,8 +40,7 @@ def method_body(src: str, signature_re: str) -> str:
 
 
 def forbidden_in(body: str, needles: tuple[str, ...]) -> list[str]:
-    hits = sorted({n for n in needles if n in body})
-    return hits
+    return sorted({n for n in needles if n in body})
 
 
 def main() -> int:
@@ -90,9 +87,9 @@ def main() -> int:
     assert "Helpers.TryEquipItemType" in src
     assert "Helpers.PushPlayerInventory" in src
 
-    press = method_body(src, r"public\s+bool\s+PressPrimary\s*\(")
-    release = method_body(src, r"public\s+void\s+ReleasePrimary\s*\(")
-    attack = method_body(src, r"public\s+bool\s+TickAttack\s*\(")
+    press = method_body(src, r"public\s+bool\s+PressPrimary\s*\([^)]*\)")
+    release = method_body(src, r"public\s+void\s+ReleasePrimary\s*\([^)]*\)")
+    attack = method_body(src, r"public\s+bool\s+TickAttack\s*\([^)]*\)")
 
     assert "UseHoldingItem(0, false)" in press, "press must be UseHoldingItem(0, false)"
     assert press.count("UseHoldingItem") == 1, "exactly one press call per attempt"
