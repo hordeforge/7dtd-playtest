@@ -590,6 +590,19 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
    dedicated server is already up, because overlapping runs photograph the
    wrong one.
 
+5. Anything a person judges by **ear** — a blast, an ambience, a cue — is
+   recorded the same way with
+   [`scripts/capture_audio.sh`](scripts/capture_audio.sh), which records the
+   default sink's monitor for the length of one suite run and reports the
+   recording's peak amplitude, so a muted client cannot ship silence unnoticed.
+   Same `--runner` contract, same refuse-to-overlap guard; the recording is
+   material for a human verdict, and nothing in it judges:
+
+```bash
+./scripts/capture_audio.sh --suite <id>
+./scripts/capture_audio.sh --suite <id> --out ./audio --runner ./my-wrapper.sh
+```
+
 `Report.Staged` exists because `ctx.Detail` does not work for this: a case's
 detail is flushed **with its result**, which is after the hold, so a loop
 waiting on the result photographs whatever came next — usually the disconnect
