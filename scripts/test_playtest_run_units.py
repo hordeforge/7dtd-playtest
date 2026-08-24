@@ -111,6 +111,12 @@ def test_loadgen_observer_wiring_is_generic() -> None:
     assert "teleportplayer {joined_entity}" in source
 
 
+def test_loadgen_rebuilds_when_source_is_newer() -> None:
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert "exe.stat().st_mtime >= source_mtime" in source
+    assert 'log("loadgen source is newer than its executable; rebuilding")' in source
+
+
 def test_fresh_save_removes_only_named_game_saves() -> None:
     """Layout UserData/Saves/<World>/<GameName>: every world's copy of the
     named game must go; sibling saves, stray files, and other worlds stay."""
@@ -1259,6 +1265,7 @@ def main() -> int:
     for name, fn in (
         ("loadgen_events", test_loadgen_structured_events_and_expectations),
         ("loadgen_observer_wiring", test_loadgen_observer_wiring_is_generic),
+        ("loadgen_stale_rebuild", test_loadgen_rebuilds_when_source_is_newer),
         ("fresh_save_named_only", test_fresh_save_removes_only_named_game_saves),
         ("fresh_save_no_saves_dir", test_fresh_save_without_saves_dir_is_noop),
         ("fresh_save_quarantine", test_fresh_save_quarantines_named_saves_recoverably),

@@ -5,6 +5,8 @@ Agent ownership: mark `[-] in progress: <agent>, YYYY-MM-DD` before editing;
 
 ## Backlog
 
+- [x] Rebuild loadgen when observer source is newer than its executable: done,
+  2026-08-24
 - [x] Consume loadgen JSON-lines joined/state events for external provider
   replication assertions: done, 2026-08-24
 - [x] Compare loadgen peer CVars with positive/equal predicates and the
