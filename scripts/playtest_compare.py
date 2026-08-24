@@ -30,6 +30,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from playtest_log import parse_client_log
 
@@ -171,7 +172,7 @@ def main() -> int:
                   file=sys.stderr)
             return 3
 
-    def by_case(res):
+    def by_case(res: dict[str, Any]) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
         for r in res["results"]:
             case = r.get("case") or "?"
@@ -179,7 +180,7 @@ def main() -> int:
         return out
 
     scases, zcases = by_case(stock), by_case(zdtd)
-    rows = []
+    rows: list[dict[str, Any]] = []
     findings = []
     for case in sorted(set(scases) | set(zcases)):
         s = scases.get(case, [{}])[-1]
@@ -198,7 +199,7 @@ def main() -> int:
             else:
                 findings.append(f"{case}: status differs ({s_st} vs {z_st})")
 
-    def summary(res):
+    def summary(res: dict[str, Any]) -> dict[str, int]:
         s = res.get("summary") or {}
         return {"pass": s.get("pass", 0), "fail": s.get("fail", 0),
                 "skip": s.get("skip", 0)}

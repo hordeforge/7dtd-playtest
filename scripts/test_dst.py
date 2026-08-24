@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -132,7 +133,14 @@ def test_simulator_catches_planted_regressions() -> None:
 
     real_acquire = pl.acquire
 
-    def blind_acquire(session, *, path=None, live_probe=None, max_age_sec=None, env=None):
+    def blind_acquire(
+        session: str,
+        *,
+        path: Path | None = None,
+        live_probe: Callable[[], bool] | None = None,
+        max_age_sec: float | None = None,
+        env: pl.LockEnv | None = None,
+    ) -> pl.LockState:
         return real_acquire(
             session, path=path, live_probe=lambda: False,
             max_age_sec=max_age_sec, env=env,
@@ -140,8 +148,15 @@ def test_simulator_catches_planted_regressions() -> None:
 
     real_write = pl.write_lock
 
-    def nonatomic_write(path, *, running, session=None, acquired=None,
-                        heartbeat=None, env=None):
+    def nonatomic_write(
+        path: Path,
+        *,
+        running: bool,
+        session: str | None = None,
+        acquired: str | None = None,
+        heartbeat: str | None = None,
+        env: pl.LockEnv | None = None,
+    ) -> None:
         e = pl._env(env)
         e.storage.mkdir_parents(path)
         if running:
@@ -156,7 +171,13 @@ def test_simulator_catches_planted_regressions() -> None:
 
     real_release = pl.release
 
-    def unchecked_release(session, *, path=None, env=None):
+    def unchecked_release(
+        session: str,
+        *,
+        path: Path | None = None,
+        env: pl.LockEnv | None = None,
+    ) -> pl.LockState:
+        path = path or pl.default_lock_path()
         e = pl._env(env)
         pl._with_flock(
             path, lambda: pl.write_lock(path, running=False, session=None, env=e), env=e

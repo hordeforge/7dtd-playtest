@@ -519,7 +519,7 @@ def install_invariants(sim: Simulation, world: World, storage: SimStorage) -> No
     last_heartbeat: dict[str, tuple[str | None, float | None]] = {}
     sim.known_sessions = known_sessions  # type: ignore[attr-defined]
 
-    def _state():
+    def _state() -> pl.LockState:
         """Read the lock on a canonical clock, not a skewed agent's."""
         env = pl.current_env()
         if isinstance(env, SimEnv):

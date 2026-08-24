@@ -1158,7 +1158,7 @@ def install_signal_handlers() -> None:
     from inside the cleanup itself and strand a live runtime under a
     published claim.
     """
-    def _exit_fast(signum, _frame):
+    def _exit_fast(signum: int, _frame: object) -> None:
         # Ignore repeats while we unwind so a second hit during cleanup
         # cannot raise inside the finally block and skip stop_proc/release.
         _ignore_termination_signals()
