@@ -544,6 +544,85 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Opens a game UI window group and reports whether it really ended up
+        /// open — not whether the call was accepted.
+        ///
+        /// <para>Every provider staging a frame of the game's own interface has
+        /// needed this, and hand-rolling it goes wrong quietly. Asking
+        /// <c>windowManager</c> to open a group does not make it open within
+        /// the same call, so a caller that checks immediately reports a closed
+        /// window that is about to appear; and <c>GUIWindowManager.Open</c>
+        /// resolves an unknown name with nothing but a log warning, so a
+        /// misspelled group looks exactly like a group that declined to
+        /// draw.</para>
+        ///
+        /// <para>This opens by name and then reports the state, so a case can
+        /// say what happened instead of assuming. Pair it with
+        /// <see cref="OpenWindowNames"/> when the answer is "it opened and I
+        /// still cannot see it": that lists what the window manager believes
+        /// is on screen, which is the difference between the wrong name and
+        /// the wrong expectation.</para>
+        /// </summary>
+        /// <param name="group">Window or group id, as declared in XUi_InGame.</param>
+        /// <param name="modal">Vanilla opens the character sheet non-modal.</param>
+        /// <returns>Whether the window manager reports it open now.</returns>
+        public static bool OpenWindowGroup(EntityPlayerLocal player, string group, bool modal = false)
+        {
+            if (player == null || string.IsNullOrEmpty(group)) return false;
+            try
+            {
+                var ui = LocalPlayerUI.GetUIForPlayer(player);
+                var wm = ui != null ? ui.windowManager : null;
+                if (wm == null) return false;
+                wm.Open(group, modal);
+                return wm.IsWindowOpen(group);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Closes a window or group by name; false if there was no UI to ask.</summary>
+        public static bool CloseWindowGroup(EntityPlayerLocal player, string group)
+        {
+            if (player == null || string.IsNullOrEmpty(group)) return false;
+            try
+            {
+                var ui = LocalPlayerUI.GetUIForPlayer(player);
+                var wm = ui != null ? ui.windowManager : null;
+                if (wm == null) return false;
+                wm.Close(group);
+                return !wm.IsWindowOpen(group);
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Every window the manager currently has open, by id, comma-joined and
+        /// sorted — the answer to "it says it opened and the frame is empty".
+        ///
+        /// <para>Deterministic order on purpose: this ends up in a case's
+        /// Detail, and a set that reorders between runs makes two identical
+        /// runs look different.</para>
+        /// </summary>
+        public static string OpenWindowNames(EntityPlayerLocal player)
+        {
+            try
+            {
+                var ui = LocalPlayerUI.GetUIForPlayer(player);
+                var wm = ui != null ? ui.windowManager : null;
+                if (wm == null || wm.openWindows == null) return "";
+                var names = new List<string>();
+                for (int i = 0; i < wm.openWindows.Count; i++)
+                {
+                    var w = wm.openWindows[i];
+                    if (w != null && !string.IsNullOrEmpty(w.Id)) names.Add(w.Id);
+                }
+                names.Sort(StringComparer.Ordinal);
+                return string.Join(",", names.ToArray());
+            }
+            catch { return ""; }
+        }
+
+        /// <summary>
         /// Stock primary attack press/release via UseHoldingItem + Attack.
         /// Client prediction + server authority; HP drop is the observable.
         /// </summary>
