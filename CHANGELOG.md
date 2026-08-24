@@ -47,6 +47,10 @@ unchanged.
 
 ### Changed
 
+- Loadgen launch now rebuilds when its C# project or source is newer than the
+  existing Release executable, preventing a freshly updated checkout from
+  silently running an incompatible stale observer binary.
+
 - `Helpers.LookAt` now follows the stock player rotation convention for
   vertical aim. Targets below the player produce negative X pitch, so overhead
   ground and block scenes no longer turn the camera into the sky.

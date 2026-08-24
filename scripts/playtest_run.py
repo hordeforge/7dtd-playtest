@@ -793,12 +793,20 @@ def start_client(
 
 def ensure_loadgen_built() -> Path | None:
     exe = LOADGEN / "src" / "LoadGen" / "bin" / "Release" / "net8.0" / "7dtd-loadgen"
-    if exe.is_file():
-        return exe
     proj = LOADGEN / "src" / "LoadGen" / "LoadGen.csproj"
     if not proj.is_file():
         warn(f"loadgen project missing: {proj}")
         return None
+    source_root = proj.parent
+    source_mtime = max(
+        (path.stat().st_mtime for path in source_root.glob("*.cs")),
+        default=proj.stat().st_mtime,
+    )
+    source_mtime = max(source_mtime, proj.stat().st_mtime)
+    if exe.is_file() and exe.stat().st_mtime >= source_mtime:
+        return exe
+    if exe.is_file():
+        log("loadgen source is newer than its executable; rebuilding")
     log("building loadgen…")
     try:
         r = subprocess.run(
