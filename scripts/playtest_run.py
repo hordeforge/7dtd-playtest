@@ -1638,12 +1638,16 @@ def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> bool:
 # barrier handlers below (spawn_zombie, kill_fixture_zombie, spawn_trader,
 # spawn_vehicle, kill_player, settime_*, bot_spawn, bot_player_near) only arm
 # when the selection names one of these; every other suite must stay
-# telnet-free. demo/full/all/live/benchmark/bench/mp/residual are legacy
-# aliases whose expansions include fixture suites.
+# telnet-free. demo/full/all/live/demo_mode/benchmark/bench/mp/residual/
+# residual_light are aliases or synonyms whose expansions include fixture
+# suites; each ExpandSuites synonym must appear here too, or one spelling of
+# the same selection arms fixtures while the other leaves its barriers
+# unserviced.
 FIXTURE_SUITE_IDS = frozenset(
     (
         # Aliases that expand into fixture-bearing suites.
         "demo",
+        "demo_mode",
         "full",
         "all",
         "live",
@@ -1651,6 +1655,7 @@ FIXTURE_SUITE_IDS = frozenset(
         "bench",
         "mp",
         "residual",
+        "residual_light",
         # Catalog suites with live cases that fire host-serviced barriers:
         # combat/economy (AI + traders), vehicle (host-owned spawns),
         # finale (player kill), bot (BotMod telnet commands).

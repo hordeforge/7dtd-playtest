@@ -429,7 +429,10 @@ def test_suite_wants_host_fixtures_selection_table() -> None:
     wants = playtest_run.suite_wants_host_fixtures
     for suite in (
         "combat", "economy", "vehicle", "finale", "bot",
-        "demo", "full", "all", "live", "benchmark", "bench", "mp", "residual",
+        # demo_mode / residual_light are ExpandSuites synonyms of demo /
+        # residual: every spelling of one selection must arm identically.
+        "demo", "demo_mode", "full", "all", "live",
+        "benchmark", "bench", "mp", "residual", "residual_light",
     ):
         assert wants(suite), f"{suite} carries live cases needing host fixtures"
     for suite in (
@@ -502,6 +505,57 @@ def test_fixture_gate_covers_every_barrier_emitting_suite() -> None:
     print(
         "PASS fixture_gate_catalog_surface "
         + ", ".join(f"{fn}→{sorted(b)[0]}" for fn, b in sorted(emitters.items()))
+    )
+
+
+def _expand_suites_alias_map(text: str) -> dict[str, tuple[str, ...]]:
+    """Parse Catalog.ExpandSuites switch arms into {alias: expansion ids}.
+
+    Only alias arms (explicit ``case`` labels with an AddUnique) are
+    returned; the pass-through default arm and the early-return list/catalog
+    arm yield no ids and are skipped by callers.
+    """
+    start = text.index("public static string[] ExpandSuites")
+    end = text.index("static void AddUnique", start)
+    body = re.sub(r"//[^\n]*", "", text[start:end])
+    aliases: dict[str, tuple[str, ...]] = {}
+    arm_re = re.compile(
+        r'((?:case\s+"[^"]+":\s*)+)'
+        r"(?:return new\[\]\s*\{[^}]*\}\s*;|AddUnique\(list,(?P<ids>[^)]*)\))"
+    )
+    for m in arm_re.finditer(body):
+        names = re.findall(r'case\s+"([^"]+)"', m.group(1))
+        ids = tuple(re.findall(r'"([^"]+)"', m.group("ids") or ""))
+        for name in names:
+            aliases[name] = ids
+    return aliases
+
+
+def test_fixture_gate_covers_every_expand_suites_alias() -> None:
+    """Alias parity: if Catalog.ExpandSuites maps an alias onto an expansion
+    containing any suite id that arms fixtures, every spelling of that
+    selection must arm fixtures too. Catches adding a client synonym (the
+    residual_light class) without teaching FIXTURE_SUITE_IDS, where one
+    spelling of the same run opens the telnet path and the other leaves its
+    barriers unserviced."""
+    text = CATALOG_CS.read_text(encoding="utf-8")
+    aliases = _expand_suites_alias_map(text)
+    assert "residual" in aliases and "residual_light" in aliases, (
+        "catalog parse failed: residual synonyms not recognized"
+    )
+    wants = playtest_run.suite_wants_host_fixtures
+    for alias, ids in sorted(aliases.items()):
+        if not ids:
+            continue
+        if set(ids) & set(playtest_run.FIXTURE_SUITE_IDS):
+            assert wants(alias), (
+                f"alias '{alias}' expands into fixture-armed suites "
+                f"{sorted(set(ids) & set(playtest_run.FIXTURE_SUITE_IDS))} but "
+                "does not arm fixtures (missing from FIXTURE_SUITE_IDS?)"
+            )
+    print(
+        f"PASS fixture_gate_alias_surface {len(aliases)} ExpandSuites aliases"
+        " agree with FIXTURE_SUITE_IDS"
     )
 
 
@@ -1302,6 +1356,7 @@ def main() -> int:
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
+        ("fixture_gate_alias_surface", test_fixture_gate_covers_every_expand_suites_alias),
         ("barrier_tables_pair", test_new_barrier_tables_fresh_pair_per_generation),
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),

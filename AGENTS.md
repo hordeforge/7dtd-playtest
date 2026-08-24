@@ -207,7 +207,7 @@ different sentence.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the ten offline suites on every push
+`make test` runs lint + typecheck plus the eleven offline suites on every push
 (CI: `.github/workflows/ci.yml`). The analysis gates come first and are
 blocking:
 
