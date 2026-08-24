@@ -33,7 +33,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help build install uninstall clean test test-one lint typecheck check dst dst-soak playtest playtest-smoke \
+.PHONY: help build install uninstall clean test test-one coverage lint typecheck check dst dst-soak playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
@@ -116,6 +116,26 @@ test: lint typecheck
 	$(UV) "$(ROOT)/scripts/test_report_surface.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_run_units.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_compare.py"
+
+# Line coverage of the orchestrator modules under the same offline suites
+# `make test` runs (same order, same interpreter pin). Writes .coverage in
+# the repo root; CI renders it into the README badge with
+# scripts/coverage_badge.py. Subprocess-based DST simulation is not traced.
+COV := uv run --locked --project "$(ROOT)" --with coverage python
+
+coverage:
+	rm -f .coverage .coverage.*
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_catalog_surface.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_version_surface.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_scenario_provider_surface.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_stock_peer_client.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_lock.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_dst.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_no_unbound_locals.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_report_surface.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_run_units.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_compare.py"
+	$(COV) -m coverage report -m
 
 # One gate while iterating: make test-one GATE=test_dst.py
 GATE ?=
