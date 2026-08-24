@@ -36,16 +36,19 @@ ZDTD_LOG = (
 )
 
 
+def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(TOOL), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+
+
 def _run(tmp_path: Path, stock: str, zdtd: str) -> subprocess.CompletedProcess[str]:
     s = tmp_path / "stock.log"
     z = tmp_path / "zdtd.log"
     s.write_text(stock, encoding="utf-8")
     z.write_text(zdtd, encoding="utf-8")
-    out = tmp_path / "out"
-    return subprocess.run(
-        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    return _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(tmp_path / "out"))
 
 
 def test_status_mismatch_becomes_finding(tmp_path: Path) -> None:
@@ -91,10 +94,7 @@ def test_report_json_wall_axis(tmp_path: Path) -> None:
     s.write_text(json.dumps(report("stock", 157.1, 1)), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd", 128.0, 1)), encoding="utf-8")
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["findings"] == []          # wall is an axis, not a mismatch
@@ -107,11 +107,7 @@ def test_report_json_wall_axis(tmp_path: Path) -> None:
 
 
 def _run_bad_input(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess[str]:
-    out = tmp_path / "out"
-    return subprocess.run(
-        [sys.executable, str(TOOL), *extra, "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    return _run_cli(*extra, "--out", str(tmp_path / "out"))
 
 
 def test_nonexistent_input_refuses_diff(tmp_path: Path) -> None:
@@ -147,10 +143,7 @@ def test_directory_input_refuses_diff(tmp_path: Path) -> None:
 
 def test_exit_codes_documented_in_help() -> None:
     """The 0/1/2/3 contract is part of the CLI surface; --help must show it."""
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--help"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--help")
     assert r.returncode == 0, r.stderr
     assert "Exit codes:" in r.stdout
     for line in ("0  comparison written", "1  no playtest result lines",
@@ -172,11 +165,7 @@ def test_missing_side_refuses_diff(tmp_path: Path) -> None:
     z = tmp_path / "zdtd"   # empty dir: side never ran
     z.mkdir()
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z),
-         "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock-dir", str(s.parent), "--zdtd-dir", str(z), "--out", str(out))
     assert r.returncode == 2, r.stderr
     assert "no report found on the zdtd side" in r.stderr
     assert not (out / "playtest-compare.json").exists()
@@ -198,11 +187,8 @@ def test_stale_report_refuses_diff(tmp_path: Path) -> None:
     s.write_text(json.dumps(report("stock")), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
-         "--out", str(out), "--require-fresh-minutes", "60"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
+                 "--out", str(out), "--require-fresh-minutes", "60")
     assert r.returncode == 3, r.stderr
     assert "comparison inputs are stale" in r.stderr
     assert not (out / "playtest-compare.json").exists()
@@ -222,10 +208,7 @@ def test_ran_at_surfaces_in_report(tmp_path: Path) -> None:
     s.write_text(json.dumps(report("stock")), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["stock"]["ranAtUtc"] and payload["zdtd"]["ranAtUtc"]
@@ -300,11 +283,8 @@ def test_orchestrator_report_diffs_through_dir_mode(tmp_path: Path) -> None:
     write(zdtd, now + 1, "zdtd", None)
 
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock-dir", str(stock), "--zdtd-dir", str(zdtd),
-         "--out", str(out), "--require-fresh-minutes", "60"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock-dir", str(stock), "--zdtd-dir", str(zdtd),
+                 "--out", str(out), "--require-fresh-minutes", "60")
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["compared"] is True

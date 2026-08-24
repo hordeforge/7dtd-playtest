@@ -3790,6 +3790,24 @@ namespace ZdtdPlaytest
             catch { /* never break case */ }
         }
 
+        /// <summary>Pad area fidelity: setup placed solid dmg seed and/or chest nearby.</summary>
+        static bool PersistPadAreaPresent(World world)
+        {
+            try
+            {
+                var dmg = world.GetBlock(PersistDmgBlock);
+                if (dmg.type != 0 && !dmg.isair) return true;
+            }
+            catch { /* */ }
+            try
+            {
+                var chest = world.GetBlock(PersistChestBlock);
+                if (chest.type != 0 && !chest.isair) return true;
+            }
+            catch { /* */ }
+            return false;
+        }
+
         static void AddPersistVerify(List<CaseDef> q, string suite)
         {
             q.Add(Live(suite, "dig_survives_rejoin", new[] { "persist", "world" }, ctx =>
@@ -3812,23 +3830,7 @@ namespace ZdtdPlaytest
                 ctx.IntA = chunkOk ? 1 : 0;
                 var b = ctx.World.GetBlock(PersistDigBlock);
                 bool air = b.type == 0 || b.isair;
-                // Pad area fidelity: setup placed solid dmg and/or chest nearby.
-                bool padArea = false;
-                try
-                {
-                    var dmg = ctx.World.GetBlock(PersistDmgBlock);
-                    if (dmg.type != 0 && !dmg.isair) padArea = true;
-                }
-                catch { /* */ }
-                try
-                {
-                    if (!padArea)
-                    {
-                        var chest = ctx.World.GetBlock(PersistChestBlock);
-                        if (chest.type != 0 && !chest.isair) padArea = true;
-                    }
-                }
-                catch { /* */ }
+                bool padArea = PersistPadAreaPresent(ctx.World);
                 ctx.PlaceBlockType = (air && chunkOk && padArea) ? 1 : 0;
                 ctx.Detail = "type=" + b.type + " chunk=" + chunkOk
                     + " padArea=" + padArea + " at " + PersistDigBlock;
@@ -3840,22 +3842,7 @@ namespace ZdtdPlaytest
                 catch { /* */ }
                 var b = ctx.World.GetBlock(PersistDigBlock);
                 bool air = b.type == 0 || b.isair;
-                bool padArea = false;
-                try
-                {
-                    var dmg = ctx.World.GetBlock(PersistDmgBlock);
-                    if (dmg.type != 0 && !dmg.isair) padArea = true;
-                }
-                catch { /* */ }
-                try
-                {
-                    if (!padArea)
-                    {
-                        var chest = ctx.World.GetBlock(PersistChestBlock);
-                        if (chest.type != 0 && !chest.isair) padArea = true;
-                    }
-                }
-                catch { /* */ }
+                bool padArea = PersistPadAreaPresent(ctx.World);
                 ctx.Detail = "type=" + b.type + " chunk=" + chunkOk
                     + " padArea=" + padArea + " ok=" + (ctx.PlaceBlockType == 1)
                     + " at " + PersistDigBlock;
