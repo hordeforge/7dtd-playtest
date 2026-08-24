@@ -35,7 +35,9 @@ from playtest_log import (  # noqa: E402
     ClientLogScan,
     LogTail,
     TailSource,
+    add_barrier_hits,
     barrier_hits_prefix,
+    barrier_line_hits,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1355,30 +1357,6 @@ BARRIER_NAMES: tuple[str, ...] = (
 # Cap on settime_bloodmoon fires per run: re-barrier spam was flipping the
 # world back to 22:00 after settime_day and killing the player in economy cases.
 SETTIME_BLOODMOON_MAX_FIRES = 2
-
-
-def barrier_line_hits(blob: str, name: str) -> int:
-    """Count human `barrier <name>` lines in ``blob`` (whole-name match).
-
-    Report.Barrier also emits JSON with the same name; summing both
-    double-fires handlers (e.g. kills bots). The whole-name match keeps
-    "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
-    lines, which are collected separately via barrier_hits_prefix.
-    """
-    return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
-
-
-def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
-    """Fold the barrier lines of one newly read chunk into cumulative totals.
-
-    Poll loops feed only appended chunks through here instead of re-scanning
-    the whole log each poll; totals only grow, matching how handlers compare
-    their fired counts against everything seen so far.
-    """
-    for name in totals:
-        hits = barrier_line_hits(blob, name)
-        if hits:
-            totals[name] += hits
 
 
 def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:

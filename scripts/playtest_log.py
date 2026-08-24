@@ -42,6 +42,30 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     ]
 
 
+def barrier_line_hits(blob: str, name: str) -> int:
+    """Count human `barrier <name>` lines in ``blob`` (whole-name match).
+
+    Report.Barrier also emits JSON with the same name; summing both
+    double-fires handlers (e.g. kills bots). The whole-name match keeps
+    "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
+    lines, which are collected separately via barrier_hits_prefix.
+    """
+    return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
+
+
+def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
+    """Fold the barrier lines of one newly read chunk into cumulative totals.
+
+    Poll loops feed only appended chunks through here instead of re-scanning
+    the whole log each poll; totals only grow, matching how handlers compare
+    their fired counts against everything seen so far.
+    """
+    for name in totals:
+        hits = barrier_line_hits(blob, name)
+        if hits:
+            totals[name] += hits
+
+
 class ClientLogScan:
     """Incremental equivalent of :func:`parse_client_log`.
 

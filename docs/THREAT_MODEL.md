@@ -109,8 +109,8 @@ where installed-mod trust becomes in-game code execution (B5).
   `spawnentity {pid} {cls}` via spawn_near_players :938-954, handler
   :2290-2308): a crafted line can append arbitrary console commands (R2).
   Countermeasures that do exist on this path: whole-name/prefix barrier
-  matching with escaped regex (`barrier_line_hits`, :1261;
-  `barrier_hits_prefix`, playtest_log.py:29), non-empty token check and
+  matching with escaped regex (`barrier_line_hits` :45, `add_barrier_hits`
+  :56, `barrier_hits_prefix` playtest_log.py:29), non-empty token check and
   fire-once-per-token state (:2266-2281), per-run counter tables reset only at
   generation boundaries (`new_barrier_tables`, :1285), bounded recv windows
   (`TelnetAdmin._recv`, :960). No character-level sanitization exists on

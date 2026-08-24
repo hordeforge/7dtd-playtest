@@ -469,9 +469,9 @@ def test_incremental_scan_matches_whole_parse() -> None:
     assert got["nre_like_total"] == 1, got["nre_like_total"]
 
     totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
-    playtest_run.add_barrier_hits(totals, text)
+    playtest_log.add_barrier_hits(totals, text)
     for name, total in totals.items():
-        assert total == playtest_run.barrier_line_hits(text, name), name
+        assert total == playtest_log.barrier_line_hits(text, name), name
     assert totals["spawn_zombie"] == 1, totals
     # Parameterised lines must not count toward the bare name.
     assert totals["spawn_vehicle"] == 0, totals
