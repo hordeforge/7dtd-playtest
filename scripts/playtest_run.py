@@ -1567,6 +1567,18 @@ def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
     return chunk
 
 
+def result_echo_line(row: dict, *, peer: bool = False) -> str:
+    """Terminal line for one parsed result row, control characters stripped.
+
+    status / case / detail are parsed back out of client log bytes, which
+    carry remote chat text verbatim (chat-echo cases put the last received
+    chat line into detail), so the same scrub as every other interactive
+    echo applies before this reaches the operator terminal.
+    """
+    indent = "  peer " if peer else "  "
+    return indent + scrub(f"{row['status']} {row['case']} {row.get('detail', '')}")
+
+
 def latest_playtest_crumb(chunk: str) -> str:
     """Last orchestrator/connect line of one chunk, scrubbed for the terminal.
 
@@ -2720,9 +2732,9 @@ def main(argv: list[str] | None = None) -> int:
             if summary:
                 log(f"partial summary={summary}")
             for r in results:
-                log(f"  {r['status']} {r['case']} {r.get('detail', '')}")
+                log(result_echo_line(r))
             for r in peer_results:
-                log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
+                log(result_echo_line(r, peer=True))
             if args.client_log.is_file():
                 # One split shared by every key grep: a failed run's client log
                 # can reach tens of MB, and re-splitting per key multiplies it.
@@ -2749,16 +2761,21 @@ def main(argv: list[str] | None = None) -> int:
                     f"skip={summary.get('skip', 0)} wall_s={wall_s:.1f}"
                 )
             for r in results:
-                log(f"  {r['status']} {r['case']} {r.get('detail', '')}")
+                log(result_echo_line(r))
             if peer_client_suite and peer_summary:
                 log(
                     f"PEER SUMMARY pass={peer_summary['pass']} fail={peer_summary['fail']} "
                     f"skip={peer_summary.get('skip', 0)}"
                 )
             for r in peer_results:
-                log(f"  peer {r['status']} {r['case']} {r.get('detail', '')}")
+                log(result_echo_line(r, peer=True))
             if slowest:
-                log("slowest: " + ", ".join(f"{c}={ms:.0f}ms" for c, ms in slowest[:5]))
+                # Case names come from JSON event fields parsed out of the
+                # client log; same control-char boundary as the rows above.
+                log(
+                    "slowest: "
+                    + scrub(", ".join(f"{c}={ms:.0f}ms" for c, ms in slowest[:5]))
+                )
             if nre or peer_nre:
                 warn(
                     f"primary={len(nre)} peer={len(peer_nre)} "

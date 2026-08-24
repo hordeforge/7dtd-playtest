@@ -764,6 +764,43 @@ def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
     print("PASS log_scrub control chars stripped from terminal echoes")
 
 
+def test_result_echo_line_scrubs_parsed_rows() -> None:
+    """Result rows echo parsed client-log fields (case ids, details carrying
+    remote chat text) to the operator terminal: the same control-char scrub
+    as every other interactive echo must apply, and the row shapes must stay
+    byte-identical for clean input."""
+    line = playtest_run.result_echo_line(
+        {"status": "PASS", "case": "smoke/join", "detail": "ok"}
+    )
+    assert line == "  PASS smoke/join ok", f"clean shape drifted: {line!r}"
+    peer = playtest_run.result_echo_line(
+        {"status": "FAIL", "case": "mp/s", "detail": "d"}, peer=True
+    )
+    assert peer == "  peer FAIL mp/s d", f"peer shape drifted: {peer!r}"
+    dirty = playtest_run.result_echo_line(
+        {"status": "FAIL", "case": "chat/echo", "detail": "\x1b[2J\x00cr\rinj"}
+    )
+    assert "\x1b" not in dirty and "\r" not in dirty and "\x00" not in dirty, (
+        f"control chars reached the terminal echo: {dirty!r}"
+    )
+    assert "[2Jcrinj" in dirty, f"visible text must survive the scrub: {dirty!r}"
+    print("PASS result_echo_line parsed rows scrubbed before terminal echo")
+
+
+def test_result_row_echoes_all_routed_through_helper() -> None:
+    """A direct f-string echo of a parsed row reintroduces the escape path;
+    every row echo in main() must call the scrubbed helper instead."""
+    src = Path(playtest_run.__file__).read_text(encoding="utf-8")
+    direct = re.findall(r'log\(f"  \{r\[.status.\]\}', src)
+    assert not direct, (
+        f"{len(direct)} result row echo(es) bypass result_echo_line"
+    )
+    calls = len(re.findall(r"\bresult_echo_line\(", src))
+    # 1 definition + 1 docstring mention aside: 4 call sites in main().
+    assert calls >= 5, f"helper defined but unwired: {calls} reference(s)"
+    print("PASS result_row_echo_wiring every row echo routed through helper")
+
+
 def test_resolve_telnet_password_paths() -> None:
     """Operator-provided wins verbatim; --no-server attach falls back to the
     documented lab default (the running dedicated's config was written by
@@ -979,6 +1016,14 @@ def main() -> int:
             test_safe_barrier_param_gates_both_telnet_handlers,
         ),
         ("log_scrub", test_scrub_strips_control_chars_from_echoed_log_text),
+        (
+            "result_row_echo",
+            test_result_echo_line_scrubs_parsed_rows,
+        ),
+        (
+            "result_row_echo_wiring",
+            test_result_row_echoes_all_routed_through_helper,
+        ),
         ("telnet_password_resolution", test_resolve_telnet_password_paths),
         ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
         (
