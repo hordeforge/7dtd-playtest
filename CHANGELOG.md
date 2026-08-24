@@ -22,6 +22,11 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- The provider-facing case contract (`PlayerGate`, `CaseDef`, `CaseCtx`)
+  moved verbatim from `Runner.cs` into its own `Source/PlayTestMod/CaseDef.cs`,
+  matching the other public provider surfaces (`Report.cs`, `MiningProbe.cs`,
+  the `Helpers.*.cs` partials). No type, member, or namespace changed; the
+  scenario-provider surface gate now reads the new file.
 - Static-analysis gates tightened where the tree already passes: ruff now
   enforces PGH (no blanket `# noqa` / bare `type: ignore`) and T10 (no
   debugger imports or breakpoints) over `scripts/`; mypy gains

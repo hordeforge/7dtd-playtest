@@ -10,6 +10,7 @@ from playtest_log import barrier_hits_prefix
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
+CASEDEF = ROOT / "Source" / "PlayTestMod" / "CaseDef.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 PROVIDER = ROOT / "Source" / "PlayTestMod" / "ScenarioProvider.cs"
 HELPERS_GLOB = sorted((ROOT / "Source" / "PlayTestMod").glob("Helpers*.cs"))
@@ -43,6 +44,7 @@ def method_body(src: str, signature_re: str) -> str:
 
 def main() -> int:
     runner = RUNNER.read_text(encoding="utf-8")
+    casedef = CASEDEF.read_text(encoding="utf-8")
     catalog = CATALOG.read_text(encoding="utf-8")
     provider = PROVIDER.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
@@ -61,8 +63,11 @@ def main() -> int:
         "spawn_vehicle:vehicleBicycle",
     ], "repeated parameterized barriers must remain separate fixture requests"
 
-    assert "public sealed class CaseDef" in runner
-    assert "public sealed class CaseCtx" in runner
+    # The provider-facing case contract lives in its own file (CaseDef.cs),
+    # beside the other public surfaces (Report.cs, MiningProbe.cs, Helpers).
+    assert "public sealed class CaseDef" in casedef
+    assert "public sealed class CaseCtx" in casedef
+    assert "public enum PlayerGate" in casedef
     assert "public interface IScenarioProvider" in provider
     assert "IEnumerable<string> SuiteIds" in provider
     assert "void AppendSuite(List<CaseDef> queue, string suite, int lap)" in provider
@@ -73,19 +78,19 @@ def main() -> int:
     # Public factories on CaseDef (external providers must not hand-build fields).
     assert re.search(
         r"public\s+static\s+CaseDef\s+Live\s*\(",
-        runner,
+        casedef,
     ), "CaseDef.Live must be a public static factory"
     assert re.search(
         r"public\s+static\s+CaseDef\s+Defer\s*\(",
-        runner,
+        casedef,
     ), "CaseDef.Defer must be a public static factory"
 
     live_body = method_body(
-        runner,
+        casedef,
         r"public\s+static\s+CaseDef\s+Live\s*\([^)]*\)",
     )
     defer_body = method_body(
-        runner,
+        casedef,
         r"public\s+static\s+CaseDef\s+Defer\s*\([^)]*\)",
     )
 

@@ -20,7 +20,7 @@ single frame, and states the reason plainly: a desktop or window screen grab
 is unreliable (the window may be unfocused, occluded, or not mapped, so it
 shows a stale or empty frame) and, on a host running more than one client,
 unsound (it photographs whatever is in front, which has repeatedly meant
-another session's client). `CaseDef.Staged` (Runner.cs:167) solves this for
+another session's client). `CaseDef.Staged` (CaseDef.cs:139) solves this for
 one frame: it calls `Helpers.CaptureFrame` (Helpers.Ui.cs), which uses
 Unity's own `ScreenCapture.CaptureScreenshot`, this client process's own
 framebuffer, from inside the game.
@@ -100,7 +100,7 @@ unaffected.
 
 ### `CaseDef.StagedClip`
 
-A new factory beside `CaseDef.Staged` (Runner.cs:167), built the same way
+A new factory beside `CaseDef.Staged` (CaseDef.cs:139), built the same way
 `Staged` is built: on top of `Live`, with the same `Report.Staged` marker
 emitted the instant staging succeeds (never at result time, for the same
 reason the doc comment on `Staged` already gives: a screenshot loop keyed on
@@ -242,7 +242,7 @@ environment variables.
 
 1. `Helpers.CaptureClipFrame` in `Source/PlayTestMod/Helpers.Ui.cs`, beside
    `CaptureFrame`, with the same profile-resolution and `SafeFileName` reuse.
-2. `CaseDef.StagedClip` in `Source/PlayTestMod/Runner.cs`, beside `Staged`,
+2. `CaseDef.StagedClip` in `Source/PlayTestMod/CaseDef.cs`, beside `Staged`,
    sharing `Live` the same way `Staged` does.
 3. `scripts/capture_video.sh`, copied in shape from `scripts/capture_frames.sh`
    and adapted per Design above.
