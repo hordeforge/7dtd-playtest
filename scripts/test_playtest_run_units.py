@@ -87,9 +87,10 @@ def test_loadgen_structured_events_and_expectations() -> None:
         ) is None
 
         class Oracle(playtest_run.TelnetAdmin):
-            def exec(self, command: str) -> str:
-                name = command.split()[2]
-                return f"{name} = 4"
+            def get_cvar(
+                self, name: str, entity_id: int, timeout: float = 8.0
+            ) -> float | None:
+                return 4.0
 
         _, latest = playtest_run.loadgen_latest_state(events)
         assert playtest_run.server_cvar_oracle_failures(
