@@ -147,6 +147,9 @@ unchanged.
 
 ### Fixed
 
+- The server CVar oracle now keeps its telnet session open until the stock
+  command returns the requested value, instead of closing after the earlier
+  command echo on a busy dedicated server.
 - Server CVar oracle parsing now requires the value delimiter immediately
   after the requested name, so a telnet command echo cannot be mistaken for
   the player entity ID supplied through `-p`.

@@ -995,7 +995,7 @@ def server_cvar_oracle_failures(
     for name in names:
         event = latest.get(("cvar", name))
         peer_value = event.get("value") if event else None
-        server_value = parse_cvar_value(tn.exec(f"cvar get {name} -p {entity_id}"), name)
+        server_value = tn.get_cvar(name, entity_id)
         if (
             not isinstance(peer_value, (int, float))
             or server_value is None
@@ -1238,6 +1238,26 @@ class TelnetAdmin:
             warn(f"telnet exec fail: {ex}")
             self.close()
             return ""
+
+    def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
+        """Run stock ``cvar get`` and wait past its command echo for a value."""
+        if not self._sock:
+            return None
+        try:
+            self._send(f"cvar get {name} -p {entity_id}")
+            deadline = time.monotonic() + timeout
+            reply = ""
+            while time.monotonic() < deadline:
+                reply += self._recv(0.5)
+                value = parse_cvar_value(reply, name)
+                if value is not None:
+                    return value
+            log(f"telnet cvar reply missing value name={name} tail={reply[-160:]!r}")
+            return None
+        except OSError as ex:
+            warn(f"telnet cvar get fail: {ex}")
+            self.close()
+            return None
 
     def _ai_entity_ids(self, out: str) -> list[str]:
         """Entity ids from listents lines matching the shared AI keyword table."""

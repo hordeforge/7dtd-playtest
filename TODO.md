@@ -5,6 +5,8 @@ Agent ownership: mark `[-] in progress: <agent>, YYYY-MM-DD` before editing;
 
 ## Backlog
 
+- [x] Wait for delayed stock telnet CVar values after the command echo: done,
+  2026-08-24
 - [x] Reject echoed `cvar get ... -p <entity>` IDs in server-oracle value
   parsing: done, 2026-08-24
 - [x] Rebuild loadgen when observer source is newer than its executable: done,
