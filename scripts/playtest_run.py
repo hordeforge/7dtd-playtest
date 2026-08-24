@@ -2264,6 +2264,9 @@ def main(argv: list[str] | None = None) -> int:
     parsed: dict = {}
     summary: dict | None = None
     unity_log: Path | None = None
+    # One-shot flag for the mid-run backend-exit announcement below; reset by
+    # start_server() so each new server process gets exactly one verdict.
+    server_exit_announced = False
     lock_session = (args.session or "").strip() or playtest_lock.new_session_id("playtest")
     lock_path = playtest_lock.default_lock_path()
     lock_held = False
@@ -2397,9 +2400,10 @@ def main(argv: list[str] | None = None) -> int:
             One path for the initial start and the rejoin restart so they
             cannot drift (same reason the ready-wait budgets are shared).
             """
-            nonlocal server_proc, unity_log
+            nonlocal server_proc, unity_log, server_exit_announced
             if args.no_server:
                 return True
+            server_exit_announced = False
             if args.server == "stock":
                 server_proc, unity_log = start_stock_dedicated(
                     args.game_srv,
@@ -2421,6 +2425,26 @@ def main(argv: list[str] | None = None) -> int:
                 server_log,
             )
             return wait_zdtd_ready(server_proc, server_log)
+
+        def note_backend_exit() -> None:
+            """Announce once when the started dedicated/zdtd dies mid-run.
+
+            After readiness nothing polls the backend: a crash shows up only
+            as scattered case failures, telnet connect misses, or a full
+            timeout, none of which name the cause. Naming the exit code and
+            log here makes the root cause visible in the run transcript; the
+            run itself still ends by its own rules (DONE / no-DONE verdict).
+            """
+            nonlocal server_exit_announced
+            if args.no_server or server_proc is None or server_exit_announced:
+                return
+            if server_proc.poll() is None:
+                return
+            server_exit_announced = True
+            err(
+                f"{args.server} backend exited mid-run code={server_proc.returncode} "
+                f"(log {server_log})"
+            )
 
         if not start_server():
             return 2
@@ -2535,6 +2559,7 @@ def main(argv: list[str] | None = None) -> int:
 
             while time.monotonic() < setup_deadline:
                 reap_finished_helpers()
+                note_backend_exit()
                 chunk = pump_log_tail(client_tail, client_scan)
                 if chunk:
                     now = time.monotonic()
@@ -2626,6 +2651,7 @@ def main(argv: list[str] | None = None) -> int:
                         "summary": summary,
                         "results": results,
                         "error": f"{rejoin_label} setup incomplete",
+                        "server_exited_mid_run": server_exit_announced,
                     },
                 )
                 write_junit(junit_path, args.suite, results)
@@ -2704,6 +2730,7 @@ def main(argv: list[str] | None = None) -> int:
 
         while time.monotonic() < deadline:
             reap_finished_helpers()
+            note_backend_exit()
             chunk = pump_log_tail(client_tail, client_scan)
             peer_chunk = (
                 pump_log_tail(peer_tail, peer_scan) if peer_tail is not None else ""
@@ -3093,6 +3120,10 @@ def main(argv: list[str] | None = None) -> int:
             "timeout_sec": args.timeout,
             "wall_sec": round(wall_s, 1),
             "ran_epoch": int(time.time()),
+            # Structured echo of note_backend_exit(): a report whose cases
+            # failed against an already-dead server must say so, not just the
+            # terminal transcript.
+            "server_exited_mid_run": server_exit_announced,
             "fixtures": {
                 "zombie_spawn_attempted": barrier_counts.get("spawn_zombie", 0) > 0,
                 "kill_fixture_attempted": barrier_counts.get("kill_fixture_zombie", 0) > 0,
@@ -3186,14 +3217,18 @@ def main(argv: list[str] | None = None) -> int:
             if peer_summary:
                 fails += int(peer_summary["fail"])
             if loadgen_observer_requested:
+                # One snapshot feeds every observer check: the events file is
+                # still growing while loadgen runs, so two reads can straddle
+                # an append and make the expectation verdict and the oracle
+                # state disagree with each other.
+                observer_events = read_loadgen_events(loadgen_events_path)
                 observer_failures = loadgen_expectation_failures(
-                    read_loadgen_events(loadgen_events_path),
+                    observer_events,
                     args.loadgen_expect_cvar,
                     args.loadgen_expect_buff,
                     args.loadgen_expect_cvar_positive,
                     args.loadgen_expect_cvar_equal,
                 )
-                observer_events = read_loadgen_events(loadgen_events_path)
                 observer_entity, observer_latest = loadgen_latest_state(observer_events)
                 if args.loadgen_server_cvar_oracle and observer_entity is not None:
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)

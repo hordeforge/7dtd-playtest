@@ -22,6 +22,17 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- The orchestrator now announces a dedicated/zdtd backend that exits after
+  readiness (`<backend> backend exited mid-run code=…`, once per server
+  process, echoed as `server_exited_mid_run` in the report JSON, including
+  the rejoin setup-incomplete report). Previously nothing polled the backend
+  after its ready wait, so a mid-run crash surfaced only as scattered case
+  failures, telnet connect misses, or the full timeout without naming a cause.
+- The loadgen observer verdict is computed from one snapshot of
+  `loadgen_events.jsonl`. Two separate reads could straddle an append and
+  make the expectation failures disagree with the CVar-oracle state they are
+  judged against.
+
 - `test_mining_probe_surface.py` now matches the full `PressPrimary` /
   `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped
   at `(` and never found the method body), and ruff F401/RET504 on that
