@@ -802,6 +802,8 @@ def ensure_loadgen_built() -> Path | None:
         (path.stat().st_mtime for path in source_root.glob("*.cs")),
         default=proj.stat().st_mtime,
     )
+    # The glob default above covers an empty source dir only; a non-empty one
+    # can still predate a csproj touch, so fold that in explicitly.
     source_mtime = max(source_mtime, proj.stat().st_mtime)
     if exe.is_file() and exe.stat().st_mtime >= source_mtime:
         return exe
@@ -985,10 +987,13 @@ def loadgen_expectation_failures(
         except ValueError:
             failures.append(f"invalid buff expectation {raw!r}")
             continue
-        expected = expected_text.lower() in ("1", "true", "yes", "on")
-        if expected_text.lower() not in ("0", "false", "no", "off", "1", "true", "yes", "on"):
+        # Validate before interpreting: an unknown token must be reported as
+        # a bad expectation, never decoded as merely falsy.
+        lowered = expected_text.lower()
+        if lowered not in ("0", "false", "no", "off", "1", "true", "yes", "on"):
             failures.append(f"invalid buff expectation {raw!r}")
             continue
+        expected = lowered in ("1", "true", "yes", "on")
         state_event = latest.get(("buff", name))
         active = state_event.get("active") if state_event else None
         if not isinstance(active, bool) or active != expected:
@@ -1442,6 +1447,16 @@ class TelnetAdmin:
         finally:
             self._sock.settimeout(2.0)
         return b"".join(chunks).decode("utf-8", errors="replace")
+
+    def connected(self) -> bool:
+        """True while the session socket survived the last exchange.
+
+        exec()/get_cvar() close the socket when it breaks and return "" or
+        None, indistinguishable from silence. Callers that record a fire as
+        serviced must check this, or a teleport/save/say that never reached
+        the server is booked as done.
+        """
+        return self._sock is not None
 
     def close(self) -> None:
         if self._sock:
@@ -2466,6 +2481,21 @@ def main(argv: list[str] | None = None) -> int:
                     break
                 counts[name] = counts.get(name, 0) + 1
 
+        def teleport_all_players_via_telnet(
+            coords: tuple[float, float, float],
+        ) -> tuple[int, bool]:
+            """Teleport every listed player over one fresh telnet session.
+
+            Returns (moved count, connected) so callers can separate the "no
+            player ids listed yet" retry from the connect-failure retry.
+            """
+            tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+            connected = tn.connect()
+            moved = tn.teleport_players_to(*coords) if connected else 0
+            if connected:
+                tn.close()
+            return moved, connected
+
         def start_server() -> bool:
             """Start the selected backend (unless --no-server) and wait ready.
 
@@ -2679,6 +2709,18 @@ def main(argv: list[str] | None = None) -> int:
                                 time.sleep(2.0)
                                 r = tn.exec("saveworld")
                                 log(f"telnet saveworld (settle) → {r[:100]!r}")
+                                # The fire is marked once either way (retrying
+                                # the save every poll would spam), but a
+                                # session that died mid-save must say so: the
+                                # rejoin verify would otherwise load pre-setup
+                                # state with nothing in the transcript naming
+                                # why.
+                                if not tn.connected():
+                                    warn(
+                                        f"{rejoin_setup_barrier}: telnet session "
+                                        "died during save; setup state may not "
+                                        "be durable"
+                                    )
                                 tn.close()
                                 barrier_counts["rejoin_setup_done"] = rejoin_setup_seen
                         else:
@@ -2720,7 +2762,6 @@ def main(argv: list[str] | None = None) -> int:
                     "skip": int((setup_parsed.get("summary") or {}).get("skip") or 0),
                 }
                 results = setup_parsed.get("results") or []
-                report_path = args.logdir / f"report-{int(time.time())}.json"
                 junit_path = args.logdir / f"junit-{int(time.time())}.xml"
                 write_report(
                     report_path,
@@ -2853,12 +2894,9 @@ def main(argv: list[str] | None = None) -> int:
                         cleaned_ai = True
 
                 if ready_seen and not rejoin_teleport_done:
-                    tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                    moved = 0
-                    connected = tn.connect()
-                    if connected:
-                        moved = tn.teleport_players_to(*args.rejoin_teleport)
-                        tn.close()
+                    moved, connected = teleport_all_players_via_telnet(
+                        args.rejoin_teleport
+                    )
                     if moved > 0:
                         rejoin_teleport_done = True
                         x, y, z = args.rejoin_teleport
@@ -2991,12 +3029,24 @@ def main(argv: list[str] | None = None) -> int:
                         if tn.connect():
                             x, y, z = args.loadgen_teleport
                             response = tn.exec(f"teleportplayer {joined_entity} {x:g} {y:g} {z:g}")
+                            # A broken session returns "" exactly like a silent
+                            # success; trust the teleport only when the socket
+                            # survived the exchange (exec closes it on failure),
+                            # so it retries next poll instead of being recorded
+                            # as done for an entity that never moved.
+                            survived = tn.connected()
                             tn.close()
-                            loadgen_teleported_entity = joined_entity
-                            log(
-                                f"loadgen teleport entity={joined_entity} -> "
-                                f"({x:g},{y:g},{z:g}) {response[:80]!r}"
-                            )
+                            if survived:
+                                loadgen_teleported_entity = joined_entity
+                                log(
+                                    f"loadgen teleport entity={joined_entity} -> "
+                                    f"({x:g},{y:g},{z:g}) {response[:80]!r}"
+                                )
+                            else:
+                                warn(
+                                    "loadgen teleport: telnet session died "
+                                    "mid-exchange; retrying next poll"
+                                )
 
                 while (
                     barrier_counts["spawn_loadgen_bots"]
@@ -3035,7 +3085,15 @@ def main(argv: list[str] | None = None) -> int:
                     for cmd in (f"say {token}", f'say "{token}"'):
                         r = tn.exec(cmd)
                         log(f"telnet {cmd} → {r[:100]!r}")
+                    # Same trust rule as spawn_near_players: a session that
+                    # died mid-exchange returns "" exactly like silence. Not
+                    # counting the fire leaves it visibly unserviced in the
+                    # report instead of a green count over an unsent say.
+                    survived = tn.connected()
                     tn.close()
+                    if not survived:
+                        warn(f"chat_echo:{token}: telnet session died during say")
+                        continue
                     chat_tokens_fired.add(token)
                     barrier_counts["chat_echo"] += 1
 
@@ -3121,12 +3179,9 @@ def main(argv: list[str] | None = None) -> int:
                 and not peer_teleport_done
                 and args.peer_client_teleport is not None
             ):
-                tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                moved = 0
-                connected = tn.connect()
-                if connected:
-                    moved = tn.teleport_players_to(*args.peer_client_teleport)
-                    tn.close()
+                moved, connected = teleport_all_players_via_telnet(
+                    args.peer_client_teleport
+                )
                 if moved >= 2:
                     peer_teleport_done = True
                     x, y, z = args.peer_client_teleport

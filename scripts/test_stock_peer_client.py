@@ -39,7 +39,11 @@ checks = [
         "peer ready state gates a shared fixture teleport",
         '"--peer-client-teleport"' in RUNNER
         and "peer_ready_seen" in RUNNER
-        and "teleport_players_to(*args.peer_client_teleport)" in RUNNER,
+        # Rejoin and peer teleports share one telnet helper; the peer site
+        # must still route the peer coordinates through it.
+        and "moved, connected = teleport_all_players_via_telnet(" in RUNNER
+        and "args.peer_client_teleport" in RUNNER
+        and "tn.teleport_players_to(*coords) if connected else 0" in RUNNER,
     ),
     require(
         "peer clears inherited scenario environment",

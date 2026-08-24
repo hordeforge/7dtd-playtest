@@ -346,6 +346,21 @@ def test_wait_until_can_start(tmp: Path) -> None:
             "CLI wait on a free path exits 0: " + proc.stderr,
         )
 
+    # The capture scripts consume only the exit code, so it must track the
+    # probe exactly: 1 with a runtime up, 0 without.
+    expected_live_rc = 1 if pl.default_live_runtime_running() else 0
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPTS / "playtest_lock.py"), "live"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    _assert(
+        proc.returncode == expected_live_rc,
+        f"CLI live exit {proc.returncode} must match probed state "
+        f"{expected_live_rc}: {proc.stderr}",
+    )
+
 
 def test_playtest_run_wiring() -> None:
     """Structural: orchestrator acquires before clean_processes and releases."""

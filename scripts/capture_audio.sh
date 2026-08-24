@@ -66,18 +66,7 @@ command -v pactl >/dev/null || { echo "ERROR: pactl is required" >&2; exit 2; }
 # clients (including the Wine preloader phase), the stock dedicated, and zdtd
 # are all covered with no drift between this guard and the runner's lock.
 runtime_rc=0
-python3 - "$HERE" <<'PYEOF' || runtime_rc=$?
-import sys
-
-sys.path.insert(0, sys.argv[1])
-try:
-    import playtest_lock
-    live = bool(playtest_lock.default_live_runtime_running())
-except Exception as ex:  # noqa: BLE001 - guard must never fail open silently
-    print(f"capture_audio: cannot inspect live runtimes: {ex}", file=sys.stderr)
-    sys.exit(2)
-sys.exit(1 if live else 0)
-PYEOF
+python3 "$HERE/playtest_lock.py" live || runtime_rc=$?
 case $runtime_rc in
 	0) : ;;
 	1)

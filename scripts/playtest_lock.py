@@ -835,16 +835,27 @@ def main(argv: list[str] | None = None) -> int:
 
     ``wait`` polls :func:`wait_until_can_start` and exits 0 when a new
     session could acquire, 1 on timeout, 2 on bad usage.
+    ``live`` probes :func:`default_live_runtime_running` and exits 0 when no
+    runtime is up, 1 when one is, 2 when the probe itself fails; the exit
+    code is the whole interface, so it prints nothing.
     """
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         sys.stdout.write(
             "usage: playtest_lock.py wait [--timeout SEC] [--interval SEC] "
             "[--path FILE]\n"
+            "       playtest_lock.py live\n"
         )
         return 0
+    if args[0] == "live":
+        try:
+            live = default_live_runtime_running()
+        except Exception as ex:
+            sys.stderr.write(f"cannot inspect live runtimes: {ex}\n")
+            return 2
+        return 1 if live else 0
     if args[0] != "wait":
-        sys.stderr.write("unknown command; expected 'wait'\n")
+        sys.stderr.write("unknown command; expected 'wait' or 'live'\n")
         return 2
     timeout_sec = 1800.0
     interval_sec = 10.0

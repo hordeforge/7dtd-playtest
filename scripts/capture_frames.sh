@@ -87,18 +87,7 @@ CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/A
 # phase), the stock dedicated, and zdtd are all covered with no drift between
 # this guard and the lock the runner itself enforces.
 runtime_rc=0
-python3 - "$HERE" <<'PYEOF' || runtime_rc=$?
-import sys
-
-sys.path.insert(0, sys.argv[1])
-try:
-    import playtest_lock
-    live = bool(playtest_lock.default_live_runtime_running())
-except Exception as ex:  # noqa: BLE001 - guard must never fail open silently
-    print(f"capture_frames: cannot inspect live runtimes: {ex}", file=sys.stderr)
-    sys.exit(2)
-sys.exit(1 if live else 0)
-PYEOF
+python3 "$HERE/playtest_lock.py" live || runtime_rc=$?
 case $runtime_rc in
 	0) : ;;
 	1)
@@ -150,7 +139,11 @@ for i in $(seq -w 1 "$FRAMES"); do
 	sleep "$INTERVAL"
 done
 
-wait "$RUN_PID" || true
+# Keep the suite's own verdict visible: capture_audio.sh prints "suite exit",
+# and a frame set from a crashed run means something different than one from
+# a green run.
+RUN_RC=0
+wait "$RUN_PID" || RUN_RC=$?
 
 mkdir -p "$OUT/cropped"
 for f in "$OUT"/raw-*.png; do
@@ -200,6 +193,7 @@ echo
 echo "RESULT"
 echo "  frames        $FRAME_COUNT"
 echo "  contact sheet $OUT/contact-sheet.png"
+echo "  suite exit    $RUN_RC"
 echo "  suite log     $RUN_LOG"
 if [[ -n "$CLIENT_LOG_SAVED" ]]; then
 	echo "  client log    $CLIENT_LOG_SAVED"
