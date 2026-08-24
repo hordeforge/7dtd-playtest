@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using UnityEngine;
 
@@ -585,6 +586,62 @@ namespace ZdtdPlaytest
             catch { /* a partial rig is still worth reporting */ }
             names.Sort(StringComparer.Ordinal);
             return names;
+        }
+
+        /// <summary>
+        /// The wearer's rig as authoring reference: one line per bone, with its
+        /// parent and its local rest transform.
+        ///
+        /// <para><see cref="RigBoneNames"/> gives the names a garment must bind
+        /// to, and names alone are not enough to author one. A skinned mesh
+        /// carries a bind pose, so an armature whose joints sit somewhere else
+        /// deforms wrongly even when every name matches. The rest pose is the
+        /// other half, and it is in the game's asset bundles for the same
+        /// reason the names are.</para>
+        ///
+        /// <para>Local rather than world transforms, because that is what an
+        /// armature is built from and it does not move with the entity.
+        /// Ordered by name for the same reason the name list is sorted: this
+        /// gets copied into a document, and a report that reorders between runs
+        /// cannot be diffed against the next game build.</para>
+        ///
+        /// <para>Format, one bone per line:
+        /// <c>name|parent|px,py,pz|rx,ry,rz,rw</c>, six decimals.</para>
+        /// </summary>
+        public static List<string> RigPoseReport(EntityAlive entity)
+        {
+            var lines = new List<string>();
+            if (entity == null) return lines;
+            try
+            {
+                var renderers = entity.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                if (renderers == null) return lines;
+                var seen = new HashSet<string>();
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    var bones = renderers[i] != null ? renderers[i].bones : null;
+                    if (bones == null) continue;
+                    for (int b = 0; b < bones.Length; b++)
+                    {
+                        var bone = bones[b];
+                        if (bone == null || !seen.Add(bone.name)) continue;
+                        var p = bone.localPosition;
+                        var r = bone.localRotation;
+                        string parent = bone.parent != null ? bone.parent.name : "";
+                        lines.Add(bone.name + "|" + parent + "|"
+                            + p.x.ToString("0.######", CultureInfo.InvariantCulture) + ","
+                            + p.y.ToString("0.######", CultureInfo.InvariantCulture) + ","
+                            + p.z.ToString("0.######", CultureInfo.InvariantCulture) + "|"
+                            + r.x.ToString("0.######", CultureInfo.InvariantCulture) + ","
+                            + r.y.ToString("0.######", CultureInfo.InvariantCulture) + ","
+                            + r.z.ToString("0.######", CultureInfo.InvariantCulture) + ","
+                            + r.w.ToString("0.######", CultureInfo.InvariantCulture));
+                    }
+                }
+            }
+            catch { /* a partial rig is still worth reporting */ }
+            lines.Sort(StringComparer.Ordinal);
+            return lines;
         }
 
         /// <summary>

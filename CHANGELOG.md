@@ -43,6 +43,10 @@ Release model (inferred practice, now pinned by `make test`):
   its result, after the hold, so a loop keyed on the result photographs
   whatever came next; providers had each worked around that with their own
   `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- `Helpers.RigPoseReport(entity)`: the wearer's rig as authoring reference, one
+  line per bone with its parent and local rest transform. Names alone cannot
+  author a garment: a skinned mesh carries a bind pose, so an armature whose
+  joints sit elsewhere deforms wrongly even when every name matches.
 - `Helpers.RigBoneNames(entity)`: every bone name the wearer's skinned
   renderers are bound to, distinct and sorted. SDCS rebinds a gear prefab's
   bones to the wearer by name and a mismatch becomes a null bone with no error,
