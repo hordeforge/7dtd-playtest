@@ -43,6 +43,12 @@ Release model (inferred practice, now pinned by `make test`):
   its result, after the hold, so a loop keyed on the result photographs
   whatever came next; providers had each worked around that with their own
   `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- `Helpers.RigBoneNames(entity)`: every bone name the wearer's skinned
+  renderers are bound to, distinct and sorted. SDCS rebinds a gear prefab's
+  bones to the wearer by name and a mismatch becomes a null bone with no error,
+  so the exact spelling is a hard prerequisite for authoring a skinned garment
+  — and it lives in the game's asset bundles, readable only off a real wearer
+  in a running client.
 - `Helpers.OpenWindowGroup` / `CloseWindowGroup` / `OpenWindowNames`: open a
   game UI window group and find out whether it really ended up open, and list
   what the window manager believes is on screen. `GUIWindowManager.Open`
