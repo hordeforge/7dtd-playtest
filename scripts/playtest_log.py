@@ -231,6 +231,11 @@ class LogTail:
     ``from_end`` starts the tail at the file's current size instead of zero:
     for a log that must not be truncated (its previous generation could not
     be preserved), only bytes appended after construction are returned.
+
+    ``generations`` counts detected shrinks (truncation before a restart).
+    A consumer that accumulates parsed state across polls must reset it when
+    this advances, or events from the previous generation would answer for
+    the new one.
     """
 
     def __init__(self, path: Path, *, from_end: bool = False) -> None:
@@ -243,6 +248,7 @@ class LogTail:
         else:
             self._offset = 0
         self._pending = b""
+        self.generations = 0
 
     def poll(self) -> str:
         """Return newly appended complete-line text since the previous call."""
@@ -253,6 +259,7 @@ class LogTail:
         if size < self._offset:
             self._offset = 0
             self._pending = b""
+            self.generations += 1
         if size <= self._offset:
             return ""
         try:

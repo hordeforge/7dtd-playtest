@@ -567,6 +567,53 @@ def test_log_tail_from_end_starts_at_current_size() -> None:
     print("PASS logtail_from_end pre-existing bytes skipped, appends still read")
 
 
+def test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate() -> None:
+    """The poll loop drains loadgen events incrementally instead of re-reading
+    the whole JSONL every iteration. The accumulated list must equal
+    read_loadgen_events over the same bytes, skip malformed/partial lines,
+    and reset when the file is truncated (a fresh loadgen generation), or an
+    id from a finished generation would answer for the current one."""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "loadgen_events.jsonl"
+        joined = '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":107}\n'
+        state = (
+            '{"schema":"7dtd.loadgen.event.v1","type":"state",'
+            '"entityId":107,"kind":"cvar","name":"HoldingController","value":1}\n'
+        )
+        noise = "not json\n{\"other\":\"wrong schema\"}\n"
+        path.write_text(joined + noise + state, encoding="utf-8")
+        reader = playtest_run.LoadgenEventReader(path)
+        got = reader.drain()
+        want = playtest_run.read_loadgen_events(path)
+        assert got == want, (got, want)
+        assert [e["type"] for e in got] == ["joined", "state"], got
+
+        # A trailing partial line stays buffered until its newline arrives,
+        # exactly like the client-log tail; nothing half-written parses.
+        piece_a = '{"schema":"7dtd.loadgen.event.v1","type":"sta'
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(piece_a)
+        assert reader.drain() == want, "partial line parsed as an event"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write('te","entityId":107}\n')
+        got = reader.drain()
+        want = playtest_run.read_loadgen_events(path)
+        assert got == want and len(got) == 3, (got, want)
+
+        # Truncation between loadgen runs: accumulated events must drop so a
+        # stale entityId is never teleported again.
+        path.write_text("", encoding="utf-8")
+        assert reader.drain() == [], "events from the truncated generation kept"
+        path.write_text(
+            '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":108}\n',
+            encoding="utf-8",
+        )
+        got = reader.drain()
+        want = playtest_run.read_loadgen_events(path)
+        assert got == want and [e["entityId"] for e in got] == [108], (got, want)
+    print("PASS loadgen_event_reader incremental equals whole read, truncate resets")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -580,6 +627,7 @@ def main() -> int:
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
+    test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
     print("RESULT PASS")
     return 0
 

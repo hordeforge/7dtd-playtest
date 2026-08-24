@@ -876,11 +876,23 @@ def start_loadgen(
 
 
 def read_loadgen_events(path: Path) -> list[dict]:
-    """Read complete valid loadgen JSON-lines events; tolerate a growing tail."""
+    """Read complete valid loadgen JSON-lines events; tolerate a growing tail.
+
+    One-shot whole-file snapshot: this is the final-verdict read, run once
+    after the suite ends so every observer check sees one consistent view.
+    Polling loops must use :class:`LoadgenEventReader` instead, which feeds
+    only newly appended lines through the same filter.
+    """
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
+    return parse_loadgen_event_lines(lines)
+
+
+def parse_loadgen_event_lines(lines: list[str]) -> list[dict]:
+    """Valid loadgen events among ``lines``; shared by the whole-file and
+    incremental readers so they cannot drift."""
     events: list[dict] = []
     for line in lines:
         try:
@@ -890,6 +902,36 @@ def read_loadgen_events(path: Path) -> list[dict]:
         if isinstance(event, dict) and event.get("schema") == "7dtd.loadgen.event.v1":
             events.append(event)
     return events
+
+
+class LoadgenEventReader:
+    """Incremental reader for the growing loadgen events JSONL file.
+
+    The poll loop re-checks for a joined bot entity every iteration while a
+    teleport is pending; re-reading and re-parsing the whole file each time
+    is quadratic in the events the bot emits (state snapshots keep flowing
+    for the rest of the run) on the same CPU as the game under test. This
+    mirrors LogTail + ClientLogScan for the client log: only newly appended
+    complete lines are parsed, and accumulated events reset when the file is
+    truncated, so an id from a finished loadgen generation can never answer
+    for the current one.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._tail = LogTail(path)
+        self.events: list[dict] = []
+
+    def drain(self) -> list[dict]:
+        """Fold in newly appended events and return everything seen so far."""
+        # A truncation between polls advances the tail's generation while
+        # poll() runs, so compare around the call rather than before it.
+        generation_before = self._tail.generations
+        chunk = self._tail.poll()
+        if self._tail.generations != generation_before:
+            self.events.clear()
+        if chunk:
+            self.events.extend(parse_loadgen_event_lines(chunk.splitlines()))
+        return self.events
 
 
 def loadgen_joined_entity(events: list[dict]) -> int | None:
@@ -2272,6 +2314,9 @@ def main(argv: list[str] | None = None) -> int:
     peer_client_proc = None
     loadgen_proc = None
     loadgen_events_path = args.logdir / "loadgen_events.jsonl"
+    # Incremental reader created before any loadgen start so every appended
+    # event is parsed exactly once (same discipline as the client-log tail).
+    loadgen_event_reader = LoadgenEventReader(loadgen_events_path)
     loadgen_teleported_entity: int | None = None
     exit_code = 2
     parsed: dict = {}
@@ -2940,7 +2985,7 @@ def main(argv: list[str] | None = None) -> int:
                     and args.loadgen_teleport is not None
                     and loadgen_teleported_entity is None
                 ):
-                    joined_entity = loadgen_joined_entity(read_loadgen_events(loadgen_events_path))
+                    joined_entity = loadgen_joined_entity(loadgen_event_reader.drain())
                     if joined_entity is not None:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():

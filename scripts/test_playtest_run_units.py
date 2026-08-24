@@ -178,7 +178,14 @@ def test_loadgen_observer_wiring_is_generic() -> None:
         "--loadgen-teleport",
     ):
         assert flag in source
-    assert "loadgen_joined_entity(read_loadgen_events(loadgen_events_path))" in source
+    # The poll loop must drain loadgen events incrementally (LoadgenEventReader),
+    # not re-read + re-parse the whole JSONL file every iteration.
+    assert "loadgen_joined_entity(loadgen_event_reader.drain())" in source
+    assert (
+        "loadgen_event_reader = LoadgenEventReader(loadgen_events_path)" in source
+    )
+    # The final-verdict snapshot stays a single whole-file read.
+    assert "read_loadgen_events(loadgen_events_path)" in source
     assert "teleportplayer {joined_entity}" in source
 
 
