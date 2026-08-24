@@ -895,19 +895,28 @@ def loadgen_joined_entity(events: list[dict]) -> int | None:
     return None
 
 
-def loadgen_expectation_failures(
-    events: list[dict], cvars: list[str], buffs: list[str]
-) -> list[str]:
-    """Compare NAME=VALUE expectations with the joined bot's latest state."""
+def loadgen_latest_state(events: list[dict]) -> tuple[int | None, dict[tuple[str, str], dict]]:
+    """Return the joined bot id and its latest event for every state key."""
     entity_id = loadgen_joined_entity(events)
+    latest: dict[tuple[str, str], dict] = {}
+    if entity_id is not None:
+        for event in events:
+            if event.get("type") == "state" and event.get("entityId") == entity_id:
+                kind, name = event.get("kind"), event.get("name")
+                if isinstance(kind, str) and isinstance(name, str):
+                    latest[(kind, name)] = event
+    return entity_id, latest
+
+
+def loadgen_expectation_failures(
+    events: list[dict], cvars: list[str], buffs: list[str],
+    positive_cvars: list[str] | None = None,
+    equal_cvars: list[str] | None = None,
+) -> list[str]:
+    """Compare exact and relational expectations with the joined bot state."""
+    entity_id, latest = loadgen_latest_state(events)
     if entity_id is None:
         return ["no structured joined event"]
-    latest: dict[tuple[str, str], dict] = {}
-    for event in events:
-        if event.get("type") == "state" and event.get("entityId") == entity_id:
-            kind, name = event.get("kind"), event.get("name")
-            if isinstance(kind, str) and isinstance(name, str):
-                latest[(kind, name)] = event
     failures: list[str] = []
     for raw in cvars:
         try:
@@ -934,6 +943,59 @@ def loadgen_expectation_failures(
         active = state_event.get("active") if state_event else None
         if not isinstance(active, bool) or active != expected:
             failures.append(f"buff {name} expected active={expected}, observed {active!r}")
+    for name in positive_cvars or []:
+        state_event = latest.get(("cvar", name))
+        value = state_event.get("value") if state_event else None
+        if not isinstance(value, (int, float)) or float(value) <= 0:
+            failures.append(f"CVar {name} expected positive, observed {value!r}")
+    for raw in equal_cvars or []:
+        try:
+            left, right = raw.split("=", 1)
+        except ValueError:
+            failures.append(f"invalid CVar equality {raw!r}")
+            continue
+        left_event, right_event = latest.get(("cvar", left)), latest.get(("cvar", right))
+        left_value = left_event.get("value") if left_event else None
+        right_value = right_event.get("value") if right_event else None
+        if (
+            not isinstance(left_value, (int, float))
+            or not isinstance(right_value, (int, float))
+            or abs(float(left_value) - float(right_value)) > 0.0001
+        ):
+            failures.append(
+                f"CVars {left} and {right} expected equal, observed "
+                f"{left_value!r} and {right_value!r}"
+            )
+    return failures
+
+
+def parse_cvar_value(reply: str, name: str) -> float | None:
+    """Extract NAME's numeric value from stock ``cvar get`` output."""
+    match = re.search(
+        rf"(?im)\b{re.escape(name)}\b[^\r\n]*?([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)",
+        reply,
+    )
+    return float(match.group(1)) if match else None
+
+
+def server_cvar_oracle_failures(
+    tn: TelnetAdmin, entity_id: int, names: list[str], latest: dict[tuple[str, str], dict]
+) -> list[str]:
+    """Compare server-authority CVar values with the joined bot's decoded state."""
+    failures: list[str] = []
+    for name in names:
+        event = latest.get(("cvar", name))
+        peer_value = event.get("value") if event else None
+        server_value = parse_cvar_value(tn.exec(f"cvar get {name} -p {entity_id}"), name)
+        if (
+            not isinstance(peer_value, (int, float))
+            or server_value is None
+            or abs(float(peer_value) - server_value) > 0.0001
+        ):
+            failures.append(
+                f"server CVar {name} expected peer value {peer_value!r}, "
+                f"observed {server_value!r}"
+            )
     return failures
 
 
@@ -2001,7 +2063,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--loadgen-observe-cvar", action="append", default=[], metavar="NAME")
     ap.add_argument("--loadgen-observe-buff", action="append", default=[], metavar="NAME")
     ap.add_argument("--loadgen-expect-cvar", action="append", default=[], metavar="NAME=VALUE")
+    ap.add_argument("--loadgen-expect-cvar-positive", action="append", default=[], metavar="NAME")
+    ap.add_argument("--loadgen-expect-cvar-equal", action="append", default=[], metavar="NAME=NAME")
     ap.add_argument("--loadgen-expect-buff", action="append", default=[], metavar="NAME=BOOL")
+    ap.add_argument(
+        "--loadgen-server-cvar-oracle",
+        action="store_true",
+        help="compare every observed CVar with cvar get on the joined server entity",
+    )
     ap.add_argument(
         "--loadgen-teleport",
         type=float,
@@ -2031,10 +2100,19 @@ def main(argv: list[str] | None = None) -> int:
         args.loadgen_observe_cvar
         or args.loadgen_observe_buff
         or args.loadgen_expect_cvar
+        or args.loadgen_expect_cvar_positive
+        or args.loadgen_expect_cvar_equal
         or args.loadgen_expect_buff
+        or args.loadgen_server_cvar_oracle
         or args.loadgen_teleport
     )
-    if (args.loadgen_expect_cvar or args.loadgen_expect_buff) and not (
+    if (
+        args.loadgen_expect_cvar
+        or args.loadgen_expect_cvar_positive
+        or args.loadgen_expect_cvar_equal
+        or args.loadgen_expect_buff
+        or args.loadgen_server_cvar_oracle
+    ) and not (
         args.loadgen_observe_cvar or args.loadgen_observe_buff
     ):
         ap.error("loadgen expectations require matching observe options")
@@ -3070,7 +3148,22 @@ def main(argv: list[str] | None = None) -> int:
                     read_loadgen_events(loadgen_events_path),
                     args.loadgen_expect_cvar,
                     args.loadgen_expect_buff,
+                    args.loadgen_expect_cvar_positive,
+                    args.loadgen_expect_cvar_equal,
                 )
+                observer_events = read_loadgen_events(loadgen_events_path)
+                observer_entity, observer_latest = loadgen_latest_state(observer_events)
+                if args.loadgen_server_cvar_oracle and observer_entity is not None:
+                    tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                    if tn.connect():
+                        observer_failures.extend(
+                            server_cvar_oracle_failures(
+                                tn, observer_entity, args.loadgen_observe_cvar, observer_latest
+                            )
+                        )
+                        tn.close()
+                    else:
+                        observer_failures.append("server CVar oracle telnet connect failed")
                 if args.loadgen_teleport is not None and loadgen_teleported_entity is None:
                     observer_failures.append("joined loadgen entity was never teleported")
                 if loadgen_proc is None or loadgen_proc.poll() is not None:

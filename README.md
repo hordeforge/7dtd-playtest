@@ -414,10 +414,14 @@ to the same run. The host reads loadgen's `7dtd.loadgen.event.v1` JSON Lines,
 retains the entity ID from its structured `joined` event, teleports that exact
 entity, and fails the run when the observer exits or the final filtered state
 does not match. CVar comparisons use a `0.0001` tolerance; buff expectations
-accept `true` or `false`.
+accept `true` or `false`. Use `--loadgen-expect-cvar-positive NAME` for a
+strictly positive value and `--loadgen-expect-cvar-equal LEFT=RIGHT` to
+compare two decoded CVars. `--loadgen-server-cvar-oracle` additionally runs
+`cvar get` for every observed CVar against the exact joined entity and
+requires the server-authority value to match the peer's decoded value.
 
 ```bash
-make playtest SUITE=your_suite EXTRA_ARGS="--host-fixtures --loadgen-observe-cvar protection --loadgen-observe-buff protected --loadgen-expect-cvar protection=1 --loadgen-expect-buff protected=true --loadgen-teleport 520 62 950"
+make playtest SUITE=your_suite EXTRA_ARGS="--host-fixtures --loadgen-observe-cvar protection --loadgen-observe-buff protected --loadgen-expect-cvar-positive protection --loadgen-expect-buff protected=true --loadgen-server-cvar-oracle --loadgen-teleport 520 62 950"
 ```
 
 The provider emits `Report.Barrier("spawn_loadgen_peer")` before it needs the

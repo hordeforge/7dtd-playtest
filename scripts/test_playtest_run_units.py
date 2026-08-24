@@ -64,19 +64,34 @@ def test_loadgen_structured_events_and_expectations() -> None:
             "not json\n"
             '{"schema":"7dtd.loadgen.event.v1","type":"joined","botId":1,"entityId":171}\n'
             '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,"kind":"cvar","name":"protection","value":1}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,"kind":"cvar","name":"raw","value":4}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,"kind":"cvar","name":"net","value":4}\n'
             '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,"kind":"buff","name":"protected","active":true}\n',
             encoding="utf-8",
         )
         events = playtest_run.read_loadgen_events(path)
         assert playtest_run.loadgen_joined_entity(events) == 171
         assert playtest_run.loadgen_expectation_failures(
-            events, ["protection=1"], ["protected=true"]
+            events, ["protection=1"], ["protected=true"], ["net"], ["raw=net"]
         ) == []
         failures = playtest_run.loadgen_expectation_failures(
             events, ["protection=0.5"], ["protected=false"]
         )
         assert len(failures) == 2 and "CVar protection" in failures[0]
         assert "buff protected" in failures[1]
+        assert playtest_run.parse_cvar_value(
+            "Player 171: protection = 1.25", "protection"
+        ) == 1.25
+
+        class Oracle(playtest_run.TelnetAdmin):
+            def exec(self, command: str) -> str:
+                name = command.split()[2]
+                return f"{name} = 4"
+
+        _, latest = playtest_run.loadgen_latest_state(events)
+        assert playtest_run.server_cvar_oracle_failures(
+            Oracle("127.0.0.1", 1, ""), 171, ["raw", "net"], latest
+        ) == []
 
 
 def test_loadgen_observer_wiring_is_generic() -> None:
@@ -85,7 +100,10 @@ def test_loadgen_observer_wiring_is_generic() -> None:
         "--loadgen-observe-cvar",
         "--loadgen-observe-buff",
         "--loadgen-expect-cvar",
+        "--loadgen-expect-cvar-positive",
+        "--loadgen-expect-cvar-equal",
         "--loadgen-expect-buff",
+        "--loadgen-server-cvar-oracle",
         "--loadgen-teleport",
     ):
         assert flag in source
