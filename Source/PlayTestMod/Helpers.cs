@@ -589,6 +589,100 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Every skinned renderer on a wearer as
+        /// <c>name center=(x,y,z) extents=(x,y,z)</c>, sorted.
+        ///
+        /// <para>The local bounds of the wearer's own meshes, which is what a
+        /// garment has to clear. Authoring one against the bind pose alone
+        /// fits the *skeleton* rather than the body wrapped around it, and the
+        /// difference shows up as skin through the shoulders, the chest and
+        /// the face.</para>
+        ///
+        /// <para>Read the numbers with care: this is a per-renderer local AABB,
+        /// so a whole-body renderer's box is bounded by whatever sticks out
+        /// furthest — in an A-pose that is the toes and the hands, not the
+        /// chest. Reading such a box as a chest measurement is a mistake that
+        /// has already been made twice, in both directions.</para>
+        /// </summary>
+        public static List<string> RigBounds(EntityAlive entity)
+        {
+            var lines = new List<string>();
+            if (entity == null) return lines;
+            try
+            {
+                var renderers = entity.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                if (renderers == null) return lines;
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    var renderer = renderers[i];
+                    if (renderer == null || renderer.sharedMesh == null) continue;
+                    var bounds = renderer.localBounds;
+                    lines.Add(renderer.gameObject.name
+                        + " center=" + bounds.center.ToString("0.###")
+                        + " extents=" + bounds.extents.ToString("0.###"));
+                }
+            }
+            catch { /* a partial list is still a measurement */ }
+            lines.Sort(StringComparer.Ordinal);
+            return lines;
+        }
+
+        /// <summary>
+        /// The mod-authored skinned meshes actually grafted on a wearer, as
+        /// <c>name=vertexCount</c>, sorted.
+        ///
+        /// <para><b>This is how a mod proves its gear reached the client at
+        /// all.</b> Everything else a suite can assert about worn armor is
+        /// satisfied without it: the item sits in an equipment slot whether or
+        /// not its prefab loaded, and the wearer has a rig whether or not
+        /// anything was grafted onto it. So a suite can go green, stage a
+        /// scene, and photograph a wearer wearing nothing this mod
+        /// built — and every frame from that run is then evidence about the
+        /// wrong thing.</para>
+        ///
+        /// <para>That is not hypothetical. It cost a full afternoon on
+        /// 2026-08-24: four green runs, four sets of frames, several rounds of
+        /// geometry "fixes" judged against pictures, and no line anywhere in
+        /// the preserved output that said whether the mod's meshes were
+        /// present. The fix is an assertion a stale bundle cannot pass.</para>
+        ///
+        /// <para><paramref name="prefix"/> is matched against
+        /// <c>sharedMesh.name</c>, not against the part transform's name. SDCS
+        /// parts are called <c>body</c>, <c>head</c>, <c>hands</c> and
+        /// <c>feet</c> — the same names the base body uses — so matching a
+        /// transform proves nothing. A mesh name belongs to whoever authored
+        /// the asset, so a mod's own prefix cannot collide with a vanilla
+        /// one.</para>
+        ///
+        /// <para>Sorted, and the vertex count included, because the caller's
+        /// real question is usually not "is anything there" but "is what is
+        /// there what I just built". A count that disagrees with the
+        /// generator's own build log is a stale bundle, and that is the single
+        /// most common way this fails.</para>
+        /// </summary>
+        public static List<string> GraftedMeshes(EntityAlive entity, string prefix)
+        {
+            var found = new List<string>();
+            if (entity == null || string.IsNullOrEmpty(prefix)) return found;
+            try
+            {
+                var renderers = entity.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                if (renderers == null) return found;
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    var renderer = renderers[i];
+                    if (renderer == null || renderer.sharedMesh == null) continue;
+                    string mesh = renderer.sharedMesh.name;
+                    if (string.IsNullOrEmpty(mesh) || !mesh.StartsWith(prefix)) continue;
+                    found.Add(mesh + "=" + renderer.sharedMesh.vertexCount);
+                }
+            }
+            catch { /* a partial answer still distinguishes present from absent */ }
+            found.Sort(StringComparer.Ordinal);
+            return found;
+        }
+
+        /// <summary>
         /// The wearer's rig as authoring reference: one line per bone, with its
         /// parent, its local position, and its <b>bind pose</b>.
         ///
