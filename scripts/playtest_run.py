@@ -221,6 +221,17 @@ def tcp_port(text: str) -> int:
     return val
 
 
+def require_litenet_room(server_port: int) -> None:
+    """LiteNet bots join on ServerPort+2 (start_loadgen): a --port above
+    65533 pushes the derived port out of TCP range and would fail late as an
+    opaque loadgen join error instead of this startup config error."""
+    if server_port > 65535 - 2:
+        raise ValueError(
+            f"ServerPort {server_port} leaves no room for the derived LiteNet "
+            f"bot port (port+2 must be <= 65535)"
+        )
+
+
 def config_summary(args: argparse.Namespace) -> str:
     """Effective top-level options as one startup log line.
 
@@ -977,9 +988,18 @@ def loadgen_expectation_failures(
         except (ValueError, TypeError):
             failures.append(f"invalid CVar expectation {raw!r}")
             continue
+        # NaN/inf expectations make every comparison below False, so a typo
+        # like "=nan" would silently pass against any observed value.
+        if not math.isfinite(expected):
+            failures.append(f"invalid CVar expectation {raw!r}")
+            continue
         state_event = latest.get(("cvar", name))
         value = state_event.get("value") if state_event else None
-        if not isinstance(value, (int, float)) or abs(float(value) - expected) > 0.0001:
+        if (
+            not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or abs(float(value) - expected) > 0.0001
+        ):
             failures.append(f"CVar {name} expected {expected:g}, observed {value!r}")
     for raw in buffs:
         try:
@@ -1001,7 +1021,12 @@ def loadgen_expectation_failures(
     for name in positive_cvars or []:
         state_event = latest.get(("cvar", name))
         value = state_event.get("value") if state_event else None
-        if not isinstance(value, (int, float)) or float(value) <= 0:
+        # NaN is not positive (<= 0 is False for it) and must not pass here.
+        if (
+            not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0
+        ):
             failures.append(f"CVar {name} expected positive, observed {value!r}")
     for raw in equal_cvars or []:
         try:
@@ -1015,6 +1040,8 @@ def loadgen_expectation_failures(
         if (
             not isinstance(left_value, (int, float))
             or not isinstance(right_value, (int, float))
+            or not math.isfinite(float(left_value))
+            or not math.isfinite(float(right_value))
             or abs(float(left_value) - float(right_value)) > 0.0001
         ):
             failures.append(
@@ -1046,6 +1073,7 @@ def server_cvar_oracle_failures(
         server_value = tn.get_cvar(name, entity_id)
         if (
             not isinstance(peer_value, (int, float))
+            or not math.isfinite(float(peer_value))
             or server_value is None
             or abs(float(peer_value) - server_value) > tolerance
         ):
@@ -2207,6 +2235,10 @@ def main(argv: list[str] | None = None) -> int:
         or args.loadgen_server_cvar_tolerance < 0
     ):
         ap.error("--loadgen-server-cvar-tolerance must be a finite non-negative number")
+    try:
+        require_litenet_room(args.port)
+    except ValueError as ex:
+        ap.error(f"--port invalid: {ex}")
     loadgen_observer_requested = bool(
         args.loadgen_observe_cvar
         or args.loadgen_observe_buff

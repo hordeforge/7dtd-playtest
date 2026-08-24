@@ -395,7 +395,11 @@ namespace ZdtdPlaytest
                 ctx.IntA = 0; // leg 0..3
                 ctx.IntB = 0; // motion ticks
                 ctx.FloatA = 0f; // path length approx
-                ctx.PlaceBlockType = 0; // last distance mm from leg start
+                // Prime last-pos components (cm) from the real start point:
+                // WasBlockType defaults to -1 and an unprimed first sample
+                // would measure against near-origin instead of being skipped.
+                ctx.WasBlockType = (int)(ctx.StartPos.x * 100f);
+                ctx.PlaceBlockType = (int)(ctx.StartPos.z * 100f);
                 float[] yaws = { 0f, 90f, 180f, 270f };
                 LocomotionDrive.Start(1f, 0f, false, yaws[0]);
                 ctx.Detail = "leg=0 yaw=0";

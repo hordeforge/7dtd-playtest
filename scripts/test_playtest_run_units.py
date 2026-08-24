@@ -164,6 +164,57 @@ def test_loadgen_structured_events_and_expectations() -> None:
         assert len(unobserved) == 1 and "never_reported" in unobserved[0], unobserved
 
 
+def test_loadgen_expectations_reject_non_finite_values() -> None:
+    """NaN/inf must fail expectations, never pass them: every comparison on
+    NaN is False, so an '=nan' typo or a non-finite observed value would
+    otherwise read as a green verdict against any state."""
+    nan = float("nan")
+    inf = float("inf")
+    events = [
+        {"type": "joined", "botId": 1, "entityId": 171},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "x",
+         "value": 4.0},
+        # Python JSON producers may emit bare NaN/Infinity tokens.
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "nan_cvar",
+         "value": nan},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "inf_cvar",
+         "value": inf},
+    ]
+
+    # Non-finite expected text is a bad expectation, not a wildcard match-all.
+    rejected = playtest_run.loadgen_expectation_failures(
+        events, ["x=nan", "x=inf", "x=1e999"], [], [], []
+    )
+    assert len(rejected) == 3, rejected
+    assert all("invalid CVar expectation" in r for r in rejected), rejected
+
+    # Non-finite observed values fail exact / positive / equal expectations.
+    failed = playtest_run.loadgen_expectation_failures(
+        events,
+        ["nan_cvar=4"],
+        [],
+        ["nan_cvar", "inf_cvar"],
+        ["nan_cvar=inf_cvar", "x=x"],
+    )
+    assert len(failed) == 4, failed
+
+    # The server oracle must flag a non-finite peer value instead of letting
+    # the NaN comparison (always False) pass any server value.
+    class FixedOracle(playtest_run.TelnetAdmin):
+        def get_cvar(
+            self, name: str, entity_id: int, timeout: float = 8.0
+        ) -> float | None:
+            return 4.0
+
+    _, latest = playtest_run.loadgen_latest_state(events)
+    oracle_failures = playtest_run.server_cvar_oracle_failures(
+        FixedOracle("127.0.0.1", 1, ""), 171, ["nan_cvar"], latest
+    )
+    assert len(oracle_failures) == 1 and "nan_cvar" in oracle_failures[0], (
+        oracle_failures
+    )
+
+
 def test_loadgen_observer_wiring_is_generic() -> None:
     source = PLAYTEST_RUN.read_text(encoding="utf-8")
     for flag in (
@@ -746,6 +797,23 @@ def test_tcp_port_type_range() -> None:
         else:
             raise AssertionError(f"tcp_port accepted {bad!r}")
     print("PASS tcp_port_range ports outside 1..65535 rejected at startup")
+
+
+def test_litenet_port_room_guard() -> None:
+    """--port feeds the derived loadgen join port ServerPort+2, so a value
+    above 65533 must be rejected at startup (tcp_port alone accepts it)."""
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert "require_litenet_room(args.port)" in source
+    for ok in (26900, 27025, 65533):
+        playtest_run.require_litenet_room(ok)
+    for bad in (65534, 65535):
+        try:
+            playtest_run.require_litenet_room(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"require_litenet_room accepted {bad}")
+    print("PASS litenet_port_room ports without room for port+2 rejected")
 
 
 def test_config_summary_redacts_telnet_password() -> None:
