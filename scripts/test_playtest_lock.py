@@ -340,6 +340,8 @@ def test_wait_until_can_start(tmp: Path) -> None:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         _assert(
             proc.returncode == 0,
@@ -354,6 +356,8 @@ def test_wait_until_can_start(tmp: Path) -> None:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     _assert(
         proc.returncode == expected_live_rc,
