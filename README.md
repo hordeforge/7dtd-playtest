@@ -526,9 +526,24 @@ Anything a person has to judge by eye needs a **staged frame**: a case that
 puts the scene on screen, holds it still, and announces itself so an external
 screenshot loop can photograph it.
 
+A staged case **photographs itself.** A little way into the hold it captures
+this client's own framebuffer through `ScreenCapture`, at `captureSuperSize`
+(default 2, so four times the pixels), and logs the path:
+
+```text
+[7dtd-playtest] shot look_myProp x2 -> .../7DaysToDie/playtest-shots/look_myProp.png
+```
+
+Take the frame from inside the game, never with a desktop screen grab. A grab
+of a game window is unreliable — the window may be unfocused, occluded, or not
+mapped, so it shows a stale or empty frame — and on a host running more than one
+client it is unsound: it photographs whatever is in front, which has repeatedly
+meant *another session's* client, producing a picture that looks like evidence
+and is somebody else's run.
+
 1. Build the case with **`CaseDef.Staged`**, not `CaseDef.Live`. It emits the
-   marker the instant your callback returns, holds the scene, and fails the
-   case if staging did not succeed:
+   marker the instant your callback returns, holds the scene, photographs it,
+   and fails the case if staging did not succeed:
 
 ```csharp
 queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
