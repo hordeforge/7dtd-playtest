@@ -947,7 +947,11 @@ namespace ZdtdPlaytest
             }
         }
 
-        /// <summary>Aim player head toward world position (setup for attack/shoot).</summary>
+        /// <summary>
+        /// Aim player head toward world position (setup for attack/shoot).
+        /// The stock SetRotation convention uses negative X pitch below the horizon
+        /// and positive X pitch above it.
+        /// </summary>
         public static void LookAt(EntityPlayerLocal player, Vector3 worldPos)
         {
             if (player == null) return;
@@ -959,7 +963,7 @@ namespace ZdtdPlaytest
                 if (len < 0.01f) return;
                 dir /= len;
                 float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
-                float pitch = -Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
+                float pitch = Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
                 player.SetRotation(new Vector3(pitch, yaw, 0f));
             }
             catch { /* */ }

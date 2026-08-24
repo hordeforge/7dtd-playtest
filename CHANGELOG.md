@@ -41,6 +41,9 @@ unchanged.
 
 ### Changed
 
+- `Helpers.LookAt` now follows the stock player rotation convention for
+  vertical aim. Targets below the player produce negative X pitch, so overhead
+  ground and block scenes no longer turn the camera into the sky.
 - `PLAYTEST_TELNET_PASSWORD` / `--telnet-password` unset no longer defaults
   to the static `retest`. Servers the orchestrator starts get an ephemeral
   per-run secret (written to the generated server config, chmod 0600, never
