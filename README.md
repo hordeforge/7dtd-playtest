@@ -512,7 +512,22 @@ screenshot loop can photograph it.
    convention).
 3. Assert only that the scene really is staged — the items were given, the
    window opened, the camera arrived. Never assert how it looks.
-4. Point a screenshot loop at the client window, keyed on `scene staged`.
+4. Photograph it with [`scripts/capture_frames.sh`](scripts/capture_frames.sh),
+   which runs the suite, waits for that marker in a log written *after* the run
+   started, shoots N frames, crops them to the client window and builds a
+   contact sheet:
+
+```bash
+./scripts/capture_frames.sh --suite <id>
+./scripts/capture_frames.sh --suite <id> --out ./frames --runner ./my-wrapper.sh
+```
+
+   `--runner` is for a project with its own entry point (deploys, `.local.env`,
+   lock handling); it is invoked as `<cmd> --suite <id>`, and defaults to this
+   repo's `scripts/playtest_run.py`. `CAPTURE_FRAMES`, `CAPTURE_INTERVAL` and
+   `CAPTURE_CROP` tune the loop. It refuses to start while a client or
+   dedicated server is already up, because overlapping runs photograph the
+   wrong one.
 
 `Report.Staged` exists because `ctx.Detail` does not work for this: a case's
 detail is flushed **with its result**, which is after the hold, so a loop

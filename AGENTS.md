@@ -190,6 +190,8 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
   case's detail is flushed with its *result*, tens of seconds later, so a loop
   waiting on the result photographs the disconnect dialog instead. A suite
   proves data, never appearance; see "Visual confirmation" in the README.
+  `scripts/capture_frames.sh` is the supported loop that waits for it — do not
+  write a per-project screenshot loop keyed on bespoke wording.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier|staged",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 

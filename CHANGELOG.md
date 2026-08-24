@@ -28,6 +28,10 @@ Release model (inferred practice, now pinned by `make test`):
   its result, after the hold, so a loop keyed on the result photographs
   whatever came next; providers had each worked around that with their own
   `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- `scripts/capture_frames.sh`: runs a suite, waits for the first staged scene,
+  photographs the client window, crops the frames and builds a contact sheet.
+  Every project using this harness needed that loop and only had it by writing
+  its own; `--runner` lets a project keep its own entry point.
 - README "Visual confirmation: what a suite cannot tell you" — a suite proves
   data and never appearance, the client is only up for as long as the cases
   take, and the supported staged-frame path for anything a person must judge by
