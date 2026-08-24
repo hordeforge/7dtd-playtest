@@ -1476,7 +1476,14 @@ class TelnetAdmin:
                     break
         finally:
             self._sock.settimeout(2.0)
-        return b"".join(chunks).decode("utf-8", errors="replace")
+        # Single control-char boundary for everything the admin plane sends
+        # back. Replies echo player names (listplayers) and entity names
+        # (listents) chosen by remote LAN peers, and every caller logs slices
+        # of them to the operator terminal; scrubbing here covers each of
+        # those echoes at once. The programmatic consumers (id regexes,
+        # keyword substring checks, cvar number extraction) only need
+        # printable text, so stripping controls cannot change a verdict.
+        return scrub(b"".join(chunks).decode("utf-8", errors="replace"))
 
     def connected(self) -> bool:
         """True while the session socket survived the last exchange.

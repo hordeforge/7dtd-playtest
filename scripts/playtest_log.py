@@ -17,14 +17,32 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Protocol, TypedDict
 
-RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
+# Every contract line is matched only at the start of a log line. The mod
+# emits each contract line through Log.Out as its own line, while game/chat
+# lines carry their own prefix first; without the ^ anchor, one chat message
+# containing "[7dtd-playtest] PASS fake/case" mid-line would forge results,
+# SUMMARY/DONE verdicts, JSON events, and barrier fires (client-log bytes are
+# attacker-reachable through remote LAN chat). Horizontal whitespace only:
+# \s would span newlines and let a trailing prefix line pair with the next
+# line's payload.
+RESULT_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+(PASS|FAIL|SKIP)[ \t]+(\S+)[ \t]*(.*)$",
+    re.MULTILINE,
+)
 SUMMARY_RE = re.compile(
-    r"\[7dtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
+    r"^[ \t]*\[7dtd-playtest\][ \t]+SUMMARY[ \t]+pass=(\d+)[ \t]+fail=(\d+)"
+    r"(?:[ \t]+skip=(\d+))?",
+    re.MULTILINE,
 )
 # Whole-token match like barrier_line_hits: a foreign "[7dtd-playtest]
 # DONExxx" line must not parse as the run-completion marker.
-DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?![\w:])(?:\s+exit_hint=(\d+))?")
-JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
+DONE_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+DONE(?![\w:])(?:[ \t]+exit_hint=(\d+))?",
+    re.MULTILINE,
+)
+JSON_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+(\{.*\})[ \t]*$", re.MULTILINE
+)
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
 NRE_SAMPLE_CAP = 50
@@ -63,8 +81,12 @@ def empty_client_log() -> ParsedClientLog:
 
 @lru_cache(maxsize=64)
 def _barrier_prefix_re(prefix: str) -> re.Pattern[str]:
-    """Compiled ``barrier <prefix>...`` grep; names repeat every poll chunk."""
-    return re.compile(rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)")
+    """Compiled line-initial ``barrier <prefix>...`` grep; names repeat every
+    poll chunk."""
+    return re.compile(
+        rf"^[ \t]*\[7dtd-playtest\][ \t]+barrier[ \t]+({re.escape(prefix)}[^\s\"]*)",
+        re.MULTILINE,
+    )
 
 
 def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
@@ -79,17 +101,22 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
 
 @lru_cache(maxsize=64)
 def _barrier_line_re(name: str) -> re.Pattern[str]:
-    """Compiled whole-name ``barrier <name>`` counter; see barrier_line_hits."""
-    return re.compile(rf"\[7dtd-playtest\]\s+barrier {re.escape(name)}(?![\w:])")
+    """Compiled line-initial whole-name ``barrier <name>`` counter; see
+    barrier_line_hits."""
+    return re.compile(
+        rf"^[ \t]*\[7dtd-playtest\][ \t]+barrier {re.escape(name)}(?![\w:])",
+        re.MULTILINE,
+    )
 
 
 def barrier_line_hits(blob: str, name: str) -> int:
     """Count human `barrier <name>` lines in ``blob`` (whole-name match).
 
-    Anchored to the stable ``[7dtd-playtest]`` prefix like every other
-    contract regex (RESULT_RE, SUMMARY_RE, DONE_RE, barrier_hits_prefix):
-    only Report.Barrier emissions may count toward servicing an admin
-    action, never a game/chat/mod line that merely contains the words.
+    Anchored to the stable ``[7dtd-playtest]`` prefix at the start of a line
+    like every other contract regex (RESULT_RE, SUMMARY_RE, DONE_RE,
+    barrier_hits_prefix): only Report.Barrier emissions may count toward
+    servicing an admin action, never a game/chat/mod line that merely
+    contains the words.
 
     Report.Barrier also emits JSON with the same name; summing both
     double-fires handlers (e.g. kills bots). The whole-name match keeps

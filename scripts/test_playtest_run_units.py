@@ -1150,6 +1150,51 @@ def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
     print("PASS log_scrub control chars stripped from terminal echoes")
 
 
+def test_telnet_recv_scrubs_control_chars() -> None:
+    """Telnet replies echo remote-peer-chosen names (listplayers player
+    names, listents entity names) and every caller logs slices of them to
+    the operator terminal. _recv is the single control-char boundary: ESC,
+    NUL, BEL, and CR must be stripped there so no exec/get_cvar/list echo
+    can emit terminal escapes, while printable text survives for the id
+    regexes, keyword checks, and cvar number extraction."""
+    class EscapedSocket:
+        """Replays one payload then acts closed."""
+
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+            self.sent: list[bytes] = []
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+        def sendall(self, data: bytes) -> None:
+            self.sent.append(data)
+
+        def recv(self, _n: int) -> bytes:
+            chunk, self._payload = self._payload, b""
+            return chunk
+
+        def close(self) -> None:
+            return None
+
+    tn = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    tn._sock = EscapedSocket(
+        b"\x1b[2J\x00'p\x07layer' (id=171)\r\nTotal of 1 in the game\n"
+    )  # type: ignore[assignment]
+    out = tn._recv(0.0)
+    for bad in ("\x1b", "\x00", "\x07", "\r"):
+        assert bad not in out, f"{bad!r} survived the telnet boundary: {out!r}"
+    assert "'player' (id=171)" in out, f"visible reply text lost: {out!r}"
+    assert "Total of 1" in out, f"reply lines lost: {out!r}"
+    # Verdict parsing still works on the scrubbed form (the escape debris
+    # stays clear of the token so the id regexes see the same boundaries).
+    scrubbed_cvar = EscapedSocket(b"\x1b[0m\nHoldingController = 3\r\n")
+    tn._sock = scrubbed_cvar  # type: ignore[assignment]
+    assert tn.get_cvar("HoldingController", 171) == 3.0
+    assert scrubbed_cvar.sent == [b"cvar get HoldingController -p 171\n"]
+    print("PASS telnet_recv_scrub replies scrubbed once at the socket boundary")
+
+
 def test_result_echo_line_scrubs_parsed_rows() -> None:
     """Result rows echo parsed client-log fields (case ids, details carrying
     remote chat text) to the operator terminal: the same control-char scrub
@@ -1697,6 +1742,10 @@ def main() -> int:
         (
             "telnet_broken_session",
             test_telnet_broken_session_degrades_to_empty_reply,
+        ),
+        (
+            "telnet_recv_scrub",
+            test_telnet_recv_scrubs_control_chars,
         ),
         (
             "spawn_trust_only_live_sessions",

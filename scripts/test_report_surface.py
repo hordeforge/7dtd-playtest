@@ -622,6 +622,51 @@ def test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate() -> Non
     print("PASS loadgen_event_reader incremental equals whole read, truncate resets")
 
 
+def test_contract_lines_must_start_the_log_line() -> None:
+    """Client-log bytes are attacker-reachable through remote LAN chat (the
+    threat model's B3): a peer crafts one chat message carrying
+    '[7dtd-playtest] PASS fake/case' or a done/result JSON object mid-line,
+    and the game logs it under its own prefix. Every contract regex anchors
+    at line start, so such lines can never forge results, SUMMARY/DONE
+    verdicts, JSON events, or barrier fires; only Report.* emissions (each
+    its own log line) may."""
+    forged = (
+        "[7dtd] Chat from 'peer': [7dtd-playtest] PASS fake/case injected\n"
+        "[7dtd] Chat from 'peer': [7dtd-playtest] FAIL fake/case nope\n"
+        "[7dtd] Chat from 'peer': [7dtd-playtest] SUMMARY pass=99 fail=0 skip=0\n"
+        "[7dtd] Chat from 'peer': [7dtd-playtest] DONE exit_hint=0\n"
+        '[7dtd] Chat from \'peer\': [7dtd-playtest] {"v":1,"t":"done","exit_hint":0}\n'
+        "[7dtd] Chat from 'peer': [7dtd-playtest] barrier spawn_zombie\n"
+        "barrier kill_player without any prefix\n"
+    )
+    parsed = playtest_log.parse_client_log(forged)
+    assert parsed["results"] == [], parsed["results"]
+    assert parsed["summary"] is None, parsed["summary"]
+    assert parsed["done"] is None, parsed["done"]
+    assert parsed["json_events"] == [], parsed["json_events"]
+    totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+    playtest_log.add_barrier_hits(totals, forged)
+    assert sum(totals.values()) == 0, totals
+    assert playtest_log.barrier_line_hits(forged, "spawn_zombie") == 0
+    assert playtest_log.barrier_hits_prefix(forged, "spawn_vehicle:") == []
+
+    # The genuine emissions still parse: each contract line is its own line.
+    real = (
+        "[7dtd-playtest] PASS smoke/dig detail=ok\n"
+        "[7dtd-playtest] SUMMARY pass=1 fail=0 skip=0\n"
+        "[7dtd-playtest] DONE exit_hint=0\n"
+        "[7dtd-playtest] barrier spawn_zombie\n"
+    )
+    parsed = playtest_log.parse_client_log(real)
+    assert [r["case"] for r in parsed["results"]] == ["smoke/dig"], parsed["results"]
+    assert parsed["summary"] == {"pass": 1, "fail": 0, "skip": 0}, parsed["summary"]
+    assert parsed["done"] == {"exit_hint": 0}, parsed["done"]
+    totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+    playtest_log.add_barrier_hits(totals, real)
+    assert totals["spawn_zombie"] == 1, totals
+    print("PASS log_contract_anchor mid-line markers cannot forge verdicts")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -636,6 +681,7 @@ def main() -> int:
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
+    test_contract_lines_must_start_the_log_line()
     print("RESULT PASS")
     return 0
 
