@@ -11,3 +11,6 @@ workspace/comparison-playtest/*/zdtd/
 .local/
 *.flock
 *.lock
+.coverage
+.coverage.*
+htmlcov/
