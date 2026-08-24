@@ -157,7 +157,7 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | `PLAYTEST_SESSION_ID` | Lock holder session id (or `--session`; auto-generated if empty) |
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
 | `PLAYTEST_LOCK_HEARTBEAT_SEC` | How often the orchestrator refreshes heartbeat (default 30) |
-| `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (default `retest`; written to the generated server config and used by the orchestrator's telnet client) |
+| `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (unset: ephemeral per-run secret written to the generated server config; `--no-server` attach falls back to `retest`) |
 
 `residual` expands to `mp,soak` only. `make playtest-residual` is a **different**
 multi-target host gate (persist + mp + apm + soak_long). See README.

@@ -62,10 +62,17 @@ def record_seed(seed: int, note: str, path: Path = SEEDS_FILE) -> bool:
         "# Replayed by `make dst` on every run. Never delete a line here\n"
         "# without understanding why the scenario can no longer occur.\n"
     )
-    with path.open("a", encoding="utf-8") as fh:
-        if header:
-            fh.write(header)
-        fh.write(f"{seed}  # {note}\n")
+    try:
+        with path.open("a", encoding="utf-8") as fh:
+            if header:
+                fh.write(header)
+            fh.write(f"{seed}  # {note}\n")
+    except OSError as ex:
+        # A failed append must not abort the run before the verdict and repro
+        # command are printed; the operator records the seed by hand instead.
+        print(f"[dst] warn: could not record seed {seed} in {path}: {ex}",
+              file=sys.stderr)
+        return False
     return True
 
 
@@ -153,19 +160,33 @@ def build_parser() -> argparse.ArgumentParser:
 
 def report_failure(
     result: SimResult, cfg: SimConfig, trace_dir: Path, argv0: str
-) -> Path:
-    """Print the seed, the repro command, and the tail of the event history."""
-    trace_dir.mkdir(parents=True, exist_ok=True)
-    path = trace_dir / f"dst-trace-{result.seed}.jsonl"
+) -> Path | None:
+    """Print the seed, the repro command, and the tail of the event history.
+
+    Returns the trace path, or None when the dump could not be written. The
+    dump failing (full disk, unwritable dir) must not prevent the verdict,
+    seed, and replay command from reaching the operator: the trace file is a
+    convenience, those prints are the evidence.
+    """
+    path: Path | None = None
     lines = result.trace_lines
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        dump = trace_dir / f"dst-trace-{result.seed}.jsonl"
+        dump.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        path = dump
+    except OSError as ex:
+        print(f"[dst] warn: could not write trace dump: {ex}", file=sys.stderr)
     print("", file=sys.stderr)
     print("=" * 72, file=sys.stderr)
     print(f"[dst] FAIL seed={result.seed}", file=sys.stderr)
     print(f"[dst] invariant: {result.violation}", file=sys.stderr)
     print(f"[dst] replay:    {replay_command(result.seed, cfg, argv0)}",
           file=sys.stderr)
-    print(f"[dst] trace:     {path} ({len(lines)} events)", file=sys.stderr)
+    if path is not None:
+        print(f"[dst] trace:     {path} ({len(lines)} events)", file=sys.stderr)
+    else:
+        print("[dst] trace:     <unavailable; see warning above>", file=sys.stderr)
     print("=" * 72, file=sys.stderr)
     for line in lines[-25:]:
         print(f"  {line}", file=sys.stderr)
@@ -230,8 +251,15 @@ def main(argv: list[str] | None = None) -> int:
         "failing_seed": failures[0].seed if failures else None,
     }
     if args.json:
-        args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        try:
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            args.json.write_text(json.dumps(summary, indent=2) + "\n",
+                                 encoding="utf-8")
+        except OSError as ex:
+            # The summary JSON is derived evidence; losing it must not lose
+            # the PASS/FAIL verdict printed below.
+            print(f"[dst] warn: could not write {args.json}: {ex}",
+                  file=sys.stderr)
     if failures:
         print(f"[dst] FAIL after {ran} seeds in {wall:.1f}s")
         return 1

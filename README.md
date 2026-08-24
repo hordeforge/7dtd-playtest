@@ -128,7 +128,7 @@ in the log without rerunning with `--help`.
 | `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
 | `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |
 | `PLAYTEST_TIMEOUT_SEC` | `900` | Harness wall-clock timeout in seconds > 0 (`--timeout`). Invalid values are a harness error (exit 2) naming the variable |
-| `PLAYTEST_TELNET_PASSWORD` | `retest` | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings) |
+| `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach falls back to `retest` |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
 
 Invalid numeric values in `PLAYTEST_LOCK_STALE_SEC` /
@@ -525,9 +525,14 @@ the push-time guard for catalog/doc drift.
 
 ### Host orchestrator secrets
 
-The stock dedicated telnet password is local-only and defaults to `retest`;
-override with `PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`). The same
-value is written into the generated server config and used by the
-orchestrator's telnet client, so the two can never diverge. It is not a
-production secret: the server binds localhost in playtest runs
+The stock dedicated telnet password is local-only. When the orchestrator
+starts the dedicated itself, an unset `PLAYTEST_TELNET_PASSWORD` (and
+`--telnet-password`) generates an ephemeral per-run secret: it is written
+into the generated server config (chmod 0600) and used by the orchestrator's
+telnet client, so the two can never diverge and a network-reachable telnet
+listener never opens with a published default. `--no-server` runs attach to a
+dedicated whose config this process did not write, so they fall back to the
+loadgen template's lab default (`retest`). The same value is written into
+the generated server config and used by the orchestrator's telnet client.
+It is not a production secret: the server binds localhost in playtest runs
 (`ServerVisibility=0`, Steam+LAN only).

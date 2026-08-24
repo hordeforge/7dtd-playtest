@@ -36,19 +36,22 @@ ZDTD_LOG = (
 )
 
 
+def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(TOOL), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+    )
+
+
 def _run(tmp_path: Path, stock: str, zdtd: str) -> subprocess.CompletedProcess[str]:
     s = tmp_path / "stock.log"
     z = tmp_path / "zdtd.log"
     s.write_text(stock, encoding="utf-8")
     z.write_text(zdtd, encoding="utf-8")
-    out = tmp_path / "out"
-    return subprocess.run(
-        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    return _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(tmp_path / "out"))
 
 
-def test_status_mismatch_becomes_finding(tmp_path):
+def test_status_mismatch_becomes_finding(tmp_path: Path) -> None:
     r = _run(tmp_path, STOCK_LOG, ZDTD_LOG)
     assert r.returncode == 0, r.stderr
     payload = json.loads((tmp_path / "out" / "playtest-compare.json").read_text(encoding="utf-8"))
@@ -64,7 +67,7 @@ def test_status_mismatch_becomes_finding(tmp_path):
     assert "| `smoke/join` | PASS | PASS |" in report
 
 
-def test_identical_sides_have_no_findings(tmp_path):
+def test_identical_sides_have_no_findings(tmp_path: Path) -> None:
     r = _run(tmp_path, STOCK_LOG, STOCK_LOG)
     assert r.returncode == 0, r.stderr
     payload = json.loads((tmp_path / "out" / "playtest-compare.json").read_text(encoding="utf-8"))
@@ -75,7 +78,7 @@ def test_identical_sides_have_no_findings(tmp_path):
     assert payload["stock"]["summary"] == {"pass": 1, "fail": 1, "skip": 0}
 
 
-def test_report_json_wall_axis(tmp_path):
+def test_report_json_wall_axis(tmp_path: Path) -> None:
     """Report JSONs carry wall_sec; the diff surfaces it as a cost axis and
     labels the sides, never as a per-case finding."""
     def report(server: str, wall: float, passn: int) -> dict:
@@ -91,10 +94,7 @@ def test_report_json_wall_axis(tmp_path):
     s.write_text(json.dumps(report("stock", 157.1, 1)), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd", 128.0, 1)), encoding="utf-8")
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["findings"] == []          # wall is an axis, not a mismatch
@@ -107,14 +107,10 @@ def test_report_json_wall_axis(tmp_path):
 
 
 def _run_bad_input(tmp_path: Path, *extra: str) -> subprocess.CompletedProcess[str]:
-    out = tmp_path / "out"
-    return subprocess.run(
-        [sys.executable, str(TOOL), *extra, "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    return _run_cli(*extra, "--out", str(tmp_path / "out"))
 
 
-def test_nonexistent_input_refuses_diff(tmp_path):
+def test_nonexistent_input_refuses_diff(tmp_path: Path) -> None:
     """A bad --stock/--zdtd path must fail like every other unusable input:
     exit 2 with the offending flag named on stderr, no traceback, and no
     comparison outputs."""
@@ -130,7 +126,7 @@ def test_nonexistent_input_refuses_diff(tmp_path):
     assert not (tmp_path / "out" / "playtest-compare.json").exists()
 
 
-def test_directory_input_refuses_diff(tmp_path):
+def test_directory_input_refuses_diff(tmp_path: Path) -> None:
     """--stock pointing at a directory is not silently globbed like
     --stock-dir would be: refuse with the flag named instead of crashing on
     IsADirectoryError."""
@@ -145,12 +141,9 @@ def test_directory_input_refuses_diff(tmp_path):
     assert not (tmp_path / "out" / "playtest-compare.json").exists()
 
 
-def test_exit_codes_documented_in_help():
+def test_exit_codes_documented_in_help() -> None:
     """The 0/1/2/3 contract is part of the CLI surface; --help must show it."""
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--help"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--help")
     assert r.returncode == 0, r.stderr
     assert "Exit codes:" in r.stdout
     for line in ("0  comparison written", "1  no playtest result lines",
@@ -158,7 +151,7 @@ def test_exit_codes_documented_in_help():
         assert line in r.stdout, line
 
 
-def test_missing_side_refuses_diff(tmp_path):
+def test_missing_side_refuses_diff(tmp_path: Path) -> None:
     """A side dir without any report must fail loudly, naming the side, and
     must NOT write comparison outputs (no phantom 'compared' result)."""
     import time
@@ -172,17 +165,13 @@ def test_missing_side_refuses_diff(tmp_path):
     z = tmp_path / "zdtd"   # empty dir: side never ran
     z.mkdir()
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z),
-         "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock-dir", str(s.parent), "--zdtd-dir", str(z), "--out", str(out))
     assert r.returncode == 2, r.stderr
     assert "no report found on the zdtd side" in r.stderr
     assert not (out / "playtest-compare.json").exists()
 
 
-def test_stale_report_refuses_diff(tmp_path):
+def test_stale_report_refuses_diff(tmp_path: Path) -> None:
     """Old reports (e.g. a previous session) must fail the freshness guard
     instead of being diffed as if fresh, and must not write outputs."""
     import time
@@ -198,17 +187,30 @@ def test_stale_report_refuses_diff(tmp_path):
     s.write_text(json.dumps(report("stock")), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
-         "--out", str(out), "--require-fresh-minutes", "60"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
+                 "--out", str(out), "--require-fresh-minutes", "60")
     assert r.returncode == 3, r.stderr
     assert "comparison inputs are stale" in r.stderr
     assert not (out / "playtest-compare.json").exists()
 
 
-def test_ran_at_surfaces_in_report(tmp_path):
+def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
+    """An unwritable --out must fail with its own exit code (4) naming the
+    destination, never a traceback with Python's default exit 1 (documented
+    as 'no playtest result lines found')."""
+    s = tmp_path / "stock.log"
+    z = tmp_path / "zdtd.log"
+    s.write_text(STOCK_LOG, encoding="utf-8")
+    z.write_text(ZDTD_LOG, encoding="utf-8")
+    blocked = tmp_path / "occupied"  # a file where the out dir should be
+    blocked.write_text("x", encoding="utf-8")
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(blocked))
+    assert r.returncode == 4, r.stderr
+    assert "cannot write comparison outputs" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_ran_at_surfaces_in_report(tmp_path: Path) -> None:
     """Fresh report JSONs carry ranAtUtc; the md shows a ran (UTC) row so a
     reader can tell when each side actually ran."""
     import time
@@ -222,10 +224,7 @@ def test_ran_at_surfaces_in_report(tmp_path):
     s.write_text(json.dumps(report("stock")), encoding="utf-8")
     z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock", str(s), "--zdtd", str(z), "--out", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["stock"]["ranAtUtc"] and payload["zdtd"]["ranAtUtc"]
@@ -233,7 +232,7 @@ def test_ran_at_surfaces_in_report(tmp_path):
     assert "| ran (UTC) | " in report_md
 
 
-def test_newest_report_picks_greatest_name_on_mtime_tie(tmp_path):
+def test_newest_report_picks_greatest_name_on_mtime_tie(tmp_path: Path) -> None:
     """Equal mtimes must not hand the choice of diffed evidence to readdir
     order: the lexicographically greatest report name wins."""
     import json as _json
@@ -265,7 +264,7 @@ def test_newest_report_picks_greatest_name_on_mtime_tie(tmp_path):
     assert picked is not None and picked.name == "report-200.json"
 
 
-def test_orchestrator_report_diffs_through_dir_mode(tmp_path):
+def test_orchestrator_report_diffs_through_dir_mode(tmp_path: Path) -> None:
     """Producer→consumer contract, end to end: a report written by the
     orchestrator's real write_report must be found by newest_report's
     report-*.json glob, pass --require-fresh-minutes, and diff per case.
@@ -300,11 +299,8 @@ def test_orchestrator_report_diffs_through_dir_mode(tmp_path):
     write(zdtd, now + 1, "zdtd", None)
 
     out = tmp_path / "out"
-    r = subprocess.run(
-        [sys.executable, str(TOOL), "--stock-dir", str(stock), "--zdtd-dir", str(zdtd),
-         "--out", str(out), "--require-fresh-minutes", "60"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
-    )
+    r = _run_cli("--stock-dir", str(stock), "--zdtd-dir", str(zdtd),
+                 "--out", str(out), "--require-fresh-minutes", "60")
     assert r.returncode == 0, r.stderr
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     assert payload["compared"] is True
@@ -316,7 +312,7 @@ def test_orchestrator_report_diffs_through_dir_mode(tmp_path):
     assert payload["zdtd"]["ranAtUtc"] != "unknown"
 
 
-def test_no_results_on_either_side_refuses(tmp_path):
+def test_no_results_on_either_side_refuses(tmp_path: Path) -> None:
     """Two live logs that contain no result lines at all are not an empty
     diff: refuse loudly instead of writing a zero-case comparison."""
     noise = "[game] boot noise, no playtest events\n"
@@ -326,7 +322,7 @@ def test_no_results_on_either_side_refuses(tmp_path):
     assert not (tmp_path / "out" / "playtest-compare.json").exists()
 
 
-def test_orchestrator_payload_keys_match_consumer_contract():
+def test_orchestrator_payload_keys_match_consumer_contract() -> None:
     """Structural drift guard for the report JSON boundary.
 
     playtest_compare.load_results reads results/summary/wall_sec/server/

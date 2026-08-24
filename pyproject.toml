@@ -9,7 +9,7 @@ dependencies = []
 # so uv.lock pins the exact version with sha256 hashes instead of resolving
 # unpinned from PyPI on every `make test`.
 dev = [
-    "pytest>=8",
+    "pytest==9.1.1",
     "ruff==0.16.4",
     "mypy==2.1.0",
 ]
@@ -18,7 +18,7 @@ dev = [
 package = false
 
 # Lint gate (make lint): defect-oriented rules only. E/W/F/I/B/SIM/UP/RUF plus
-# the free strictness of C4/RET/A/DTZ/FA and the error-only subsets of pylint
+# the free strictness of C4/RET/A/DTZ/FA/PIE and the error-only subsets of pylint
 # (PLE), pep8-naming-adjacent (RSE), import hygiene (TID), __slots__ (SLOT) and
 # isinstance/issubclass traps (YTT). Style suites that would fight the
 # hand-rolled gate scripts (D, ANN, S, TRY) are deliberately not selected.
@@ -42,6 +42,7 @@ select = [
     "A",   # builtin shadowing
     "DTZ", # naive datetime
     "FA",  # future annotations
+    "PIE", # flake8-pie (dead placeholders, duplicate fields, needless spread)
     "PLE", # pylint errors only (used-before-assignment, ...)
     "RSE", # unnecessary paren on raised exception
     "TID", # tidy imports (no relative-import tricks)
@@ -50,13 +51,16 @@ select = [
 ]
 
 # Type gate (make typecheck). Baseline strictness the tree passes today;
-# ratchet up as annotations spread. disallow_untyped_defs is next (23 gaps);
-# disallow_any_generics after that (30).
+# ratchet up as annotations spread. disallow_any_generics is next (34 gaps);
+# after that, disallow_any_explicit (8) and the remaining strict flags.
 [tool.mypy]
 python_version = "3.11"
 files = ["scripts"]
 check_untyped_defs = true
 disallow_incomplete_defs = true
+disallow_untyped_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
 disallow_subclassing_any = true
 warn_return_any = true
 warn_unused_ignores = true

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -550,6 +551,17 @@ namespace ZdtdPlaytest
         /// Resolve local player. Prefer World.GetPrimaryPlayer, then GameManager
         /// myEntityPlayerLocal, LocalPlayerUI, then player/entity lists.
         /// </summary>
+        /// <remarks>
+        /// Tick calls this every game frame, and during dead/missing-player windows
+        /// the primary-player path misses so the fallbacks run per frame (the same
+        /// window where cold joins are CPU-starved). Member lookup is therefore
+        /// resolved once and reused, mirroring LocomotionDrive's reflection caches.
+        /// </remarks>
+        static FieldInfo _gmPlayerField;
+        static PropertyInfo _gmPlayerProp;
+        static bool _gmMembersResolved;
+        static FieldInfo _uiPlayerField;
+
         static EntityPlayerLocal ResolveLocalPlayer(World world)
         {
             try
@@ -567,20 +579,18 @@ namespace ZdtdPlaytest
                 var gm = GameManager.Instance;
                 if (gm != null)
                 {
-                    var fi = AccessTools.Field(typeof(GameManager), "myEntityPlayerLocal")
-                        ?? AccessTools.Field(typeof(GameManager), "entityPlayerLocal");
-                    if (fi != null)
+                    if (!_gmMembersResolved)
                     {
-                        var v = fi.GetValue(gm) as EntityPlayerLocal;
-                        if (v != null) return v;
+                        _gmMembersResolved = true;
+                        _gmPlayerField = AccessTools.Field(typeof(GameManager), "myEntityPlayerLocal")
+                            ?? AccessTools.Field(typeof(GameManager), "entityPlayerLocal");
+                        _gmPlayerProp = AccessTools.Property(typeof(GameManager), "myEntityPlayerLocal")
+                            ?? AccessTools.Property(typeof(GameManager), "entityPlayerLocal");
                     }
-                    var pi = AccessTools.Property(typeof(GameManager), "myEntityPlayerLocal")
-                        ?? AccessTools.Property(typeof(GameManager), "entityPlayerLocal");
-                    if (pi != null)
-                    {
-                        var v = pi.GetValue(gm, null) as EntityPlayerLocal;
-                        if (v != null) return v;
-                    }
+                    var v = _gmPlayerField?.GetValue(gm) as EntityPlayerLocal;
+                    if (v != null) return v;
+                    v = _gmPlayerProp?.GetValue(gm, null) as EntityPlayerLocal;
+                    if (v != null) return v;
                 }
             }
             catch { /* */ }
@@ -591,13 +601,13 @@ namespace ZdtdPlaytest
                 {
                     var ep = ui.entityPlayer as EntityPlayerLocal;
                     if (ep != null) return ep;
-                    var fi = AccessTools.Field(ui.GetType(), "entityPlayerLocal")
-                        ?? AccessTools.Field(ui.GetType(), "<entityPlayerLocal>k__BackingField");
-                    if (fi != null)
-                    {
-                        var v = fi.GetValue(ui) as EntityPlayerLocal;
-                        if (v != null) return v;
-                    }
+                    // GetUIForPrimaryPlayer always yields a LocalPlayerUI, so one
+                    // lazy resolve covers every call.
+                    if (_uiPlayerField == null)
+                        _uiPlayerField = AccessTools.Field(ui.GetType(), "entityPlayerLocal")
+                            ?? AccessTools.Field(ui.GetType(), "<entityPlayerLocal>k__BackingField");
+                    var v = _uiPlayerField?.GetValue(ui) as EntityPlayerLocal;
+                    if (v != null) return v;
                 }
             }
             catch { /* */ }

@@ -27,9 +27,25 @@ unchanged.
 
 ### Added
 
+- Barrier-parameter sanitization: `chat_echo:<token>` and
+  `spawn_vehicle:<class>` parameters lifted from client-log lines are
+  validated as plain identifiers (`[A-Za-z0-9_]{1,64}`) before they reach a
+  telnet console command, closing the log-to-console injection path where
+  remote chat text could seed extra admin commands. Unsafe parameters are
+  dropped with a warning.
+- Control-character scrubbing on log-derived text echoed to orchestrator
+  stdout (progress crumbs, failure dumps): remote chat can no longer inject
+  terminal escape sequences into the run log.
 - `PLAYTEST_TELNET_PASSWORD` env and `--telnet-password`: one value feeds
   both the generated server config and the orchestrator telnet client.
-  Default stays `retest`.
+
+### Changed
+
+- `PLAYTEST_TELNET_PASSWORD` / `--telnet-password` unset no longer defaults
+  to the static `retest`. Servers the orchestrator starts get an ephemeral
+  per-run secret (written to the generated server config, chmod 0600, never
+  logged); `--no-server` attach falls back to `retest`. Operator-supplied
+  values win verbatim.
 - Deterministic simulation of the exclusivity lock: `make dst`
   (`scripts/test_dst.py`, `DST.md`). Crash, torn-write, corruption, and
   clock-skew faults replay from recorded seeds.

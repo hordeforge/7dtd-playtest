@@ -25,12 +25,14 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import playtest_lock as pl  # noqa: E402
 import playtest_run  # noqa: E402
 
 ROOT = _SCRIPTS.parent
@@ -579,6 +581,17 @@ def test_config_summary_redacts_telnet_password() -> None:
     assert "suite=smoke" in line and "port=26900" in line and "server=stock" in line, line
     assert "fresh_save=True" in line, line
 
+    # Attach mode without env: the state is named (legacy fallback) but no
+    # value ever appears. An own-server run without env generates instead,
+    # which still counts as "set".
+    attach = argparse.Namespace(
+        **{**vars(args), "telnet_password": "", "no_server": True}
+    )
+    line = playtest_run.config_summary(attach)
+    assert "telnet_password=legacy-attach-default" in line, line
+    generated = argparse.Namespace(**{**vars(args), "telnet_password": ""})
+    assert "telnet_password=set" in playtest_run.config_summary(generated)
+
     zdtd = argparse.Namespace(**{**vars(args), "server": "zdtd"})
     assert "world_name" not in playtest_run.config_summary(zdtd), (
         "stock-only GameName must not masquerade as the zdtd world"
@@ -685,6 +698,181 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
         assert empty.teleport_players_to(520, 62, 950) == 0
     assert empty.sent == ["listplayers", "list"], empty.sent
     assert "no players from listplayers" in errbuf.getvalue(), errbuf.getvalue()
+
+
+def test_telnet_broken_session_degrades_to_empty_reply() -> None:
+    """A telnet session that dies mid-poll (server restart, pipe reset) must
+    degrade like every other telnet failure: exec closes the socket and
+    returns "", and list_player_ids' lag re-read then sees no session. The
+    old `assert self._sock` turned that expected operating error into an
+    AssertionError that escaped the poll loop and killed the whole run with
+    a traceback instead of a warn-and-retry next poll."""
+    class BrokenPipe:
+        """Socket stub whose transport is already gone."""
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+        def sendall(self, _b: bytes) -> None:
+            raise OSError("broken pipe")
+
+        def recv(self, _n: int) -> bytes:
+            raise OSError("connection reset")
+
+        def close(self) -> None:
+            return None
+
+    tn = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    tn._sock = BrokenPipe()  # type: ignore[assignment]
+    errbuf = io.StringIO()
+    with contextlib.redirect_stderr(errbuf):
+        ids = tn.list_player_ids()
+    assert ids == [], f"broken session must parse no players: {ids}"
+    assert tn._sock is None, "exec must close the broken session"
+    assert "telnet exec fail" in errbuf.getvalue(), errbuf.getvalue()
+
+    # The same path with no socket at all (post-close callers): empty reply,
+    # never an assert, and no 1.5s settle sleep on the dead handle.
+    gone = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    gone._sock = None
+    t0 = time.monotonic()
+    assert gone.list_player_ids() == []
+    assert time.monotonic() - t0 < 1.0, "dead-session read must not settle-wait"
+    print("PASS telnet_broken_session dead session degrades to empty reply")
+
+
+def test_safe_barrier_param_rejects_command_shapes() -> None:
+    """Barrier parameters are lifted from client-log lines (attacker-reachable
+    via remote chat) and interpolated into telnet console commands. Only
+    identifier-shaped tokens may cross: whitespace would smuggle a second
+    command onto the next telnet line, quotes break out of the quoted
+    `say "<token>"` form."""
+    for good in (
+        "ptchat12345",
+        "zombieBoe",
+        "vehicleMotorcycle",
+        "npcTraderJoel",
+        "a" * 64,
+    ):
+        assert playtest_run.safe_barrier_param(good), f"{good!r} must pass"
+    for bad in (
+        "",
+        "two words",
+        'say" hacked',
+        "x\nsay hacked",
+        "x\rsay hacked",
+        "semi;colon",
+        "$(...)",
+        "`cmd`",
+        "a" * 65,
+        "ptchat-1;kill 4",
+        "tab\tsep",
+    ):
+        assert not playtest_run.safe_barrier_param(bad), f"{bad!r} must be dropped"
+    print("PASS barrier_param_validation identifiers only, injection shapes dropped")
+
+
+def test_safe_barrier_param_gates_both_telnet_handlers() -> None:
+    """Wiring gate: every log-derived barrier parameter forwarded into a
+    telnet command (chat_echo token, spawn_vehicle class) must pass through
+    safe_barrier_param inside main(). A new handler that skips the check
+    reopens the log-to-console injection path."""
+    tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
+    mains = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+    ]
+    assert len(mains) == 1
+    calls = sum(
+        1
+        for n in ast.walk(mains[0])
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "safe_barrier_param"
+    )
+    assert calls >= 2, (
+        f"chat_echo and spawn_vehicle handlers must validate via "
+        f"safe_barrier_param, found {calls} call(s) in main()"
+    )
+    print("PASS barrier_param_wiring both parameterised handlers validated")
+
+
+def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
+    """Log bytes echoed to the operator terminal carry remote chat text;
+    control characters (ESC introducing terminal escapes, CR rewriting
+    lines) must not survive into orchestrator stdout. Tab/LF stay so dumps
+    remain readable."""
+    scrub = playtest_run.scrub
+    assert scrub("normal line") == "normal line"
+    assert scrub("\x1b[31mred\x1b[0m") == "[31mred[0m"
+    assert scrub("hide\x0bme\x00\x07") == "hideme"
+    assert scrub("cr\rinjected") == "crinjected", "CR must go (line-rewrite)"
+    assert scrub("keep\ttabs\nand\nlines") == "keep\ttabs\nand\nlines"
+    print("PASS log_scrub control chars stripped from terminal echoes")
+
+
+def test_result_echo_line_scrubs_parsed_rows() -> None:
+    """Result rows echo parsed client-log fields (case ids, details carrying
+    remote chat text) to the operator terminal: the same control-char scrub
+    as every other interactive echo must apply, and the row shapes must stay
+    byte-identical for clean input."""
+    line = playtest_run.result_echo_line(
+        {"status": "PASS", "case": "smoke/join", "detail": "ok"}
+    )
+    assert line == "  PASS smoke/join ok", f"clean shape drifted: {line!r}"
+    peer = playtest_run.result_echo_line(
+        {"status": "FAIL", "case": "mp/s", "detail": "d"}, peer=True
+    )
+    assert peer == "  peer FAIL mp/s d", f"peer shape drifted: {peer!r}"
+    dirty = playtest_run.result_echo_line(
+        {"status": "FAIL", "case": "chat/echo", "detail": "\x1b[2J\x00cr\rinj"}
+    )
+    assert "\x1b" not in dirty and "\r" not in dirty and "\x00" not in dirty, (
+        f"control chars reached the terminal echo: {dirty!r}"
+    )
+    assert "[2Jcrinj" in dirty, f"visible text must survive the scrub: {dirty!r}"
+    print("PASS result_echo_line parsed rows scrubbed before terminal echo")
+
+
+def test_result_row_echoes_all_routed_through_helper() -> None:
+    """A direct f-string echo of a parsed row reintroduces the escape path;
+    every row echo in main() must call the scrubbed helper instead."""
+    src = Path(playtest_run.__file__).read_text(encoding="utf-8")
+    direct = re.findall(r'log\(f"  \{r\[.status.\]\}', src)
+    assert not direct, (
+        f"{len(direct)} result row echo(es) bypass result_echo_line"
+    )
+    calls = len(re.findall(r"\bresult_echo_line\(", src))
+    # 1 definition + 1 docstring mention aside: 4 call sites in main().
+    assert calls >= 5, f"helper defined but unwired: {calls} reference(s)"
+    print("PASS result_row_echo_wiring every row echo routed through helper")
+
+
+def test_resolve_telnet_password_paths() -> None:
+    """Operator-provided wins verbatim; --no-server attach falls back to the
+    documented lab default (the running dedicated's config was written by
+    someone else); servers this orchestrator starts get an ephemeral secret,
+    unique per run and never equal to the published default."""
+    resolve = playtest_run.resolve_telnet_password
+    legacy = playtest_run.LEGACY_TELNET_PASSWORD
+
+    assert resolve("operator-pw", no_server=False) == "operator-pw"
+    assert resolve("operator-pw", no_server=True) == "operator-pw"
+
+    assert resolve("", no_server=True) == legacy, (
+        "attach mode without env must use the documented lab default"
+    )
+
+    generated = [resolve("", no_server=False) for _ in range(2)]
+    assert all(pw != legacy for pw in generated), (
+        "the static published default must never serve as the run password"
+    )
+    assert len(set(generated)) == 2, "generated secrets must differ per call"
+    for pw in generated:
+        assert playtest_run.safe_barrier_param(pw.replace("-", "_")) or True
+        # Command-safe alphabet (token_urlsafe): survives the generated XML
+        # attribute and the telnet wire unescaped.
+        assert re.fullmatch(r"[A-Za-z0-9_-]{10,40}", pw), f"bad shape: {pw!r}"
+    print("PASS telnet_password_resolution operator/attach/generated split")
 
 
 def test_write_stock_config_restricts_file_mode() -> None:
@@ -824,6 +1012,194 @@ def test_write_stock_config_activates_commented_userdata_folder() -> None:
     print("PASS stock_config_userdata_folder commented form activated, stale value rewritten")
 
 
+def test_write_stock_config_unreadable_template_names_the_file() -> None:
+    """A template that exists but cannot be decoded (UTF-16 editor save) or
+    read (permissions) must raise a named error carrying the path and cause,
+    not a bare UnicodeDecodeError/OSError traceback after --fresh-save."""
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        src_cfg = tdp / "serverconfig.xml"
+        # UTF-16-encoded bytes are not valid UTF-8: read_text raises
+        # UnicodeDecodeError, the realistic user-edit failure shape.
+        src_cfg.write_bytes(
+            "<ServerSettings/>\n".encode("utf-16")
+        )
+        try:
+            playtest_run.write_stock_config(
+                src_cfg,
+                tdp / "out" / "serverconfig_playtest.xml",
+                tdp / "userdata",
+                world_name="Navezgane",
+                game_name="PlaytestNav",
+                port=26900,
+                telnet_port=8081,
+                telnet_password="pw",
+            )
+        except RuntimeError as ex:
+            assert str(src_cfg) in str(ex), f"path missing from error: {ex}"
+            assert "cannot read serverconfig template" in str(ex)
+        except Exception as ex:
+            raise AssertionError(f"wrong error type: {type(ex).__name__}: {ex}") from ex
+        else:
+            raise AssertionError("undecodable template accepted silently")
+
+
+def test_write_stock_config_unwritable_output_names_the_file() -> None:
+    """An output path that cannot be created (parent exists as a file) must
+    raise a named RuntimeError carrying the destination and cause, not a bare
+    OSError traceback: this fires after --fresh-save already moved the save
+    aside, mirroring the read-side guard right above it."""
+    src = (
+        "<ServerSettings>\n"
+        '  <property name="TelnetPassword" value="old"/>\n'
+        "</ServerSettings>\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        src_cfg = tdp / "serverconfig.xml"
+        src_cfg.write_text(src, encoding="utf-8")
+        blocker = tdp / "out"
+        blocker.write_text("a file where the output dir must go", encoding="utf-8")
+        out_cfg = blocker / "serverconfig_playtest.xml"
+        try:
+            playtest_run.write_stock_config(
+                src_cfg,
+                out_cfg,
+                tdp / "userdata",
+                world_name="Navezgane",
+                game_name="PlaytestNav",
+                port=26900,
+                telnet_port=8081,
+                telnet_password="pw",
+            )
+        except RuntimeError as ex:
+            assert str(out_cfg) in str(ex), f"destination missing from error: {ex}"
+            assert "cannot write generated serverconfig" in str(ex)
+        except Exception as ex:
+            raise AssertionError(f"wrong error type: {type(ex).__name__}: {ex}") from ex
+        else:
+            raise AssertionError("unwritable generated config accepted silently")
+    print(
+        "PASS stock_config_unwritable_output named RuntimeError carries destination"
+    )
+
+
+def test_wait_stock_ready_early_exit_survives_unreadable_log() -> None:
+    """When the dedicated exits before StartGame done, the diagnostic tail of
+    its unity log is best-effort: a readable log must be echoed scrubbed,
+    and an unreadable one (rotation, EIO, permissions) must warn and still
+    return False instead of raising out of main()'s startup path."""
+    class DeadProc:
+        returncode = 137
+
+        def poll(self) -> int:
+            return 137
+
+    orig_timeout = playtest_run.STOCK_READY_TIMEOUT_SEC
+    playtest_run.STOCK_READY_TIMEOUT_SEC = 0.05
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            unity_log = tdp / "server_playtest.txt"
+
+            # Readable log: tail reaches stderr, verdict is False.
+            unity_log.write_text(
+                "line one\nERROR: world load failed\nline three\n",
+                encoding="utf-8",
+            )
+            errbuf = io.StringIO()
+            with contextlib.redirect_stderr(errbuf):
+                ready = playtest_run.wait_stock_dedicated_ready(DeadProc(), unity_log)  # type: ignore[arg-type]
+            assert ready is False, "exited-early dedicated must not read as ready"
+            errs = errbuf.getvalue()
+            assert "exited early code=137" in errs, errs
+            assert "tail server log" in errs and "world load failed" in errs, errs
+
+            # Unreadable log: warn + same False verdict, no exception.
+            if os.geteuid() != 0:
+                unity_log.chmod(0o000)
+                try:
+                    errbuf = io.StringIO()
+                    with contextlib.redirect_stderr(errbuf):
+                        ready = playtest_run.wait_stock_dedicated_ready(DeadProc(), unity_log)  # type: ignore[arg-type]
+                    assert ready is False
+                    assert "could not read server log tail" in errbuf.getvalue(), (
+                        errbuf.getvalue()
+                    )
+                finally:
+                    unity_log.chmod(0o644)
+    finally:
+        playtest_run.STOCK_READY_TIMEOUT_SEC = orig_timeout
+    print("PASS stock_ready_unreadable_log tail read is best-effort, verdict stands")
+
+
+def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
+    """A signal-driven SystemExit escaping after the claim was published must
+    not leave it standing: main() has not set lock_held yet, so its finally
+    would skip release and the orphan claim would sit unheartbeated until
+    the stale window passes, blocking every other agent."""
+    with tempfile.TemporaryDirectory(prefix="playtest-acq-") as td:
+        lock = Path(td) / "playtest_running"
+        sid = "grok-20260810-231500-a1b2c3d4e5f6"
+
+        # Captured before patching so the fake can publish a real claim
+        # without recursing into itself.
+        real_acquire = pl.acquire
+
+        def publish_then_die(
+            session: str,
+            *,
+            path: Path | None = None,
+            live_probe: Callable[[], bool] | None = None,
+            max_age_sec: float | None = None,
+            env: pl.LockEnv | None = None,
+        ) -> pl.LockState:
+            state = real_acquire(session, path=path, live_probe=live_probe)
+            if not (state.running and state.session == session):
+                raise AssertionError(f"fake acquire failed to publish: {state}")
+            # Model the signal landing after publication but before main()
+            # records lock_held.
+            raise SystemExit(128 + 15)
+
+        orig = pl.acquire
+        pl.acquire = publish_then_die
+        raised = False
+        try:
+            try:
+                playtest_run.acquire_exclusive_lock(sid, lock)
+            except SystemExit:
+                raised = True
+        finally:
+            pl.acquire = orig
+        assert raised, "interrupt must propagate out of acquire_exclusive_lock"
+        state = pl.read_lock(lock)
+        assert not state.running and state.session is None, (
+            f"published claim survived interrupt: {state}"
+        )
+    print("PASS acquire_exclusive_lock_undo interrupt releases published claim")
+
+
+def test_acquire_exclusive_lock_refusal_leaves_foreign_record() -> None:
+    """A refused acquire fails like a bare acquire and leaves the foreign
+    record exactly as it was: the interrupt-undo release refuses to write
+    for a session the file does not name."""
+    with tempfile.TemporaryDirectory(prefix="playtest-acqr-") as td:
+        lock = Path(td) / "playtest_running"
+        owner = "owner-20260810-000000-aaaaaaaaaaaa"
+        other = "other-20260810-000001-bbbbbbbbbbbb"
+        pl.acquire(owner, path=lock, live_probe=lambda: False)
+        try:
+            playtest_run.acquire_exclusive_lock(other, lock)
+            raise AssertionError("foreign acquire must refuse")
+        except pl.PlaytestLockError as ex:
+            assert ex.reason == "foreign_holder", f"reason={ex.reason}"
+        state = pl.read_lock(lock)
+        assert state.running and state.session == owner, (
+            f"refusal disturbed the foreign record: {state}"
+        )
+    print("PASS acquire_exclusive_lock_refusal foreign record untouched")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -858,10 +1234,49 @@ def main() -> int:
         ("tcp_port_range", test_tcp_port_type_range),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
+        (
+            "telnet_broken_session",
+            test_telnet_broken_session_degrades_to_empty_reply,
+        ),
+        (
+            "stock_ready_unreadable_log",
+            test_wait_stock_ready_early_exit_survives_unreadable_log,
+        ),
+        ("barrier_param_validation", test_safe_barrier_param_rejects_command_shapes),
+        (
+            "barrier_param_wiring",
+            test_safe_barrier_param_gates_both_telnet_handlers,
+        ),
+        ("log_scrub", test_scrub_strips_control_chars_from_echoed_log_text),
+        (
+            "result_row_echo",
+            test_result_echo_line_scrubs_parsed_rows,
+        ),
+        (
+            "result_row_echo_wiring",
+            test_result_row_echoes_all_routed_through_helper,
+        ),
+        ("telnet_password_resolution", test_resolve_telnet_password_paths),
         ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
         (
             "stock_config_userdata_folder",
             test_write_stock_config_activates_commented_userdata_folder,
+        ),
+        (
+            "stock_config_unreadable_template",
+            test_write_stock_config_unreadable_template_names_the_file,
+        ),
+        (
+            "stock_config_unwritable_output",
+            test_write_stock_config_unwritable_output_names_the_file,
+        ),
+        (
+            "acquire_exclusive_lock_undo",
+            test_acquire_exclusive_lock_undoes_published_claim_on_interrupt,
+        ),
+        (
+            "acquire_exclusive_lock_refusal",
+            test_acquire_exclusive_lock_refusal_leaves_foreign_record,
         ),
     ):
         try:

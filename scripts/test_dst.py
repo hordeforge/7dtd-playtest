@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -132,7 +133,14 @@ def test_simulator_catches_planted_regressions() -> None:
 
     real_acquire = pl.acquire
 
-    def blind_acquire(session, *, path=None, live_probe=None, max_age_sec=None, env=None):
+    def blind_acquire(
+        session: str,
+        *,
+        path: Path | None = None,
+        live_probe: Callable[[], bool] | None = None,
+        max_age_sec: float | None = None,
+        env: pl.LockEnv | None = None,
+    ) -> pl.LockState:
         return real_acquire(
             session, path=path, live_probe=lambda: False,
             max_age_sec=max_age_sec, env=env,
@@ -140,8 +148,15 @@ def test_simulator_catches_planted_regressions() -> None:
 
     real_write = pl.write_lock
 
-    def nonatomic_write(path, *, running, session=None, acquired=None,
-                        heartbeat=None, env=None):
+    def nonatomic_write(
+        path: Path,
+        *,
+        running: bool,
+        session: str | None = None,
+        acquired: str | None = None,
+        heartbeat: str | None = None,
+        env: pl.LockEnv | None = None,
+    ) -> None:
         e = pl._env(env)
         e.storage.mkdir_parents(path)
         if running:
@@ -156,7 +171,13 @@ def test_simulator_catches_planted_regressions() -> None:
 
     real_release = pl.release
 
-    def unchecked_release(session, *, path=None, env=None):
+    def unchecked_release(
+        session: str,
+        *,
+        path: Path | None = None,
+        env: pl.LockEnv | None = None,
+    ) -> pl.LockState:
+        path = path or pl.default_lock_path()
         e = pl._env(env)
         pl._with_flock(
             path, lambda: pl.write_lock(path, running=False, session=None, env=e), env=e
@@ -254,6 +275,53 @@ def test_heartbeat_loop_flags_a_lost_claim() -> None:
         _assert(loop.lost_claim, "lost claim must be flagged, not swallowed")
 
 
+def test_failure_reporting_survives_unwritable_trace_dir() -> None:
+    """A trace dump that cannot be written (full disk, bad --trace-dir) must
+    not abort dst_run before the seed, repro command, and FAIL verdict are
+    printed: those prints are the evidence, the file is a convenience."""
+    import contextlib
+    import io
+    import tempfile
+
+    from dst_sim import SimConfig, SimResult
+
+    with tempfile.TemporaryDirectory() as td:
+        blocked = Path(td) / "not-a-dir"
+        blocked.write_text("occupies the path so mkdir fails\n", encoding="utf-8")
+        result = SimResult(
+            seed=4242, digest="d", steps=1, refusals={}, torn=0, crashes=0,
+            io_errors=0, max_concurrent_runtime=1, violation="[t] broken",
+            trace_lines=["e1", "e2"],
+        )
+        errbuf = io.StringIO()
+        with contextlib.redirect_stderr(errbuf):
+            reported = dst_run.report_failure(
+                result, SimConfig(), blocked, "dst_run.py"
+            )
+        err = errbuf.getvalue()
+    _assert(reported is None, f"expected no trace path, got {reported}")
+    _assert("could not write trace dump" in err, "dump warning missing")
+    _assert("FAIL seed=4242" in err, "verdict lost when the dump fails")
+    _assert("replay:" in err and "--seed 4242" in err, "repro command lost")
+
+
+def test_record_seed_reports_unwritable_file() -> None:
+    """A regression-list append failure must return False with a warning, not
+    raise past the verdict print in main()'s loop."""
+    import contextlib
+    import io
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        target = Path(td) / "sub"
+        target.mkdir()  # opening a directory for append raises OSError
+        errbuf = io.StringIO()
+        with contextlib.redirect_stderr(errbuf):
+            recorded = dst_run.record_seed(7, "broken", target)
+    _assert(recorded is False, f"record_seed on unwritable path returned {recorded}")
+    _assert("could not record seed 7" in errbuf.getvalue(), "warning not printed")
+
+
 def main() -> int:
     tests = [
         ("replay_is_byte_identical", test_replay_is_byte_identical),
@@ -267,6 +335,10 @@ def main() -> int:
         ("replay_command_pins_the_config", test_replay_command_pins_the_config),
         ("release_no_op_when_not_owner", test_lock_release_is_no_op_when_not_owner),
         ("heartbeat_flags_lost_claim", test_heartbeat_loop_flags_a_lost_claim),
+        ("failure_reporting_survives_unwritable_trace_dir",
+         test_failure_reporting_survives_unwritable_trace_dir),
+        ("record_seed_reports_unwritable_file",
+         test_record_seed_reports_unwritable_file),
     ]
     failed = 0
     for name, fn in tests:

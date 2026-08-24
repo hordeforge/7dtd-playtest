@@ -183,6 +183,9 @@ namespace ZdtdPlaytest
         }
 
         static System.Reflection.MethodInfo _getWaterMethod;
+        // Reused reflection arg slots: Invoke is synchronous on the game thread,
+        // so a shared array avoids a heap alloc per frame (see LocomotionDrive).
+        static readonly object[] WaterProbeArgs = new object[3];
 
         /// <summary>Read water mass at world cell if API available.</summary>
         public static bool CellHasWaterMass(World world, Vector3i pos)
@@ -207,7 +210,10 @@ namespace ZdtdPlaytest
                         _getWaterMethod = chunk.GetType().GetMethod("GetWater");
                     if (_getWaterMethod != null)
                     {
-                        var wv = _getWaterMethod.Invoke(chunk, new object[] { pos.x & 15, pos.y, pos.z & 15 });
+                        WaterProbeArgs[0] = pos.x & 15;
+                        WaterProbeArgs[1] = pos.y;
+                        WaterProbeArgs[2] = pos.z & 15;
+                        var wv = _getWaterMethod.Invoke(chunk, WaterProbeArgs);
                         if (wv is WaterValue water && water.HasMass()) return true;
                     }
                 }
