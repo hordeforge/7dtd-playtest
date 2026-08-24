@@ -49,7 +49,9 @@ Release model (inferred practice, now pinned by `make test`):
   resolves an unknown name with only a log warning and does not open within
   the same call, so a hand-rolled open reports a closed window that is about
   to appear and a misspelled group looks identical to one that declined to
-  draw. `OpenWindowNames` sorts, so two identical runs read identically.
+  draw. `OpenWindowGroup` therefore returns whether the *name is known*, and
+  `OpenWindowNames` — sorted, so two identical runs read identically — is what
+  answers "is it on screen", from a later tick.
 - `CaseDef.Staged(suite, id, tags, stage, holdSeconds)`: builds a staging case
   — put the scene up, announce it immediately, hold it still, fail if it did
   not stage. Providers had hand-rolled that triple, which is where the

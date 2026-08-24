@@ -565,7 +565,16 @@ namespace ZdtdPlaytest
         /// </summary>
         /// <param name="group">Window or group id, as declared in XUi_InGame.</param>
         /// <param name="modal">Vanilla opens the character sheet non-modal.</param>
-        /// <returns>Whether the window manager reports it open now.</returns>
+        /// <returns>
+        /// Whether the name is one the manager knows, i.e. whether the request
+        /// was accepted — <b>not</b> whether the window is on screen.
+        /// <c>Open</c> queues into <c>windowsToOpen</c> and the manager drains
+        /// that on a later <c>Update</c>, so nothing here can answer "is it
+        /// drawn" and any method that claims to is lying. A window trace on the
+        /// installed build put the game's own <c>toolbelt</c> open 1.7 s after
+        /// the call that asked for it. Verify with <see cref="OpenWindowNames"/>
+        /// from a later tick — a wait callback, or the hold of a staged frame.
+        /// </returns>
         public static bool OpenWindowGroup(EntityPlayerLocal player, string group, bool modal = false)
         {
             if (player == null || string.IsNullOrEmpty(group)) return false;
@@ -573,14 +582,22 @@ namespace ZdtdPlaytest
             {
                 var ui = LocalPlayerUI.GetUIForPlayer(player);
                 var wm = ui != null ? ui.windowManager : null;
-                if (wm == null) return false;
+                if (wm == null || wm.nameToWindowMap == null) return false;
+                // Checked before the call, because Open answers an unknown name
+                // with a log warning and no return value: without this a typo
+                // and a group that declines to draw are the same result.
+                bool known = wm.nameToWindowMap.ContainsKey(group);
                 wm.Open(group, modal);
-                return wm.IsWindowOpen(group);
+                return known;
             }
             catch { return false; }
         }
 
-        /// <summary>Closes a window or group by name; false if there was no UI to ask.</summary>
+        /// <summary>
+        /// Closes a window or group by name. Returns whether the name is known,
+        /// on the same reasoning as <see cref="OpenWindowGroup"/>: the close is
+        /// queued, so an immediate <c>IsWindowOpen</c> says nothing.
+        /// </summary>
         public static bool CloseWindowGroup(EntityPlayerLocal player, string group)
         {
             if (player == null || string.IsNullOrEmpty(group)) return false;
@@ -588,9 +605,10 @@ namespace ZdtdPlaytest
             {
                 var ui = LocalPlayerUI.GetUIForPlayer(player);
                 var wm = ui != null ? ui.windowManager : null;
-                if (wm == null) return false;
+                if (wm == null || wm.nameToWindowMap == null) return false;
+                bool known = wm.nameToWindowMap.ContainsKey(group);
                 wm.Close(group);
-                return !wm.IsWindowOpen(group);
+                return known;
             }
             catch { return false; }
         }
