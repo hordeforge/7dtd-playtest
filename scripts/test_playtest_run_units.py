@@ -83,6 +83,10 @@ def test_loadgen_structured_events_and_expectations() -> None:
             "Player 171: protection = 1.25", "protection"
         ) == 1.25
         assert playtest_run.parse_cvar_value(
+            "Player EntityPlayer has cvar protection: True. Value: 9.940732",
+            "protection",
+        ) == 9.940732
+        assert playtest_run.parse_cvar_value(
             "Executing command 'cvar get protection -p 172'", "protection"
         ) is None
 

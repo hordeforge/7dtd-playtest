@@ -980,7 +980,7 @@ def loadgen_expectation_failures(
 def parse_cvar_value(reply: str, name: str) -> float | None:
     """Extract NAME's numeric value from stock ``cvar get`` output."""
     match = re.search(
-        rf"(?im)\b{re.escape(name)}\b\s*(?:=|:)\s*"
+        rf"(?im)\b{re.escape(name)}\b(?:\s*=\s*|:\s*(?:True|False)\.\s*Value:\s*)"
         r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)",
         reply,
     )
