@@ -259,6 +259,94 @@ def test_heartbeat_and_stale_takeover(tmp: Path) -> None:
     pl.release(other, path=lock)
 
 
+def test_wait_until_can_start(tmp: Path) -> None:
+    """wait_until_can_start uses can_start, including missing-heartbeat stale."""
+    tmp.mkdir(parents=True, exist_ok=True)
+    lock = tmp / "playtest_running"
+    waiter = "waiter-20260824-000000-aaaaaaaaaaaa"
+    owner = "owner-20260824-000000-bbbbbbbbbbbb"
+    sleeps: list[float] = []
+
+    def sleeper(dt: float) -> None:
+        sleeps.append(dt)
+
+    _assert(
+        pl.wait_until_can_start(
+            waiter, path=lock, live_probe=lambda: False, sleeper=sleeper
+        ),
+        "free lock is immediately startable",
+    )
+    _assert(sleeps == [], "no wait when already free")
+
+    # Missing heartbeat while claimed is stale (not free). The local matrix
+    # clone treated that as free; wait_until_can_start must not.
+    lock.write_text(
+        "running=yes\nsession=" + owner + "\nacquired=2020-01-01T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    st = pl.read_lock(lock)
+    _assert(st.heartbeat is None, "fixture has no heartbeat field")
+    _assert(pl.is_stale(st), "missing heartbeat is stale")
+    _assert(
+        pl.can_start(waiter, path=lock, live_probe=lambda: False),
+        "stale missing-heartbeat + no runtime can start",
+    )
+    _assert(
+        pl.wait_until_can_start(
+            waiter, path=lock, live_probe=lambda: False, sleeper=sleeper
+        ),
+        "wait returns immediately on stale missing-heartbeat",
+    )
+
+    sleeps.clear()
+    clock = [0.0]
+
+    class FakeEnv(pl.LockEnv):
+        def now(self) -> float:
+            return clock[0]
+
+    def advancing_sleep(dt: float) -> None:
+        sleeps.append(dt)
+        clock[0] += dt
+
+    _assert(
+        not pl.wait_until_can_start(
+            waiter,
+            path=lock,
+            timeout_sec=25,
+            interval_sec=10,
+            live_probe=lambda: True,
+            env=FakeEnv(),
+            sleeper=advancing_sleep,
+        ),
+        "live runtime times out instead of spinning forever",
+    )
+    _assert(sleeps != [], "slept while blocked")
+    _assert(clock[0] >= 25, f"clock reached timeout, got {clock[0]}")
+
+    if not pl.default_live_runtime_running():
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "playtest_lock.py"),
+                "wait",
+                "--timeout",
+                "2",
+                "--interval",
+                "1",
+                "--path",
+                str(tmp / "cli-free"),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        _assert(
+            proc.returncode == 0,
+            "CLI wait on a free path exits 0: " + proc.stderr,
+        )
+
+
 def test_playtest_run_wiring() -> None:
     """Structural: orchestrator acquires before clean_processes and releases."""
     src = (SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
@@ -589,6 +677,10 @@ def main() -> int:
             (
                 "heartbeat_and_stale_takeover",
                 lambda: test_heartbeat_and_stale_takeover(tmp / "hb"),
+            ),
+            (
+                "wait_until_can_start",
+                lambda: test_wait_until_can_start(tmp / "wait"),
             ),
             (
                 "heartbeat_thread_stop_before_start",

@@ -524,6 +524,36 @@ def can_start(
     return not (probe() and not (state.running and state.session == session))
 
 
+def wait_until_can_start(
+    session: str,
+    *,
+    path: Path | None = None,
+    timeout_sec: float = 1800,
+    interval_sec: float = 10,
+    live_probe: Callable[[], bool] | None = None,
+    env: LockEnv | None = None,
+    sleeper: Callable[[float], None] | None = None,
+) -> bool:
+    """Poll :func:`can_start` until True, or return False at ``timeout_sec``.
+
+    Consumers (matrix runners, agents) must wait here instead of parsing
+    ``running=`` / ``heartbeat=`` themselves. Missing heartbeat is stale,
+    matching :func:`is_stale`.
+    """
+    e = _env(env)
+    sleep = time.sleep if sleeper is None else sleeper
+    deadline = e.now() + timeout_sec
+    while True:
+        if can_start(
+            session, path=path, live_probe=live_probe, env=e
+        ):
+            return True
+        now_t = e.now()
+        if now_t >= deadline:
+            return False
+        sleep(min(interval_sec, max(0.0, deadline - now_t)))
+
+
 def acquire(
     session: str,
     *,
@@ -798,3 +828,52 @@ class HeartbeatThread:
         self.loop.tick(force=True)
         while not self._stop.wait(self.loop.interval_sec):
             self.loop.tick(force=True)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI for consumers that cannot import this module from bash.
+
+    ``wait`` polls :func:`wait_until_can_start` and exits 0 when a new
+    session could acquire, 1 on timeout, 2 on bad usage.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] in ("-h", "--help"):
+        sys.stdout.write(
+            "usage: playtest_lock.py wait [--timeout SEC] [--interval SEC] "
+            "[--path FILE]\n"
+        )
+        return 0
+    if args[0] != "wait":
+        sys.stderr.write("unknown command; expected 'wait'\n")
+        return 2
+    timeout_sec = 1800.0
+    interval_sec = 10.0
+    path: Path | None = None
+    rest = args[1:]
+    i = 0
+    while i < len(rest):
+        opt = rest[i]
+        if opt in ("--timeout", "--interval", "--path"):
+            if i + 1 >= len(rest):
+                sys.stderr.write(opt + " requires a value\n")
+                return 2
+            val = rest[i + 1]
+            if opt == "--timeout":
+                timeout_sec = float(val)
+            elif opt == "--interval":
+                interval_sec = float(val)
+            else:
+                path = Path(val)
+            i += 2
+            continue
+        sys.stderr.write("unknown option " + opt + "\n")
+        return 2
+    sid = new_session_id("waiter")
+    ok = wait_until_can_start(
+        sid, path=path, timeout_sec=timeout_sec, interval_sec=interval_sec
+    )
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

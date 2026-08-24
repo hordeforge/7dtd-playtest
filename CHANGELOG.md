@@ -29,6 +29,10 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- `playtest_lock.wait_until_can_start` and CLI `playtest_lock.py wait`:
+  poll `can_start` (missing heartbeat is stale) so consumers do not parse
+  `running=` / `heartbeat=` themselves. Matrix runners call this instead
+  of a local lock clone.
 - `MiningSpec` / `MiningProbe` / `MiningResult`: public real-mining driver for
   external providers. Seeds a named block, equips a named tool, presses
   exactly one `UseHoldingItem(0, false)` per attempt, and requires both
