@@ -542,6 +542,31 @@ def test_log_tail_keeps_multibyte_char_split_across_polls() -> None:
     print("PASS logtail_multibyte torn UTF-8 char survives across polls intact")
 
 
+def test_log_tail_from_end_starts_at_current_size() -> None:
+    """``from_end`` is what the orchestrator relies on when the previous
+    generation's client log could not be preserved: only bytes appended
+    after construction may be returned, so stale barriers/results from the
+    old log cannot re-fire into the new run's verdicts. A missing file must
+    degrade to reading from zero, not raise."""
+    with tempfile.TemporaryDirectory() as td:
+        log_path = Path(td) / "client.log"
+        log_path.write_text("[7dtd-playtest] barrier spawn_zombie\n", encoding="utf-8")
+        tail = playtest_log.LogTail(log_path, from_end=True)
+        assert tail.poll() == "", "pre-existing bytes replayed into the new run"
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write("[7dtd-playtest] barrier kill_player\n")
+        chunk = tail.poll()
+        assert "kill_player" in chunk and "spawn_zombie" not in chunk, chunk
+
+    with tempfile.TemporaryDirectory() as td:
+        absent = Path(td) / "absent.log"
+        tail = playtest_log.LogTail(absent, from_end=True)
+        assert tail.poll() == "", "missing log must poll empty"
+        absent.write_text("[7dtd-playtest] PASS s/c ok\n", encoding="utf-8")
+        assert "PASS s/c ok" in tail.poll(), "append after missing-start was lost"
+    print("PASS logtail_from_end pre-existing bytes skipped, appends still read")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -554,6 +579,7 @@ def main() -> int:
     test_incremental_scan_matches_whole_parse()
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
+    test_log_tail_from_end_starts_at_current_size()
     print("RESULT PASS")
     return 0
 

@@ -79,6 +79,25 @@ def test_loadgen_structured_events_and_expectations() -> None:
         )
         assert len(failures) == 2 and "CVar protection" in failures[0]
         assert "buff protected" in failures[1]
+
+        # Every rejection path must surface as a named failure instead of a
+        # silent pass: no joined event, unparseable expectation text, and
+        # positive/equality expectations against missing state.
+        assert playtest_run.loadgen_expectation_failures([], [], []) == [
+            "no structured joined event"
+        ]
+        rejected = playtest_run.loadgen_expectation_failures(
+            events,
+            ["protection=abc"],
+            ["protected=maybe"],
+            ["missing_cvar"],
+            ["net=also_missing"],
+        )
+        assert len(rejected) == 4, f"rejection paths drifted: {rejected}"
+        assert "invalid CVar expectation" in rejected[0], rejected
+        assert "invalid buff expectation" in rejected[1], rejected
+        assert "missing_cvar expected positive" in rejected[2], rejected
+        assert "net and also_missing expected equal" in rejected[3], rejected
         assert playtest_run.parse_cvar_value(
             "Player 171: protection = 1.25", "protection"
         ) == 1.25
@@ -110,6 +129,39 @@ def test_loadgen_structured_events_and_expectations() -> None:
         assert playtest_run.server_cvar_oracle_failures(
             DriftOracle("127.0.0.1", 1, ""), 171, ["net"], latest, 0.05
         ) == []
+
+        # Rejection direction: the oracle decides mp-suite verdicts, so an
+        # implementation that stopped consulting the server or comparing
+        # values would otherwise stay green here forever.
+        class BeyondToleranceOracle(Oracle):
+            def get_cvar(
+                self, name: str, entity_id: int, timeout: float = 8.0
+            ) -> float | None:
+                return 4.5
+
+        drift = playtest_run.server_cvar_oracle_failures(
+            BeyondToleranceOracle("127.0.0.1", 1, ""), 171, ["raw", "net"], latest, 0.05
+        )
+        assert len(drift) == 2 and "CVar raw" in drift[0], f"drift missed: {drift}"
+        assert "expected peer value" in drift[0] and "4.5" in drift[0], drift
+
+        class DeadOracle(Oracle):
+            def get_cvar(
+                self, name: str, entity_id: int, timeout: float = 8.0
+            ) -> float | None:
+                return None
+
+        dead = playtest_run.server_cvar_oracle_failures(
+            DeadOracle("127.0.0.1", 1, ""), 171, ["net"], latest
+        )
+        assert len(dead) == 1 and "observed None" in dead[0], f"None not flagged: {dead}"
+
+        # A name with no peer state event has nothing to compare against and
+        # must fail, not silently pass.
+        unobserved = playtest_run.server_cvar_oracle_failures(
+            Oracle("127.0.0.1", 1, ""), 171, ["never_reported"], latest
+        )
+        assert len(unobserved) == 1 and "never_reported" in unobserved[0], unobserved
 
 
 def test_loadgen_observer_wiring_is_generic() -> None:
@@ -1001,7 +1053,6 @@ def test_resolve_telnet_password_paths() -> None:
     )
     assert len(set(generated)) == 2, "generated secrets must differ per call"
     for pw in generated:
-        assert playtest_run.safe_barrier_param(pw.replace("-", "_")) or True
         # Command-safe alphabet (token_urlsafe): survives the generated XML
         # attribute and the telnet wire unescaped.
         assert re.fullmatch(r"[A-Za-z0-9_-]{10,40}", pw), f"bad shape: {pw!r}"
