@@ -147,6 +147,8 @@ unchanged.
 
 ### Fixed
 
+- Server CVar oracle parsing accepts stock's live
+  `name: True. Value: <number>` result format.
 - The server CVar oracle now keeps its telnet session open until the stock
   command returns the requested value, instead of closing after the earlier
   command echo on a busy dedicated server.
