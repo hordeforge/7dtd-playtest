@@ -2490,9 +2490,10 @@ def main(argv: list[str] | None = None) -> int:
             player ids listed yet" retry from the connect-failure retry.
             """
             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-            connected = tn.connect()
-            moved = tn.teleport_players_to(*coords) if connected else 0
-            if connected:
+            try:
+                connected = tn.connect()
+                moved = tn.teleport_players_to(*coords) if connected else 0
+            finally:
                 tn.close()
             return moved, connected
 
@@ -2690,41 +2691,43 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     if rejoin_setup_seen > barrier_counts["rejoin_setup_done"]:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-                        if tn.connect():
-                            n = 1
-                            if not provider_rejoin:
-                                # Re-tele pad once more so last write before disconnect is pad pos.
-                                n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
-                            if n == 0:
-                                warn(
-                                    f"{rejoin_setup_barrier}: no player ids; "
-                                    "retry next poll"
-                                )
-                                tn.close()
-                            else:
-                                time.sleep(1.5)
-                                for cmd in ("saveworld", "sa"):
-                                    r = tn.exec(cmd)
-                                    log(f"telnet {cmd} → {r[:100]!r}")
-                                time.sleep(2.0)
-                                r = tn.exec("saveworld")
-                                log(f"telnet saveworld (settle) → {r[:100]!r}")
-                                # The fire is marked once either way (retrying
-                                # the save every poll would spam), but a
-                                # session that died mid-save must say so: the
-                                # rejoin verify would otherwise load pre-setup
-                                # state with nothing in the transcript naming
-                                # why.
-                                if not tn.connected():
-                                    warn(
-                                        f"{rejoin_setup_barrier}: telnet session "
-                                        "died during save; setup state may not "
-                                        "be durable"
-                                    )
-                                tn.close()
-                                barrier_counts["rejoin_setup_done"] = rejoin_setup_seen
-                        else:
+                        if not tn.connect():
                             warn(f"{rejoin_setup_barrier}: telnet connect fail; retry")
+                        else:
+                            try:
+                                n = 1
+                                if not provider_rejoin:
+                                    # Re-tele pad once more so the last write
+                                    # before disconnect is the pad position.
+                                    n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
+                                if n == 0:
+                                    warn(
+                                        f"{rejoin_setup_barrier}: no player ids; "
+                                        "retry next poll"
+                                    )
+                                else:
+                                    time.sleep(1.5)
+                                    for cmd in ("saveworld", "sa"):
+                                        r = tn.exec(cmd)
+                                        log(f"telnet {cmd} → {r[:100]!r}")
+                                    time.sleep(2.0)
+                                    r = tn.exec("saveworld")
+                                    log(f"telnet saveworld (settle) → {r[:100]!r}")
+                                    # The fire is marked once either way (retrying
+                                    # the save every poll would spam), but a
+                                    # session that died mid-save must say so: the
+                                    # rejoin verify would otherwise load pre-setup
+                                    # state with nothing in the transcript naming
+                                    # why.
+                                    if not tn.connected():
+                                        warn(
+                                            f"{rejoin_setup_barrier}: telnet session "
+                                            "died during save; setup state may not "
+                                            "be durable"
+                                        )
+                                    barrier_counts["rejoin_setup_done"] = rejoin_setup_seen
+                            finally:
+                                tn.close()
                     setup_parsed = client_scan.result()
                     if setup_parsed.get("done") is not None:
                         log(
@@ -2788,26 +2791,28 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
 
             tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
-            if tn.connect():
-                # Persist needs the pad as the last player state; providers retain
-                # the position their setup case actually established.
-                if not provider_rejoin:
-                    tn.teleport_players_to(*PERSIST_PAD_XYZ)
-                time.sleep(1.5)
-                r = tn.exec("saveworld")
-                log(f"telnet saveworld (post-setup) → {r[:100]!r}")
-                time.sleep(2.0)
-                tn.exec("sa")
-                time.sleep(1.0)
-                tn.exec("kickall")
-                tn.close()
-            else:
+            if not tn.connect():
                 # Silent would look like a clean save when nothing was saved;
                 # say why the setup state may not be durable before teardown.
                 warn(
                     f"{rejoin_label}: post-setup saveworld/kickall skipped "
                     "(telnet connect fail)"
                 )
+            else:
+                try:
+                    # Persist needs the pad as the last player state; providers retain
+                    # the position their setup case actually established.
+                    if not provider_rejoin:
+                        tn.teleport_players_to(*PERSIST_PAD_XYZ)
+                    time.sleep(1.5)
+                    r = tn.exec("saveworld")
+                    log(f"telnet saveworld (post-setup) → {r[:100]!r}")
+                    time.sleep(2.0)
+                    tn.exec("sa")
+                    time.sleep(1.0)
+                    tn.exec("kickall")
+                finally:
+                    tn.close()
             time.sleep(4)
             stop_proc(client_proc)
             client_proc = None
@@ -2885,10 +2890,12 @@ def main(argv: list[str] | None = None) -> int:
                     if want_fixtures and not cleaned_ai:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
-                            tn.clear_ai()
-                            # Do NOT enable dm/god here: finale player_death_screen needs
-                            # a real kill, and god mode blocked telnet kill entirely.
-                            tn.close()
+                            try:
+                                tn.clear_ai()
+                            finally:
+                                # Do NOT enable dm/god here: finale player_death_screen needs
+                                # a real kill, and god mode blocked telnet kill entirely.
+                                tn.close()
                         else:
                             warn("post-ready clear_ai: telnet connect fail")
                         cleaned_ai = True
@@ -3027,15 +3034,19 @@ def main(argv: list[str] | None = None) -> int:
                     if joined_entity is not None:
                         tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                         if tn.connect():
-                            x, y, z = args.loadgen_teleport
-                            response = tn.exec(f"teleportplayer {joined_entity} {x:g} {y:g} {z:g}")
-                            # A broken session returns "" exactly like a silent
-                            # success; trust the teleport only when the socket
-                            # survived the exchange (exec closes it on failure),
-                            # so it retries next poll instead of being recorded
-                            # as done for an entity that never moved.
-                            survived = tn.connected()
-                            tn.close()
+                            try:
+                                x, y, z = args.loadgen_teleport
+                                response = tn.exec(
+                                    f"teleportplayer {joined_entity} {x:g} {y:g} {z:g}"
+                                )
+                                # A broken session returns "" exactly like a silent
+                                # success; trust the teleport only when the socket
+                                # survived the exchange (exec closes it on failure),
+                                # so it retries next poll instead of being recorded
+                                # as done for an entity that never moved.
+                                survived = tn.connected()
+                            finally:
+                                tn.close()
                             if survived:
                                 loadgen_teleported_entity = joined_entity
                                 log(
@@ -3082,15 +3093,17 @@ def main(argv: list[str] | None = None) -> int:
                     if not tn.connect():
                         warn(f"chat_echo:{token} telnet connect fail; retry")
                         continue
-                    for cmd in (f"say {token}", f'say "{token}"'):
-                        r = tn.exec(cmd)
-                        log(f"telnet {cmd} → {r[:100]!r}")
-                    # Same trust rule as spawn_near_players: a session that
-                    # died mid-exchange returns "" exactly like silence. Not
-                    # counting the fire leaves it visibly unserviced in the
-                    # report instead of a green count over an unsent say.
-                    survived = tn.connected()
-                    tn.close()
+                    try:
+                        for cmd in (f"say {token}", f'say "{token}"'):
+                            r = tn.exec(cmd)
+                            log(f"telnet {cmd} → {r[:100]!r}")
+                        # Same trust rule as spawn_near_players: a session that
+                        # died mid-exchange returns "" exactly like silence. Not
+                        # counting the fire leaves it visibly unserviced in the
+                        # report instead of a green count over an unsent say.
+                        survived = tn.connected()
+                    finally:
+                        tn.close()
                     if not survived:
                         warn(f"chat_echo:{token}: telnet session died during say")
                         continue
@@ -3384,18 +3397,22 @@ def main(argv: list[str] | None = None) -> int:
                 if args.loadgen_server_cvar_oracle and observer_entity is not None:
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     if tn.connect():
-                        observer_failures.extend(
-                            server_cvar_oracle_failures(
-                                tn,
-                                observer_entity,
-                                args.loadgen_observe_cvar,
-                                observer_latest,
-                                args.loadgen_server_cvar_tolerance,
+                        try:
+                            observer_failures.extend(
+                                server_cvar_oracle_failures(
+                                    tn,
+                                    observer_entity,
+                                    args.loadgen_observe_cvar,
+                                    observer_latest,
+                                    args.loadgen_server_cvar_tolerance,
+                                )
                             )
-                        )
-                        tn.close()
+                        finally:
+                            tn.close()
                     else:
-                        observer_failures.append("server CVar oracle telnet connect failed")
+                        observer_failures.append(
+                            "server CVar oracle telnet connect failed"
+                        )
                 if args.loadgen_teleport is not None and loadgen_teleported_entity is None:
                     observer_failures.append("joined loadgen entity was never teleported")
                 if loadgen_proc is None or loadgen_proc.poll() is not None:
