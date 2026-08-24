@@ -913,6 +913,38 @@ def test_write_stock_config_activates_commented_userdata_folder() -> None:
     print("PASS stock_config_userdata_folder commented form activated, stale value rewritten")
 
 
+def test_write_stock_config_unreadable_template_names_the_file() -> None:
+    """A template that exists but cannot be decoded (UTF-16 editor save) or
+    read (permissions) must raise a named error carrying the path and cause,
+    not a bare UnicodeDecodeError/OSError traceback after --fresh-save."""
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        src_cfg = tdp / "serverconfig.xml"
+        # UTF-16-encoded bytes are not valid UTF-8: read_text raises
+        # UnicodeDecodeError, the realistic user-edit failure shape.
+        src_cfg.write_bytes(
+            "<ServerSettings/>\n".encode("utf-16")
+        )
+        try:
+            playtest_run.write_stock_config(
+                src_cfg,
+                tdp / "out" / "serverconfig_playtest.xml",
+                tdp / "userdata",
+                world_name="Navezgane",
+                game_name="PlaytestNav",
+                port=26900,
+                telnet_port=8081,
+                telnet_password="pw",
+            )
+        except RuntimeError as ex:
+            assert str(src_cfg) in str(ex), f"path missing from error: {ex}"
+            assert "cannot read serverconfig template" in str(ex)
+        except Exception as ex:
+            raise AssertionError(f"wrong error type: {type(ex).__name__}: {ex}") from ex
+        else:
+            raise AssertionError("undecodable template accepted silently")
+
+
 def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
     """A signal-driven SystemExit escaping after the claim was published must
     not leave it standing: main() has not set lock_held yet, so its finally
@@ -1029,6 +1061,10 @@ def main() -> int:
         (
             "stock_config_userdata_folder",
             test_write_stock_config_activates_commented_userdata_folder,
+        ),
+        (
+            "stock_config_unreadable_template",
+            test_write_stock_config_unreadable_template_names_the_file,
         ),
         (
             "acquire_exclusive_lock_undo",

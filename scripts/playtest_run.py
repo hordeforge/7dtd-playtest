@@ -342,7 +342,15 @@ def write_stock_config(
     telnet_port: int,
     telnet_password: str,
 ) -> None:
-    text = src_cfg.read_text(encoding="utf-8")
+    try:
+        text = src_cfg.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as ex:
+        # A user-edited template can be non-UTF-8 or unreadable; name it and
+        # the reason here instead of a bare decode/OSError traceback after
+        # the save wipe already ran.
+        raise RuntimeError(
+            f"cannot read serverconfig template {src_cfg}: {ex}"
+        ) from ex
     ud = str(userdata.resolve())
     # Values land inside double-quoted XML attributes; a quote or ampersand in
     # any of them would corrupt the property or smuggle extra ones into the
@@ -2723,21 +2731,28 @@ def main(argv: list[str] | None = None) -> int:
             if args.client_log.is_file():
                 # One split shared by every key grep: a failed run's client log
                 # can reach tens of MB, and re-splitting per key multiplies it.
-                cl_lines = args.client_log.read_text(
-                    encoding="utf-8", errors="replace"
-                ).splitlines()
-                for key in (
-                    "7dtd-playtest",
-                    "7dtd-fastconnect",
-                    "InitMod",
-                    "Connect",
-                    "ERROR",
-                    "Exception",
-                ):
-                    hits = [ln for ln in cl_lines if key in ln]
-                    if hits:
-                        shown = [scrub(ln)[-160:] for ln in hits[-3:]]
-                        err(f"client log '{key}' ({len(hits)}): {shown}")
+                try:
+                    cl_lines = args.client_log.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()
+                except OSError as ex:
+                    # The report/junit above are already written; a log that
+                    # vanished (rotation, EIO) must not turn the structured
+                    # verdict echo into a raw traceback.
+                    warn(f"could not re-read client log for greps: {ex}")
+                else:
+                    for key in (
+                        "7dtd-playtest",
+                        "7dtd-fastconnect",
+                        "InitMod",
+                        "Connect",
+                        "ERROR",
+                        "Exception",
+                    ):
+                        hits = [ln for ln in cl_lines if key in ln]
+                        if hits:
+                            shown = [scrub(ln)[-160:] for ln in hits[-3:]]
+                            err(f"client log '{key}' ({len(hits)}): {shown}")
             exit_code = 2
         else:
             if summary:

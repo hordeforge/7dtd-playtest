@@ -19,6 +19,7 @@ Exit codes:
   1  no playtest result lines found on either side
   2  a side has no input (side never ran, logs wiped, or a bad path)
   3  inputs older than --require-fresh-minutes
+  4  comparison outputs could not be written
 """
 
 from __future__ import annotations
@@ -90,8 +91,15 @@ def newest_report(d: Path) -> Path | None:
     if d.is_file():
         return d
     # Name as tie-break: equal mtimes must not let readdir order decide
-    # which run's evidence gets diffed.
-    cands = sorted(d.glob("report-*.json"), key=lambda p: (p.stat().st_mtime, p.name))
+    # which run's evidence gets diffed. A report removed between glob and
+    # stat sorts as oldest instead of crashing the whole comparison.
+    def mtime(p: Path) -> tuple[float, str]:
+        try:
+            return (p.stat().st_mtime, p.name)
+        except OSError:
+            return (float("-inf"), p.name)
+
+    cands = sorted(d.glob("report-*.json"), key=mtime)
     return cands[-1] if cands else None
 
 
@@ -251,10 +259,19 @@ def main() -> int:
                  "divergence. Known divergences are recorded in "
                  "zdtd-server/docs/PROVENANCE.md (divergence register).*")
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "playtest-compare.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (args.out / "playtest-compare.json").write_text(
-        json.dumps(payload, indent=1, sort_keys=True), encoding="utf-8")
+    try:
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / "playtest-compare.md").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8")
+        (args.out / "playtest-compare.json").write_text(
+            json.dumps(payload, indent=1, sort_keys=True), encoding="utf-8")
+    except OSError as ex:
+        # An unwritable --out must not fall through to a traceback with
+        # Python's default exit 1, which this CLI documents as "no playtest
+        # result lines found". Name the destination and exit 4 instead.
+        print(f"ERROR: cannot write comparison outputs under {args.out}: {ex}",
+              file=sys.stderr)
+        return 4
     print("\n".join(lines))
     return 0
 

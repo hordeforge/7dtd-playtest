@@ -194,6 +194,22 @@ def test_stale_report_refuses_diff(tmp_path: Path) -> None:
     assert not (out / "playtest-compare.json").exists()
 
 
+def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
+    """An unwritable --out must fail with its own exit code (4) naming the
+    destination, never a traceback with Python's default exit 1 (documented
+    as 'no playtest result lines found')."""
+    s = tmp_path / "stock.log"
+    z = tmp_path / "zdtd.log"
+    s.write_text(STOCK_LOG, encoding="utf-8")
+    z.write_text(ZDTD_LOG, encoding="utf-8")
+    blocked = tmp_path / "occupied"  # a file where the out dir should be
+    blocked.write_text("x", encoding="utf-8")
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(blocked))
+    assert r.returncode == 4, r.stderr
+    assert "cannot write comparison outputs" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
 def test_ran_at_surfaces_in_report(tmp_path: Path) -> None:
     """Fresh report JSONs carry ranAtUtc; the md shows a ran (UTC) row so a
     reader can tell when each side actually ran."""
