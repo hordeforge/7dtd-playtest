@@ -407,7 +407,22 @@ External suites that need the same host phases should:
 - Run `make playtest-mp` / loadgen attach first, then arm your suite while peers
   remain (host composition). Cross-client terrain assertions stay real
   multi-client work (Human-Runtime / two clients); the harness does not fake
-  other players.
+other players.
+
+For a headless replication assertion, add exact state filters and expectations
+to the same run. The host reads loadgen's `7dtd.loadgen.event.v1` JSON Lines,
+retains the entity ID from its structured `joined` event, teleports that exact
+entity, and fails the run when the observer exits or the final filtered state
+does not match. CVar comparisons use a `0.0001` tolerance; buff expectations
+accept `true` or `false`.
+
+```bash
+make playtest SUITE=your_suite EXTRA_ARGS="--host-fixtures --loadgen-observe-cvar protection --loadgen-observe-buff protected --loadgen-expect-cvar protection=1 --loadgen-expect-buff protected=true --loadgen-teleport 520 62 950"
+```
+
+The provider emits `Report.Barrier("spawn_loadgen_peer")` before it needs the
+peer. Ordinary loadgen barriers remain unchanged and quiet when no observer
+options are supplied.
 
 For one passive **stock** peer, provide both a distinct Local-platform player
 name and an already initialized, separate Proton compat profile. The runner

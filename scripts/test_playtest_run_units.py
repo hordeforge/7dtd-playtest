@@ -57,6 +57,42 @@ GATED_BARRIERS = frozenset(
 )
 
 
+def test_loadgen_structured_events_and_expectations() -> None:
+    with tempfile.TemporaryDirectory(prefix="playtest-loadgen-events-") as td:
+        path = Path(td) / "events.jsonl"
+        path.write_text(
+            "not json\n"
+            '{"schema":"7dtd.loadgen.event.v1","type":"joined","botId":1,"entityId":171}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,"kind":"cvar","name":"protection","value":1}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,"kind":"buff","name":"protected","active":true}\n',
+            encoding="utf-8",
+        )
+        events = playtest_run.read_loadgen_events(path)
+        assert playtest_run.loadgen_joined_entity(events) == 171
+        assert playtest_run.loadgen_expectation_failures(
+            events, ["protection=1"], ["protected=true"]
+        ) == []
+        failures = playtest_run.loadgen_expectation_failures(
+            events, ["protection=0.5"], ["protected=false"]
+        )
+        assert len(failures) == 2 and "CVar protection" in failures[0]
+        assert "buff protected" in failures[1]
+
+
+def test_loadgen_observer_wiring_is_generic() -> None:
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    for flag in (
+        "--loadgen-observe-cvar",
+        "--loadgen-observe-buff",
+        "--loadgen-expect-cvar",
+        "--loadgen-expect-buff",
+        "--loadgen-teleport",
+    ):
+        assert flag in source
+    assert "loadgen_joined_entity(read_loadgen_events(loadgen_events_path))" in source
+    assert "teleportplayer {joined_entity}" in source
+
+
 def test_fresh_save_removes_only_named_game_saves() -> None:
     """Layout UserData/Saves/<World>/<GameName>: every world's copy of the
     named game must go; sibling saves, stray files, and other worlds stay."""
@@ -1203,6 +1239,8 @@ def test_acquire_exclusive_lock_refusal_leaves_foreign_record() -> None:
 def main() -> int:
     failures = 0
     for name, fn in (
+        ("loadgen_events", test_loadgen_structured_events_and_expectations),
+        ("loadgen_observer_wiring", test_loadgen_observer_wiring_is_generic),
         ("fresh_save_named_only", test_fresh_save_removes_only_named_game_saves),
         ("fresh_save_no_saves_dir", test_fresh_save_without_saves_dir_is_noop),
         ("fresh_save_quarantine", test_fresh_save_quarantines_named_saves_recoverably),

@@ -832,6 +832,9 @@ def start_loadgen(
     count: int,
     timeout_ms: int,
     log_path: Path,
+    events_path: Path | None = None,
+    observe_cvars: list[str] | None = None,
+    observe_buffs: list[str] | None = None,
 ) -> subprocess.Popen | None:
     """Join LiteNet bots (port = ServerPort+2)."""
     exe = ensure_loadgen_built()
@@ -854,8 +857,84 @@ def start_loadgen(
         "--min-pass-rate",
         "0.0",
     ]
+    if events_path is not None:
+        cmd.extend(["--events-jsonl", str(events_path)])
+        for name in observe_cvars or []:
+            cmd.extend(["--observe-cvar", name])
+        for name in observe_buffs or []:
+            cmd.extend(["--observe-buff", name])
     log(f"start loadgen count={count} litenet={litenet} timeout_ms={timeout_ms}")
     return _popen_to_logfile(cmd, log_path, cwd=str(LOADGEN))
+
+
+def read_loadgen_events(path: Path) -> list[dict]:
+    """Read complete valid loadgen JSON-lines events; tolerate a growing tail."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    events: list[dict] = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(event, dict) and event.get("schema") == "7dtd.loadgen.event.v1":
+            events.append(event)
+    return events
+
+
+def loadgen_joined_entity(events: list[dict]) -> int | None:
+    """Return the newest positive entity id from a structured joined event."""
+    for event in reversed(events):
+        if event.get("type") != "joined":
+            continue
+        entity_id = event.get("entityId")
+        if isinstance(entity_id, int) and entity_id > 0:
+            return entity_id
+    return None
+
+
+def loadgen_expectation_failures(
+    events: list[dict], cvars: list[str], buffs: list[str]
+) -> list[str]:
+    """Compare NAME=VALUE expectations with the joined bot's latest state."""
+    entity_id = loadgen_joined_entity(events)
+    if entity_id is None:
+        return ["no structured joined event"]
+    latest: dict[tuple[str, str], dict] = {}
+    for event in events:
+        if event.get("type") == "state" and event.get("entityId") == entity_id:
+            kind, name = event.get("kind"), event.get("name")
+            if isinstance(kind, str) and isinstance(name, str):
+                latest[(kind, name)] = event
+    failures: list[str] = []
+    for raw in cvars:
+        try:
+            name, expected_text = raw.rsplit("=", 1)
+            expected = float(expected_text)
+        except (ValueError, TypeError):
+            failures.append(f"invalid CVar expectation {raw!r}")
+            continue
+        state_event = latest.get(("cvar", name))
+        value = state_event.get("value") if state_event else None
+        if not isinstance(value, (int, float)) or abs(float(value) - expected) > 0.0001:
+            failures.append(f"CVar {name} expected {expected:g}, observed {value!r}")
+    for raw in buffs:
+        try:
+            name, expected_text = raw.rsplit("=", 1)
+        except ValueError:
+            failures.append(f"invalid buff expectation {raw!r}")
+            continue
+        expected = expected_text.lower() in ("1", "true", "yes", "on")
+        if expected_text.lower() not in ("0", "false", "no", "off", "1", "true", "yes", "on"):
+            failures.append(f"invalid buff expectation {raw!r}")
+            continue
+        state_event = latest.get(("buff", name))
+        active = state_event.get("active") if state_event else None
+        if not isinstance(active, bool) or active != expected:
+            failures.append(f"buff {name} expected active={expected}, observed {active!r}")
+    return failures
 
 
 def write_zdtd_apm_dump(
@@ -1919,6 +1998,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="service host barriers emitted by an external provider suite",
     )
+    ap.add_argument("--loadgen-observe-cvar", action="append", default=[], metavar="NAME")
+    ap.add_argument("--loadgen-observe-buff", action="append", default=[], metavar="NAME")
+    ap.add_argument("--loadgen-expect-cvar", action="append", default=[], metavar="NAME=VALUE")
+    ap.add_argument("--loadgen-expect-buff", action="append", default=[], metavar="NAME=BOOL")
+    ap.add_argument(
+        "--loadgen-teleport",
+        type=float,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        default=None,
+        help="teleport the exact entity from loadgen's structured joined event",
+    )
     ap.add_argument(
         "--fresh-save",
         action="store_true",
@@ -1936,6 +2027,17 @@ def main(argv: list[str] | None = None) -> int:
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
     args = ap.parse_args(argv)
+    loadgen_observer_requested = bool(
+        args.loadgen_observe_cvar
+        or args.loadgen_observe_buff
+        or args.loadgen_expect_cvar
+        or args.loadgen_expect_buff
+        or args.loadgen_teleport
+    )
+    if (args.loadgen_expect_cvar or args.loadgen_expect_buff) and not (
+        args.loadgen_observe_cvar or args.loadgen_observe_buff
+    ):
+        ap.error("loadgen expectations require matching observe options")
     peer_client_name = args.peer_client_name.strip()
     peer_client_suite = args.peer_client_suite.strip()
     if bool(peer_client_name) != bool(args.peer_client_compat):
@@ -2036,6 +2138,8 @@ def main(argv: list[str] | None = None) -> int:
     client_proc = None
     peer_client_proc = None
     loadgen_proc = None
+    loadgen_events_path = args.logdir / "loadgen_events.jsonl"
+    loadgen_teleported_entity: int | None = None
     exit_code = 2
     parsed: dict = {}
     summary: dict | None = None
@@ -2628,11 +2732,32 @@ def main(argv: list[str] | None = None) -> int:
                         count=1,
                         timeout_ms=120_000,
                         log_path=args.logdir / "loadgen_peer.log",
+                        events_path=(loadgen_events_path if loadgen_observer_requested else None),
+                        observe_cvars=args.loadgen_observe_cvar,
+                        observe_buffs=args.loadgen_observe_buff,
                     )
                     if loadgen_proc is None:
                         warn("loadgen peer start failed; will retry next poll")
                         break
                     barrier_counts["spawn_loadgen_peer"] += 1
+
+                if (
+                    loadgen_proc is not None
+                    and args.loadgen_teleport is not None
+                    and loadgen_teleported_entity is None
+                ):
+                    joined_entity = loadgen_joined_entity(read_loadgen_events(loadgen_events_path))
+                    if joined_entity is not None:
+                        tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
+                        if tn.connect():
+                            x, y, z = args.loadgen_teleport
+                            response = tn.exec(f"teleportplayer {joined_entity} {x:g} {y:g} {z:g}")
+                            tn.close()
+                            loadgen_teleported_entity = joined_entity
+                            log(
+                                f"loadgen teleport entity={joined_entity} -> "
+                                f"({x:g},{y:g},{z:g}) {response[:80]!r}"
+                            )
 
                 while (
                     barrier_counts["spawn_loadgen_bots"]
@@ -2940,6 +3065,24 @@ def main(argv: list[str] | None = None) -> int:
                 fails = 1
             if peer_summary:
                 fails += int(peer_summary["fail"])
+            if loadgen_observer_requested:
+                observer_failures = loadgen_expectation_failures(
+                    read_loadgen_events(loadgen_events_path),
+                    args.loadgen_expect_cvar,
+                    args.loadgen_expect_buff,
+                )
+                if args.loadgen_teleport is not None and loadgen_teleported_entity is None:
+                    observer_failures.append("joined loadgen entity was never teleported")
+                if loadgen_proc is None or loadgen_proc.poll() is not None:
+                    observer_failures.append(
+                        "loadgen observer process exited before suite completion"
+                    )
+                if observer_failures:
+                    for failure in observer_failures:
+                        err(f"loadgen observer: {failure}")
+                    fails += 1
+                else:
+                    log("loadgen observer expectations PASS")
             exit_code = 1 if fails > 0 else 0
 
         log(f"exit={exit_code}")
