@@ -5,6 +5,8 @@ Agent ownership: mark `[-] in progress: <agent>, YYYY-MM-DD` before editing;
 
 ## Backlog
 
+- [x] Reject echoed `cvar get ... -p <entity>` IDs in server-oracle value
+  parsing: done, 2026-08-24
 - [x] Rebuild loadgen when observer source is newer than its executable: done,
   2026-08-24
 - [x] Consume loadgen JSON-lines joined/state events for external provider
