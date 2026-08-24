@@ -590,23 +590,32 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// The wearer's rig as authoring reference: one line per bone, with its
-        /// parent and its local rest transform.
+        /// parent, its local position, and its <b>bind pose</b>.
         ///
         /// <para><see cref="RigBoneNames"/> gives the names a garment must bind
-        /// to, and names alone are not enough to author one. A skinned mesh
-        /// carries a bind pose, so an armature whose joints sit somewhere else
-        /// deforms wrongly even when every name matches. The rest pose is the
-        /// other half, and it is in the game's asset bundles for the same
-        /// reason the names are.</para>
+        /// to, and names alone cannot author one. A skinned mesh carries a bind
+        /// pose, so an armature whose joints sit somewhere else deforms wrongly
+        /// even when every name matches.</para>
         ///
-        /// <para>Local rather than world transforms, because that is what an
-        /// armature is built from and it does not move with the entity.
-        /// Ordered by name for the same reason the name list is sorted: this
-        /// gets copied into a document, and a report that reorders between runs
-        /// cannot be diffed against the next game build.</para>
+        /// <para>The bind pose comes from <c>sharedMesh.bindposes</c>, not from
+        /// the live transform. An earlier version of this method reported
+        /// <c>localRotation</c> and called it a rest transform: that is the
+        /// <i>animated</i> pose, whatever frame the wearer happened to be on,
+        /// and it changes between two runs of the same suite. Positions survive
+        /// that mistake because bone lengths do not animate; rotations do not.
+        /// The bind pose is the matrix the mesh was actually skinned against,
+        /// which is what an armature has to reproduce.</para>
+        ///
+        /// <para>Ordered by name: this gets copied into a document, and a
+        /// report that reorders between runs cannot be diffed against the next
+        /// game build.</para>
         ///
         /// <para>Format, one bone per line:
-        /// <c>name|parent|px,py,pz|rx,ry,rz,rw</c>, six decimals.</para>
+        /// <c>name|parent|localPos x,y,z|bindPos x,y,z|bindRot x,y,z,w</c>.
+        /// The bind columns are the inverse of the bind-pose matrix, i.e. the
+        /// bone's own transform at the moment the mesh was skinned. A bone with
+        /// no bind pose (it belongs to no renderer's mesh) reports empty bind
+        /// columns rather than being dropped.</para>
         /// </summary>
         public static List<string> RigPoseReport(EntityAlive entity)
         {
@@ -619,29 +628,52 @@ namespace ZdtdPlaytest
                 var seen = new HashSet<string>();
                 for (int i = 0; i < renderers.Length; i++)
                 {
-                    var bones = renderers[i] != null ? renderers[i].bones : null;
+                    var smr = renderers[i];
+                    var bones = smr != null ? smr.bones : null;
                     if (bones == null) continue;
+                    var mesh = smr.sharedMesh;
+                    var binds = mesh != null ? mesh.bindposes : null;
                     for (int b = 0; b < bones.Length; b++)
                     {
                         var bone = bones[b];
                         if (bone == null || !seen.Add(bone.name)) continue;
-                        var p = bone.localPosition;
-                        var r = bone.localRotation;
-                        string parent = bone.parent != null ? bone.parent.name : "";
-                        lines.Add(bone.name + "|" + parent + "|"
-                            + p.x.ToString("0.######", CultureInfo.InvariantCulture) + ","
-                            + p.y.ToString("0.######", CultureInfo.InvariantCulture) + ","
-                            + p.z.ToString("0.######", CultureInfo.InvariantCulture) + "|"
-                            + r.x.ToString("0.######", CultureInfo.InvariantCulture) + ","
-                            + r.y.ToString("0.######", CultureInfo.InvariantCulture) + ","
-                            + r.z.ToString("0.######", CultureInfo.InvariantCulture) + ","
-                            + r.w.ToString("0.######", CultureInfo.InvariantCulture));
+
+                        string bindPos = "";
+                        string bindRot = "";
+                        if (binds != null && b < binds.Length)
+                        {
+                            // bindposes holds the world-to-bone matrix, so the
+                            // bone's own bind transform is its inverse.
+                            var m = binds[b].inverse;
+                            bindPos = V3(m.GetColumn(3));
+                            var q = m.rotation;
+                            bindRot = F(q.x) + "," + F(q.y) + "," + F(q.z) + "," + F(q.w);
+                        }
+
+                        lines.Add(bone.name + "|"
+                            + (bone.parent != null ? bone.parent.name : "") + "|"
+                            + V3(bone.localPosition) + "|" + bindPos + "|" + bindRot);
                     }
                 }
             }
             catch { /* a partial rig is still worth reporting */ }
             lines.Sort(StringComparer.Ordinal);
             return lines;
+        }
+
+        static string F(float v)
+        {
+            return v.ToString("0.######", CultureInfo.InvariantCulture);
+        }
+
+        static string V3(Vector3 v)
+        {
+            return F(v.x) + "," + F(v.y) + "," + F(v.z);
+        }
+
+        static string V3(Vector4 v)
+        {
+            return F(v.x) + "," + F(v.y) + "," + F(v.z);
         }
 
         /// <summary>
