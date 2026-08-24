@@ -470,7 +470,8 @@ Host runners (including third-party) scrape **stable** prefixes and tokens:
 [7dtd-playtest] FAIL suite/case detail
 [7dtd-playtest] SKIP suite/case detail
 [7dtd-playtest] barrier name
-[7dtd-playtest] {"v":1,"t":"result|summary|done|log|barrier",…}
+[7dtd-playtest] scene staged name detail
+[7dtd-playtest] {"v":1,"t":"result|summary|done|log|barrier|staged",…}
 [7dtd-playtest] SUMMARY pass=N fail=M skip=K total=T wall_ms=…
 [7dtd-playtest] DONE exit_hint=0|1
 ```
@@ -479,6 +480,51 @@ Legacy log prefix `[zdtd-playtest]` may appear in older builds; new code emits
 `[7dtd-playtest]` only. JSON `t` values and human `PASS|FAIL|SKIP` /
 `SUMMARY` / `DONE` / `barrier` tokens are part of the contract. Optional host
 reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
+
+### Visual confirmation: what a suite cannot tell you
+
+**A suite proves data, never appearance.** Cases read loaded items, tags,
+progression rows, buffs and server-written CVars. Nothing in this harness looks
+at the screen, so a green run says the data is right and says nothing at all
+about whether a model, an icon, a UI row or an effect *looks* right.
+
+Two things follow, and both have been mistaken for faults:
+
+- **The client is only up for as long as the cases take.** A data-only suite is
+  mostly world load: a five-case suite can finish its cases in under two
+  seconds of a seventy-second run, and the client is torn down the moment
+  `DONE` is written. Someone watching the screen sees a window appear, sit on a
+  loading screen, and vanish. That is the runner working, not failing — but it
+  is also not evidence of anything visual.
+- **Do not report a green suite as visual confirmation,** and do not tell
+  someone who watched the screen what they saw. The log cannot answer whether a
+  window appeared or what was in it.
+
+#### The supported path
+
+Anything a person has to judge by eye needs a **staged frame**: a case that
+puts the scene on screen, holds it still, and announces itself so an external
+screenshot loop can photograph it.
+
+1. In the staging case, call `Report.Staged("<scene id>", "<context>")` as the
+   **first** thing it does, before the hold.
+2. Hold the scene for long enough to be photographed (ten seconds is the
+   convention).
+3. Assert only that the scene really is staged — the items were given, the
+   window opened, the camera arrived. Never assert how it looks.
+4. Point a screenshot loop at the client window, keyed on `scene staged`.
+
+`Report.Staged` exists because `ctx.Detail` does not work for this: a case's
+detail is flushed **with its result**, which is after the hold, so a loop
+waiting on the result photographs whatever came next — usually the disconnect
+dialog. Providers each worked around that with their own bespoke `Report.Info`
+wording, which meant every screenshot loop grepped a different sentence. The
+marker is now spelled once, here, and is part of the log contract above.
+
+A staging suite is a **fixture, not a proof**. Its assertions establish that
+there was something to photograph; the verdict on the frame belongs to a
+person, and should be tracked as such wherever that project records human
+sign-off.
 
 ### Which client install a run uses
 

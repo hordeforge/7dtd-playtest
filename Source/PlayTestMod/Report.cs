@@ -42,6 +42,39 @@ namespace ZdtdPlaytest
             EmitJson("barrier", "\"name\":" + JsonString(name));
         }
 
+        /// <summary>
+        /// Announces that a scene is on screen <b>now</b>, for an external
+        /// screenshot loop to key on.
+        ///
+        /// <para>A suite proves data: loaded items, tags, progression rows,
+        /// server-written CVars. None of it looks at anything, so anything a
+        /// person has to judge by eye needs a frame, and a frame needs to be
+        /// taken while the scene is actually up.</para>
+        ///
+        /// <para><see cref="Result"/> is no good for that. A case's detail text
+        /// is flushed with its result — after the hold, which is typically tens
+        /// of seconds after the camera moved — so a screenshot loop waiting for
+        /// the result photographs whatever came next, usually the disconnect
+        /// dialog. Providers worked around it by emitting a bespoke
+        /// <see cref="Info"/> line and grepping their own wording, which every
+        /// provider then spelled differently. This is that marker, spelled once:
+        /// emit it as the first thing a staging case does, hold the scene, and
+        /// let the screenshot loop wait for <c>scene staged</c>.</para>
+        ///
+        /// <para>It says a scene was <i>staged</i>, never that it looked right.
+        /// Judging the frame is a person's job.</para>
+        /// </summary>
+        /// <param name="name">Scene id, stable across runs (e.g. <c>cbrn_suit</c>).</param>
+        /// <param name="detail">Optional context for the human reading the frame.</param>
+        public static void Staged(string name, string detail = null)
+        {
+            Log.Out("[7dtd-playtest] scene staged " + name
+                + (string.IsNullOrEmpty(detail) ? "" : " " + detail));
+            EmitJson("staged",
+                "\"name\":" + JsonString(name)
+                + ",\"detail\":" + JsonString(detail ?? ""));
+        }
+
         public static void Result(string suite, string caseId, string status, float ms, string detail)
         {
             status = (status ?? "fail").ToLowerInvariant();
