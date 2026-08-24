@@ -536,8 +536,13 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 ```
 
    Staging the game's own interface? Use `Helpers.OpenWindowGroup(player,
-   "<group>")`, which returns whether the group really ended up open, and put
-   `Helpers.OpenWindowNames(player)` in the detail. `GUIWindowManager.Open`
+   "<group>")`, which returns whether the **name is known** — the request was
+   accepted — and verify with `Helpers.OpenWindowNames(player)` from a later
+   tick, never in the same call. `Open` queues into `windowsToOpen` and the
+   manager drains it on a later `Update`: a window trace on the installed
+   build put the game's own `toolbelt` on screen 1.7 s after the call that
+   asked for it, so an immediate `IsWindowOpen` is always false and any helper
+   claiming otherwise is lying. `GUIWindowManager.Open`
    resolves an unknown name with only a log warning and does not open within
    the same call, so those two are the difference between "wrong name" and
    "opened, still not drawn".
