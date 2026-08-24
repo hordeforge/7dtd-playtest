@@ -172,7 +172,8 @@ namespace ZdtdPlaytest
             float holdSeconds = 10f,
             string fail = null,
             float pause = 0.5f,
-            Action<CaseCtx, float> onHold = null)
+            Action<CaseCtx, float> onHold = null,
+            int captureSuperSize = 2)
         {
             if (stage == null)
                 throw new ArgumentException(
@@ -210,6 +211,17 @@ namespace ZdtdPlaytest
                     {
                         try { onHold(ctx, Mathf.Clamp01(elapsed / holdSeconds)); }
                         catch (Exception e) { Log.Warning("[7dtd-playtest] staged hold callback threw: " + e.Message); }
+                    }
+                    // Photograph the held scene from inside the game, once, a
+                    // little way into the hold so the frame is settled. This is
+                    // the whole point of staging: an external desktop grab is
+                    // unsound on a host running more than one client, because it
+                    // photographs whatever is in front - which has meant another
+                    // session's client more than once.
+                    if (ctx.IntA == 1 && ctx.IntB == 0 && elapsed >= Mathf.Min(1f, holdSeconds * 0.25f))
+                    {
+                        ctx.IntB = 1;
+                        Helpers.CaptureFrame(id, captureSuperSize);
                     }
                     return elapsed >= holdSeconds;
                 },

@@ -1897,5 +1897,58 @@ namespace ZdtdPlaytest
                 return false;
             }
         }
+        /// <summary>
+        /// Photograph this client's own framebuffer, from inside the game.
+        /// </summary>
+        /// <remarks>
+        /// <para>An external screen grab of a game window is unreliable and, on a
+        /// host running more than one client, unsound: the window may be
+        /// unfocused, occluded or not mapped, and a desktop capture photographs
+        /// whatever is in front — which has repeatedly meant *another session's*
+        /// client. A frame taken here is this process's own rendering, so it
+        /// cannot be somebody else's run.</para>
+        /// <para><paramref name="superSize"/> multiplies the resolution, which is
+        /// how a staged frame becomes readable evidence rather than a thumbnail:
+        /// 2 gives four times the pixels. Unity writes the file at the end of the
+        /// frame, so the path is logged rather than returned open.</para>
+        /// <para>Returns the path it asked Unity to write, or null when there is
+        /// no home directory to write into.</para>
+        /// </remarks>
+        public static string CaptureFrame(string name, int superSize = 2)
+        {
+            if (string.IsNullOrEmpty(name)) name = "frame";
+            if (superSize < 1) superSize = 1;
+            // Same profile derivation the connect mod uses: resolves to the
+            // Proton user directory under wine and stays valid natively.
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(profile)) return null;
+            string dir = System.IO.Path.Combine(profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots");
+            try { System.IO.Directory.CreateDirectory(dir); }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] cannot create " + dir + ": " + e.Message);
+                return null;
+            }
+            string safe = SafeFileName(name);
+            string path = System.IO.Path.Combine(dir, safe + ".png");
+            try { ScreenCapture.CaptureScreenshot(path, superSize); }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] capture of " + safe + " failed: " + e.Message);
+                return null;
+            }
+            // The line a collector greps for; the file appears a frame later.
+            Log.Out("[7dtd-playtest] shot " + safe + " x" + superSize + " -> " + path);
+            return path;
+        }
+
+        /// <summary>A file name that cannot escape its directory.</summary>
+        static string SafeFileName(string name)
+        {
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name)
+                sb.Append(char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_');
+            return sb.ToString();
+        }
     }
 }
