@@ -418,7 +418,9 @@ accept `true` or `false`. Use `--loadgen-expect-cvar-positive NAME` for a
 strictly positive value and `--loadgen-expect-cvar-equal LEFT=RIGHT` to
 compare two decoded CVars. `--loadgen-server-cvar-oracle` additionally runs
 `cvar get` for every observed CVar against the exact joined entity and
-requires the server-authority value to match the peer's decoded value.
+requires the server-authority value to match the peer's decoded value. Its
+default absolute tolerance is `0.0001`; time-varying values may set
+`--loadgen-server-cvar-tolerance VALUE` explicitly.
 
 ```bash
 make playtest SUITE=your_suite EXTRA_ARGS="--host-fixtures --loadgen-observe-cvar protection --loadgen-observe-buff protected --loadgen-expect-cvar-positive protection --loadgen-expect-buff protected=true --loadgen-server-cvar-oracle --loadgen-teleport 520 62 950"

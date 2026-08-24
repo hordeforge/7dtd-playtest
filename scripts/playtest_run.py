@@ -988,7 +988,8 @@ def parse_cvar_value(reply: str, name: str) -> float | None:
 
 
 def server_cvar_oracle_failures(
-    tn: TelnetAdmin, entity_id: int, names: list[str], latest: dict[tuple[str, str], dict]
+    tn: TelnetAdmin, entity_id: int, names: list[str], latest: dict[tuple[str, str], dict],
+    tolerance: float = 0.0001,
 ) -> list[str]:
     """Compare server-authority CVar values with the joined bot's decoded state."""
     failures: list[str] = []
@@ -999,7 +1000,7 @@ def server_cvar_oracle_failures(
         if (
             not isinstance(peer_value, (int, float))
             or server_value is None
-            or abs(float(peer_value) - server_value) > 0.0001
+            or abs(float(peer_value) - server_value) > tolerance
         ):
             failures.append(
                 f"server CVar {name} expected peer value {peer_value!r}, "
@@ -2101,6 +2102,13 @@ def main(argv: list[str] | None = None) -> int:
         help="compare every observed CVar with cvar get on the joined server entity",
     )
     ap.add_argument(
+        "--loadgen-server-cvar-tolerance",
+        type=float,
+        default=0.0001,
+        metavar="VALUE",
+        help="absolute tolerance for server-oracle versus decoded peer CVars",
+    )
+    ap.add_argument(
         "--loadgen-teleport",
         type=float,
         nargs=3,
@@ -2125,6 +2133,11 @@ def main(argv: list[str] | None = None) -> int:
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
     args = ap.parse_args(argv)
+    if (
+        not math.isfinite(args.loadgen_server_cvar_tolerance)
+        or args.loadgen_server_cvar_tolerance < 0
+    ):
+        ap.error("--loadgen-server-cvar-tolerance must be a finite non-negative number")
     loadgen_observer_requested = bool(
         args.loadgen_observe_cvar
         or args.loadgen_observe_buff
@@ -3187,7 +3200,11 @@ def main(argv: list[str] | None = None) -> int:
                     if tn.connect():
                         observer_failures.extend(
                             server_cvar_oracle_failures(
-                                tn, observer_entity, args.loadgen_observe_cvar, observer_latest
+                                tn,
+                                observer_entity,
+                                args.loadgen_observe_cvar,
+                                observer_latest,
+                                args.loadgen_server_cvar_tolerance,
                             )
                         )
                         tn.close()
