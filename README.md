@@ -576,6 +576,30 @@ dialog. Providers each worked around that with their own bespoke `Report.Info`
 wording, which meant every screenshot loop grepped a different sentence. The
 marker is now spelled once, here, and is part of the log contract above.
 
+#### The automated client will not show you a UI window
+
+Measured on the installed build, 2026-08-24, with `7DTD_CONNECT_DEBUG=1` and
+fastconnect's window trace: a case can ask for `character`, `backpack`,
+`windowpaging`, `toolbelt` or `crafting` and **none of them reaches the
+screen**. The trace shows all five `Open` calls arriving with valid names and
+no `unknown!` warning, and `OpenWindowNames` reports only `toolTip` throughout
+the hold. The game's own `toolbelt` group opened 1.7 s after a call it made
+itself, so the manager is draining its queue — it simply never draws what a
+case asks for.
+
+Plan around it rather than into it:
+
+- **World-space scenes photograph fine.** A worn garment, a placed block, a
+  vehicle, an effect: put the camera where it can see the thing. For a worn
+  item, `SetFirstPersonView(false, false)` is what the view-toggle key ends up
+  calling, and the third-person model shows the gear.
+- **The toolbelt draws by itself.** It is the one inventory surface that is
+  already on screen, so an item icon can be photographed by putting the item
+  in the belt — no window involved.
+- **Anything that only exists inside a window** — equipment slots, the
+  character preview, a crafting queue — is not obtainable this lane today. Say
+  so rather than shipping a green case whose frames show terrain.
+
 A staging suite is a **fixture, not a proof**. Its assertions establish that
 there was something to photograph; the verdict on the frame belongs to a
 person, and should be tracked as such wherever that project records human
