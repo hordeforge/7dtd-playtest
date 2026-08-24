@@ -94,6 +94,7 @@ make playtest SUITE=combat
 | `dig_confirm` | live | world, c2s, setblock, demo, bench | Seed solid then dig; GetBlock → air (self-contained) |
 | `place_confirm` | live | world, c2s, setblock, demo, bench | GetBlock solid after place |
 | `block_damage_melee` | live | world, c2s, demo, melee | Primary attack raises `BlockValue.damage` or clears block |
+| `mining_harvest` | live | world, c2s, demo, melee, harvest | Real held-tool swing raises block damage **and** a named bag+toolbelt award (`terrOreIron` / iron pickaxe / `resourceScrapIron`) |
 | `held_slot_report` | live | inv, demo | Holding slot index + item type readable |
 | `buffs` | live | player, demo | Buff manager live |
 | `quests_journal` | live | quest, demo | QuestJournal non-null |
@@ -323,7 +324,7 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 | Suite | Live | Deferred |
 |---|---:|---:|
 | smoke | 5 | 0 |
-| core | 18 | 0 |
+| core | 19 | 0 |
 | world | 10 | 0 |
 | ui | 8 | 0 |
 | combat | 10 | 0 |
@@ -339,7 +340,7 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 | soak_long | 1 | 0 |
 | apm | 1 | 0 |
 | bot | 4 | 0 |
-| **catalog total** | **108** | **0** |
+| **catalog total** | **109** | **0** |
 
 Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
 (smoke…finale attract path; residual suites separate). Residual promotion gate:

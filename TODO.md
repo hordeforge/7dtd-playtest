@@ -5,6 +5,11 @@ Agent ownership: mark `[-] in progress: <agent>, YYYY-MM-DD` before editing;
 
 ## Backlog
 
+- [x] Public real-mining probe (`MiningSpec`/`MiningProbe`/`MiningResult`)
+      plus stock `mining_harvest` case: done, 2026-08-24. Held-tool
+      `UseHoldingItem` only; observes block damage and a named inventory
+      award. `block_damage_melee` stays the weaker combat fixture.
+
 - [x] Make server-versus-peer CVar tolerance configurable for time-varying
   observer values: done, 2026-08-24
 - [x] Parse stock's live `cvar get` value format in the server oracle: done,

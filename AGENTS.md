@@ -196,7 +196,9 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
 Public API for external providers: `CaseDef.Live`/`Staged`/`Defer`, `Helpers`,
-`Report`. Visual evidence uses `CaseDef.Staged` — never hand-roll the
+`Report`, `MiningSpec`/`MiningProbe`/`MiningResult`. A capability that more
+than one consumer needs (real mining, staged frames, the exclusivity lock)
+belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged` — never hand-roll the
 marker/hold/assert triple, that is what made every screenshot loop grep a
 different sentence.
 
@@ -210,7 +212,7 @@ blocking:
    mypy over `scripts/` (`make typecheck`, `[tool.mypy]`); both tools are
    pinned in the dev dependency-group so local and CI versions match uv.lock.
 
-Then the ten suites:
+Then the eleven suites:
 
 1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
    + counts total must equal Catalog.cs. A catalog addition that skips
@@ -219,20 +221,21 @@ Then the ten suites:
    ModApi.Version == dist manifest, and CHANGELOG.md must carry an
    [Unreleased] section plus the current release entry.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
-4. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
-5. host lock (`scripts/test_playtest_lock.py`)
-6. deterministic simulation (`scripts/test_dst.py`)
-7. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
+4. mining-probe provider surface (`scripts/test_mining_probe_surface.py`)
+5. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
+6. host lock (`scripts/test_playtest_lock.py`)
+7. deterministic simulation (`scripts/test_dst.py`)
+8. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
    catches the read-before-assignment crash class that once shipped in
    `playtest_run.py` main(); only fires with real game binaries present.
-8. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
+9. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
    and serverconfig XML attribute escaping plus parser survival on malformed
    JSON events.
-9. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
+10. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
    fresh-save removes only every world's copy of the named game save
    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
    hard-deleted).
-10. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
+11. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).
