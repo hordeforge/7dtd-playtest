@@ -865,6 +865,19 @@ namespace ZdtdPlaytest
                 return ok;
             }, timeout: 18f, fail: "melee did not damage block", pause: 0.5f));
 
+            // Real harvest: held-tool UseHoldingItem only, block damage AND a
+            // named bag+toolbelt award. PulsePrimaryAttack + SetBlockRpc damage
+            // cannot prove GameUtils.HarvestOnAttack; MiningProbe can.
+            {
+                var probe = new MiningProbe(MiningSpec.StockIron());
+                q.Add(Live(suite, "mining_harvest", new[] { "world", "c2s", "demo", "melee", "harvest" },
+                    act: ctx => probe.Act(ctx),
+                    wait: ctx => probe.Wait(ctx),
+                    assert: ctx => probe.Assert(ctx),
+                    timeout: 25f,
+                    fail: "mining harvest did not raise block damage and award count"));
+            }
+
             q.Add(Live(suite, "held_slot_report", new[] { "inv", "demo" }, ctx =>
             {
                 try

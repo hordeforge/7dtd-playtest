@@ -245,6 +245,23 @@ Helpers.TryGiveItem(ctx.Player, stack);
 Helpers.TryEquipItemType(ctx.Player, itemType);
 Helpers.PlayerInVehicle(ctx.Player, vehicle);
 Helpers.TryEnterVehicle(ctx.Player, vehicle, out var detail);
+
+// Real mining: seed a named block, equip a named tool, swing only through
+// UseHoldingItem, observe block damage AND a named bag+toolbelt award.
+// Do not copy PulsePrimaryAttack or write BlockValue.damage from the
+// attack phase: that cannot prove GameUtils.HarvestOnAttack.
+var probe = new MiningProbe(new MiningSpec
+{
+    BlockName = "terrOreIron",
+    ToolName = "meleeToolPickT1IronPickaxe",
+    AwardItemName = "resourceScrapIron",
+});
+queue.Add(CaseDef.Live(suite, "my_mine", new[] { "harvest" },
+    act: ctx => probe.Act(ctx),
+    wait: ctx => probe.Wait(ctx),
+    assert: ctx => probe.Assert(ctx),
+    timeout: 25f,
+    fail: "mining harvest did not raise block damage and award count"));
 ```
 
 ### Provider error behavior
@@ -296,8 +313,10 @@ uv run --locked --project . python scripts/playtest_run.py --suite your_suite --
 
 `--no-fixtures` is the overriding opt-out when both options are present.
 
-Public surface for providers: `CaseDef.Live` / `CaseDef.Defer`, `CaseCtx`,
-`IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`).
+Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged`, `CaseCtx`,
+`IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`),
+`MiningSpec` / `MiningProbe` / `MiningResult`. The stock `mining_harvest`
+case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
 
 `Helpers.LookAt(player, worldPos)` aims the player camera at a world position.
 It follows the stock `EntityPlayerLocal.SetRotation` convention: negative X

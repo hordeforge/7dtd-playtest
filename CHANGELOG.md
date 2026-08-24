@@ -22,6 +22,14 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- `MiningSpec` / `MiningProbe` / `MiningResult`: public real-mining driver for
+  external providers. Seeds a named block, equips a named tool, presses
+  exactly one `UseHoldingItem(0, false)` per attempt, and requires both
+  authoritative block damage and a named bag+toolbelt award. Stock case
+  `mining_harvest` (iron ore / iron pickaxe / scrap iron).
+  `PulsePrimaryAttack` + `SetBlockRpc` damage remains the weaker combat
+  fixture and is not a harvest proof. Guarded by
+  `scripts/test_mining_probe_surface.py`.
 - `Report.Staged(name, detail)` and the stable `scene staged <name>` log line
   (JSON `"t":"staged"`), announcing that a scene is on screen *now* so an
   external screenshot loop can photograph it. A case's `Detail` is flushed with

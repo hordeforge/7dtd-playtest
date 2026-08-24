@@ -28,6 +28,7 @@ REQUIRED_LIVE = (
     "quest_log_open",
     "skills_open",
     "block_damage_melee",
+    "mining_harvest",
     "item_drop_entity",
     "eat_food_consume",
     "ranged_shot",

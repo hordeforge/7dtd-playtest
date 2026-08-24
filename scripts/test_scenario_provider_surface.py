@@ -160,10 +160,22 @@ def main() -> int:
         "TryEnterVehicle",
         "FindNearestVehicle",
         "LookAt",
+        "CountItemType",
+        "PushPlayerInventory",
+        "SetBlockRpc",
+        "FreeBagSlots",
     ):
         assert "public static" in helpers and name in helpers, (
             f"Helpers must expose {name} for providers"
         )
+
+    probe = (ROOT / "Source" / "PlayTestMod" / "MiningProbe.cs").read_text(
+        encoding="utf-8"
+    )
+    assert "public sealed class MiningProbe" in probe
+    assert "public sealed class MiningSpec" in probe
+    assert "public sealed class MiningResult" in probe
+    assert "MiningProbe" in readme, "README must document MiningProbe"
 
     # EntityPlayerLocal.SetRotation uses negative X below the horizon. Keep
     # LookAt aligned with that stock convention: a target with dir.y < 0 must
