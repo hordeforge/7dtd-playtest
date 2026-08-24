@@ -30,6 +30,9 @@ unchanged.
 - Generic loadgen replicated-state orchestration: exact CVar/buff filters and
   expectations consume structured joined/state events, teleport the exact
   joined entity, and fail the harness on missing or contradictory peer state.
+- Relational loadgen assertions for positive and equal CVar values, plus an
+  opt-in server-authority oracle that compares `cvar get` with the exact
+  joined peer's decoded CVar state.
 - Barrier-parameter sanitization: `chat_echo:<token>` and
   `spawn_vehicle:<class>` parameters lifted from client-log lines are
   validated as plain identifiers (`[A-Za-z0-9_]{1,64}`) before they reach a
