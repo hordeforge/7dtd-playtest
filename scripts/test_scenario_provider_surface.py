@@ -159,10 +159,26 @@ def main() -> int:
         "PlayerInVehicle",
         "TryEnterVehicle",
         "FindNearestVehicle",
+        "LookAt",
     ):
         assert "public static" in helpers and name in helpers, (
             f"Helpers must expose {name} for providers"
         )
+
+    # EntityPlayerLocal.SetRotation uses negative X below the horizon. Keep
+    # LookAt aligned with that stock convention: a target with dir.y < 0 must
+    # produce a negative pitch, not the skyward positive pitch used before.
+    look_at = method_body(
+        helpers,
+        r"public\s+static\s+void\s+LookAt\s*\(\s*EntityPlayerLocal\s+player\s*,"
+        r"\s*Vector3\s+worldPos\s*\)",
+    )
+    assert "float pitch = Mathf.Asin(" in look_at, (
+        "LookAt must preserve the stock vertical convention: below is negative X pitch"
+    )
+    assert "float pitch = -Mathf.Asin(" not in look_at, (
+        "LookAt inverted vertical pitch and will aim below-horizon targets into the sky"
+    )
 
     # Dual suite env: PLAYTEST_SUITE and ZDTD_PLAYTEST_SUITE both arm the runner.
     arm = method_body(runner, r"public\s+static\s+void\s+ArmFromEnv\s*\(\s*\)")

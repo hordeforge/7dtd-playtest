@@ -299,6 +299,12 @@ uv run --locked --project . python scripts/playtest_run.py --suite your_suite --
 Public surface for providers: `CaseDef.Live` / `CaseDef.Defer`, `CaseCtx`,
 `IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`).
 
+`Helpers.LookAt(player, worldPos)` aims the player camera at a world position.
+It follows the stock `EntityPlayerLocal.SetRotation` convention: negative X
+pitch looks below the horizon and positive X pitch looks above it. Use the
+helper for ground-zero or block-facing scenes instead of deriving pitch with
+the opposite Unity-camera sign.
+
 #### CaseCtx members (fresh instance per case)
 
 | Member | Meaning |
