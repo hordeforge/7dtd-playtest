@@ -63,6 +63,11 @@ Release model (inferred practice, now pinned by `make test`):
   draw. `OpenWindowGroup` therefore returns whether the *name is known*, and
   `OpenWindowNames` — sorted, so two identical runs read identically — is what
   answers "is it on screen", from a later tick.
+- `CaseDef.Staged` takes an optional `onHold(ctx, fraction)`, called every tick
+  of the hold. A fixed camera photographs one face of a subject and says
+  nothing about the others; turning the subject here makes the frames a
+  turntable. A throw is logged and the hold continues, because the scene is
+  already staged and the frames already exist.
 - `CaseDef.Staged(suite, id, tags, stage, holdSeconds)`: builds a staging case
   — put the scene up, announce it immediately, hold it still, fail if it did
   not stage. Providers had hand-rolled that triple, which is where the
