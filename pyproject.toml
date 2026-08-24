@@ -51,11 +51,16 @@ select = [
 ]
 
 # Type gate (make typecheck). Baseline strictness the tree passes today;
-# ratchet up as annotations spread. disallow_any_generics is next (34 gaps);
-# after that, disallow_any_explicit (8) and the remaining strict flags.
+# ratchet up as annotations spread. The two Any-oriented strict flags are on
+# globally with per-module opt-outs below for modules that still carry gaps:
+# shrink a module's count to zero, then drop it from its override list.
+# Remaining debt today: ~45 missing type-arguments across the six generics
+# opt-outs, ~11 explicit Any in dst/playtest_compare.
 [tool.mypy]
 python_version = "3.11"
 files = ["scripts"]
+disallow_any_generics = true
+disallow_any_explicit = true
 check_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_defs = true
@@ -71,6 +76,9 @@ strict_equality_for_none = true
 no_implicit_optional = true
 no_implicit_reexport = true
 extra_checks = true
+# Scream when an override above stops matching any file (rename, deletion):
+# a dead opt-out hides the fact that a module graduated back to strict.
+warn_unused_configs = true
 enable_error_code = [
     "possibly-undefined",
     "ignore-without-code",
@@ -78,3 +86,20 @@ enable_error_code = [
     "unimported-reveal",
     "deprecated",
 ]
+
+# Ratchet opt-outs (see comment above [tool.mypy]). Every entry is a module
+# that still fails the named flag; remove entries, never add them.
+[[tool.mypy.overrides]]
+module = [
+    "playtest_compare",
+    "playtest_log",
+    "playtest_run",
+    "test_playtest_compare",
+    "test_playtest_run_units",
+    "test_report_surface",
+]
+disallow_any_generics = false
+
+[[tool.mypy.overrides]]
+module = ["dst", "playtest_compare"]
+disallow_any_explicit = false
