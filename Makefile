@@ -123,7 +123,9 @@ test: lint typecheck
 # `make test` runs (same order, same interpreter pin). Writes .coverage in
 # the repo root; CI renders it into the README badge with
 # scripts/coverage_badge.py. Subprocess-based DST simulation is not traced.
-COV := uv run --locked --project "$(ROOT)" --with coverage python
+# coverage comes from the locked dev group (pyproject.toml), not a
+# `--with` side-install, so CI measures with hash-pinned bytes.
+COV := $(UV)
 
 coverage:
 	rm -f .coverage .coverage.*
