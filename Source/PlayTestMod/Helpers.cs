@@ -544,6 +544,50 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Every bone name the wearer's skinned renderers are bound to,
+        /// distinct and sorted.
+        ///
+        /// <para>This is the one input a skinned garment cannot be authored
+        /// without. SDCS rebinds a gear prefab's <c>SkinnedMeshRenderer.bones</c>
+        /// to the wearer <b>by name</b> through a string-keyed
+        /// <c>TransformCatalog</c>, and a name that does not match becomes a
+        /// null bone with no error raised, so the exact spelling of every bone
+        /// decides whether a garment deforms or hangs in space. The names live
+        /// in the game's own asset bundles, not in XML or IL, so the only place
+        /// to read them is off a real wearer in a running client.</para>
+        ///
+        /// <para>Sorted because the answer is reference material to copy into
+        /// an authoring doc, and a set that reorders between runs is not a
+        /// reference. Pass any <see cref="EntityAlive"/>: the local player is
+        /// the usual subject, but a spawned entity works the same way.</para>
+        /// </summary>
+        public static List<string> RigBoneNames(EntityAlive entity)
+        {
+            var names = new List<string>();
+            if (entity == null) return names;
+            try
+            {
+                var renderers = entity.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                if (renderers == null) return names;
+                var seen = new HashSet<string>();
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    var bones = renderers[i] != null ? renderers[i].bones : null;
+                    if (bones == null) continue;
+                    for (int b = 0; b < bones.Length; b++)
+                    {
+                        // A null bone here is exactly the failure this exists to
+                        // prevent downstream, so it is skipped rather than named.
+                        if (bones[b] != null && seen.Add(bones[b].name)) names.Add(bones[b].name);
+                    }
+                }
+            }
+            catch { /* a partial rig is still worth reporting */ }
+            names.Sort(StringComparer.Ordinal);
+            return names;
+        }
+
+        /// <summary>
         /// Opens a game UI window group and reports whether it really ended up
         /// open — not whether the call was accepted.
         ///
