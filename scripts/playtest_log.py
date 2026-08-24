@@ -15,7 +15,7 @@ import re
 from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
 SUMMARY_RE = re.compile(
@@ -28,6 +28,37 @@ JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
 NRE_SAMPLE_CAP = 50
+
+
+class ParsedClientLog(TypedDict):
+    """Shape of :meth:`ClientLogScan.result` / :func:`parse_client_log`.
+
+    Single home of the parsed-log contract shared by the orchestrator, the
+    comparison tool, and the offline gates. ``json_events`` entries are
+    whatever JSON objects the client emitted; every other field is coerced
+    by the parser to the types shown here.
+    """
+
+    results: list[dict[str, str]]
+    summary: dict[str, int] | None
+    done: dict[str, int | None] | None
+    json_events: list[dict[str, object]]
+    nre_like: list[str]
+    nre_like_total: int
+    malformed_events: int
+
+
+def empty_client_log() -> ParsedClientLog:
+    """Placeholder before any log bytes exist; same shape as :meth:`ClientLogScan.result`."""
+    return {
+        "results": [],
+        "summary": None,
+        "done": None,
+        "json_events": [],
+        "nre_like": [],
+        "nre_like_total": 0,
+        "malformed_events": 0,
+    }
 
 
 @lru_cache(maxsize=64)
@@ -94,13 +125,13 @@ class ClientLogScan:
     """
 
     def __init__(self) -> None:
-        self.human_results: list[dict] = []
-        self.json_results: list[dict] = []
-        self.json_events: list[dict] = []
-        self.json_summary: dict | None = None
-        self.json_done: dict | None = None
-        self.human_summary: dict | None = None
-        self.human_done: dict | None = None
+        self.human_results: list[dict[str, str]] = []
+        self.json_results: list[dict[str, str]] = []
+        self.json_events: list[dict[str, object]] = []
+        self.json_summary: dict[str, int] | None = None
+        self.json_done: dict[str, int | None] | None = None
+        self.human_summary: dict[str, int] | None = None
+        self.human_done: dict[str, int | None] | None = None
         self.nre_hits: list[str] = []
         self.nre_total = 0
         # Lines that looked like events but failed to parse. Skipped on
@@ -201,7 +232,7 @@ class ClientLogScan:
             self.feed_line(line)
             self._count_nre(line)
 
-    def result(self) -> dict:
+    def result(self) -> ParsedClientLog:
         if self.json_results:
             results = self.json_results
             summary = self.json_summary or self.human_summary
@@ -228,7 +259,7 @@ class ClientLogScan:
         }
 
 
-def parse_client_log(text: str) -> dict:
+def parse_client_log(text: str) -> ParsedClientLog:
     """Parse a whole playtest log at once. Prefer JSON events when present
     (avoid double human+JSON). Incremental consumers should use
     :class:`ClientLogScan` instead of re-running this over the full text."""

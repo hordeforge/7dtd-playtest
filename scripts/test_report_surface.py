@@ -30,6 +30,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_log  # noqa: E402
 import playtest_run  # noqa: E402
+from playtest_log import ParsedClientLog  # noqa: E402
 
 
 def test_write_junit_escapes_log_derived_attributes() -> None:
@@ -231,7 +232,7 @@ def _log_fuzz_blob(rng: random.Random) -> str:
     return blob
 
 
-def _assert_parsed_shape(parsed: dict, seed: int) -> None:
+def _assert_parsed_shape(parsed: ParsedClientLog, seed: int) -> None:
     assert set(parsed) == {
         "results",
         "summary",

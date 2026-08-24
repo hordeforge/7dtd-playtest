@@ -56,7 +56,7 @@ select = [
 # ratchet up as annotations spread. The two Any-oriented strict flags are on
 # globally with per-module opt-outs below for modules that still carry gaps:
 # shrink a module's count to zero, then drop it from its override list.
-# Remaining debt today: ~45 missing type-arguments across the six generics
+# Remaining debt today: ~43 missing type-arguments across the four generics
 # opt-outs, ~11 explicit Any in dst/playtest_compare.
 [tool.mypy]
 python_version = "3.11"
@@ -99,8 +99,6 @@ module = [
     "playtest_log",
     "playtest_run",
     "test_playtest_compare",
-    "test_playtest_run_units",
-    "test_report_surface",
 ]
 disallow_any_generics = false
 

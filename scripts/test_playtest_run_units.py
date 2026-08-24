@@ -669,7 +669,7 @@ def test_fixture_gate_covers_every_expand_suites_alias() -> None:
     )
 
 
-def _spawn_detached(body: str) -> subprocess.Popen:
+def _spawn_detached(body: str) -> subprocess.Popen[bytes]:
     """Real child in its own session (same shape as orchestrator launches)."""
     return subprocess.Popen(
         ["bash", "-c", body],

@@ -34,10 +34,12 @@ import playtest_lock  # noqa: E402
 from playtest_log import (  # noqa: E402
     ClientLogScan,
     LogTail,
+    ParsedClientLog,
     TailSource,
     add_barrier_hits,
     barrier_hits_prefix,
     barrier_line_hits,
+    empty_client_log,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1947,7 +1949,7 @@ def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
     return chunk
 
 
-def result_echo_line(row: dict, *, peer: bool = False) -> str:
+def result_echo_line(row: dict[str, str], *, peer: bool = False) -> str:
     """Terminal line for one parsed result row, control characters stripped.
 
     status / case / detail are parsed back out of client log bytes, which
@@ -2365,7 +2367,7 @@ def main(argv: list[str] | None = None) -> int:
     loadgen_event_reader = LoadgenEventReader(loadgen_events_path)
     loadgen_teleported_entity: int | None = None
     exit_code = 2
-    parsed: dict = {}
+    parsed: ParsedClientLog = empty_client_log()
     summary: dict | None = None
     unity_log: Path | None = None
     # One-shot flag for the mid-run backend-exit announcement below; reset by
@@ -2766,8 +2768,8 @@ def main(argv: list[str] | None = None) -> int:
                     if setup_parsed.get("done") is not None:
                         log(
                             f"{rejoin_label} setup DONE "
-                            f"pass={setup_parsed.get('summary', {}).get('pass')} "
-                            f"fail={setup_parsed.get('summary', {}).get('fail')}"
+                            f"pass={(setup_parsed.get('summary') or {}).get('pass')} "
+                            f"fail={(setup_parsed.get('summary') or {}).get('fail')}"
                         )
                         break
                 if client_proc.poll() is not None:
@@ -2887,12 +2889,12 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         # Always defined so timeout / missing client logs cannot UnboundLocalError.
-        peer_parsed: dict = {}
+        peer_parsed: ParsedClientLog = empty_client_log()
         primary_done_logged = False
 
-        def read_peer_results() -> dict:
+        def read_peer_results() -> ParsedClientLog:
             if peer_tail is None:
-                return {}
+                return empty_client_log()
             # Drain first so callers between poll ticks still see fresh bytes.
             pump_log_tail(peer_tail, peer_scan)
             return peer_scan.result()
@@ -3276,9 +3278,14 @@ def main(argv: list[str] | None = None) -> int:
         slowest = []
         for ev in parsed.get("json_events") or []:
             if ev.get("t") == "result" and ev.get("status") in ("pass", "fail"):
+                # json.loads values only: numbers and numeric strings convert,
+                # anything else skips (the old try/except TypeError path).
+                ms_raw = ev.get("ms") or 0
+                if not isinstance(ms_raw, (int, float, str)):
+                    continue
                 try:
-                    ms = float(ev.get("ms") or 0)
-                except (TypeError, ValueError):
+                    ms = float(ms_raw)
+                except ValueError:
                     continue
                 if not math.isfinite(ms):
                     continue
@@ -3342,10 +3349,10 @@ def main(argv: list[str] | None = None) -> int:
             err(f"FAIL harness: no DONE from {missing} playtest mod")
             if summary:
                 log(f"partial summary={summary}")
-            for r in results:
-                log(result_echo_line(r))
-            for r in peer_results:
-                log(result_echo_line(r, peer=True))
+            for row in results:
+                log(result_echo_line(row))
+            for row in peer_results:
+                log(result_echo_line(row, peer=True))
             if args.client_log.is_file():
                 # One split shared by every key grep: a failed run's client log
                 # can reach tens of MB, and re-splitting per key multiplies it.
@@ -3378,15 +3385,15 @@ def main(argv: list[str] | None = None) -> int:
                     f"SUMMARY pass={summary['pass']} fail={summary['fail']} "
                     f"skip={summary.get('skip', 0)} wall_s={wall_s:.1f}"
                 )
-            for r in results:
-                log(result_echo_line(r))
+            for row in results:
+                log(result_echo_line(row))
             if peer_client_suite and peer_summary:
                 log(
                     f"PEER SUMMARY pass={peer_summary['pass']} fail={peer_summary['fail']} "
                     f"skip={peer_summary.get('skip', 0)}"
                 )
-            for r in peer_results:
-                log(result_echo_line(r, peer=True))
+            for row in peer_results:
+                log(result_echo_line(row, peer=True))
             if slowest:
                 # Case names come from JSON event fields parsed out of the
                 # client log; same control-char boundary as the rows above.
@@ -3408,8 +3415,9 @@ def main(argv: list[str] | None = None) -> int:
                     "not parse; skipped (count in report)"
                 )
             fails = int(summary["fail"]) if summary else None
-            if fails is None and done.get("exit_hint") is not None:
-                fails = int(done["exit_hint"])
+            exit_hint = done.get("exit_hint")
+            if fails is None and exit_hint is not None:
+                fails = exit_hint
             if fails is None:
                 fails = 1
             if peer_summary:
