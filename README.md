@@ -535,6 +535,13 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
     holdSeconds: 10f));
 ```
 
+   Staging the game's own interface? Use `Helpers.OpenWindowGroup(player,
+   "<group>")`, which returns whether the group really ended up open, and put
+   `Helpers.OpenWindowNames(player)` in the detail. `GUIWindowManager.Open`
+   resolves an unknown name with only a log warning and does not open within
+   the same call, so those two are the difference between "wrong name" and
+   "opened, still not drawn".
+
 2. Your callback returns whether the scene is genuinely on screen — the items
    were given, the window opened, the camera arrived — and sets `ctx.Detail`
    to whatever context helps the person reading the frame.

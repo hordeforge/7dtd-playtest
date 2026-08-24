@@ -43,6 +43,13 @@ Release model (inferred practice, now pinned by `make test`):
   its result, after the hold, so a loop keyed on the result photographs
   whatever came next; providers had each worked around that with their own
   `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- `Helpers.OpenWindowGroup` / `CloseWindowGroup` / `OpenWindowNames`: open a
+  game UI window group and find out whether it really ended up open, and list
+  what the window manager believes is on screen. `GUIWindowManager.Open`
+  resolves an unknown name with only a log warning and does not open within
+  the same call, so a hand-rolled open reports a closed window that is about
+  to appear and a misspelled group looks identical to one that declined to
+  draw. `OpenWindowNames` sorts, so two identical runs read identically.
 - `CaseDef.Staged(suite, id, tags, stage, holdSeconds)`: builds a staging case
   — put the scene up, announce it immediately, hold it still, fail if it did
   not stage. Providers had hand-rolled that triple, which is where the
