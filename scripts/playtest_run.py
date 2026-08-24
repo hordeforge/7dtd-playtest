@@ -1909,14 +1909,13 @@ def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
 
     Returns the new text so per-line greps in the caller see exactly what was
     parsed. Both sides share ClientLogScan's parser so incremental results
-    cannot drift from parse_client_log over the same bytes.
+    cannot drift from parse_client_log over the same bytes; feed_lines keeps
+    that one parser to a single pass over each chunk.
     """
     chunk = tail.poll()
     if not chunk:
         return ""
-    for line in chunk.splitlines():
-        scan.feed_line(line)
-    scan.feed_chunk(chunk)
+    scan.feed_lines(chunk.splitlines())
     return chunk
 
 

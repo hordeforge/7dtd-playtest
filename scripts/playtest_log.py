@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
+from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
 
@@ -28,6 +30,12 @@ NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange",
 NRE_SAMPLE_CAP = 50
 
 
+@lru_cache(maxsize=64)
+def _barrier_prefix_re(prefix: str) -> re.Pattern[str]:
+    """Compiled ``barrier <prefix>...`` grep; names repeat every poll chunk."""
+    return re.compile(rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)")
+
+
 def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     """Return every full barrier name that starts with ``prefix``.
 
@@ -35,13 +43,13 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     the same class during one composed run. Consumers keep their own fired
     counts or token sets, so collapsing identical names here loses events.
     """
-    return [
-        match.group(1)
-        for match in re.finditer(
-            rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
-            blob,
-        )
-    ]
+    return [match.group(1) for match in _barrier_prefix_re(prefix).finditer(blob)]
+
+
+@lru_cache(maxsize=64)
+def _barrier_line_re(name: str) -> re.Pattern[str]:
+    """Compiled whole-name ``barrier <name>`` counter; see barrier_line_hits."""
+    return re.compile(rf"\[7dtd-playtest\]\s+barrier {re.escape(name)}(?![\w:])")
 
 
 def barrier_line_hits(blob: str, name: str) -> int:
@@ -57,9 +65,7 @@ def barrier_line_hits(blob: str, name: str) -> int:
     "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
     lines, which are collected separately via barrier_hits_prefix.
     """
-    return len(
-        re.findall(rf"\[7dtd-playtest\]\s+barrier {re.escape(name)}(?![\w:])", blob)
-    )
+    return len(_barrier_line_re(name).findall(blob))
 
 
 def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
@@ -169,13 +175,31 @@ class ClientLogScan:
             hint = int(m.group(1)) if m.group(1) is not None else None
             self.human_done = {"exit_hint": hint}
 
+    def _count_nre(self, line: str) -> None:
+        if NRE_RE.search(line):
+            self.nre_total += 1
+            if len(self.nre_hits) < NRE_SAMPLE_CAP:
+                self.nre_hits.append(line)
+
     def feed_chunk(self, chunk: str) -> None:
-        """Feed text made of complete newline-terminated lines (see LogTail)."""
+        """Feed text made of complete newline-terminated lines (see LogTail).
+
+        NRE scan only; callers that also need result parsing should use
+        :meth:`feed_lines`, which runs both passes over a single split.
+        """
         for line in chunk.splitlines():
-            if NRE_RE.search(line):
-                self.nre_total += 1
-                if len(self.nre_hits) < NRE_SAMPLE_CAP:
-                    self.nre_hits.append(line)
+            self._count_nre(line)
+
+    def feed_lines(self, lines: Iterable[str]) -> None:
+        """Parse already-split complete lines in one pass.
+
+        Per line this is :meth:`feed_line` plus the NRE scan that
+        :meth:`feed_chunk` performs, without splitting (and re-iterating)
+        the same bytes twice on the orchestrator's ~2 Hz poll path.
+        """
+        for line in lines:
+            self.feed_line(line)
+            self._count_nre(line)
 
     def result(self) -> dict:
         if self.json_results:
@@ -209,9 +233,7 @@ def parse_client_log(text: str) -> dict:
     (avoid double human+JSON). Incremental consumers should use
     :class:`ClientLogScan` instead of re-running this over the full text."""
     scan = ClientLogScan()
-    for line in text.splitlines():
-        scan.feed_line(line)
-        scan.feed_chunk(line)
+    scan.feed_lines(text.splitlines())
     return scan.result()
 
 
