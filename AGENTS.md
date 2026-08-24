@@ -111,6 +111,20 @@ Inspect: `cat` the lock file, or from the repo root
 6. After clean, orchestrator also refuses if ServerPort / telnet port is still
    bound (leftover outside pkill patterns).
 
+### Two ways agents have broken this
+
+- **Never read the lock and write it in separate steps.** An agent that printed
+  `running=yes` and then wrote its own claim in the same command clobbered a
+  hold that had started 10 s earlier, killing that playtest. Acquire only
+  through `playtest_lock.acquire()`, which serializes on flock and refuses a
+  fresh foreign claim; a shell read-then-write has no such window closed.
+- **A heartbeat only lives as long as its process.** Backgrounding a refresh
+  loop with `nohup ... &` from a tool call that then returns leaves the loop
+  dead and the hold going stale under a still-running client — the
+  `stale_but_live` mismatch. Either hold the lock from a process that outlives
+  the run (`playtest_run.py` does), or refresh `heartbeat` explicitly from each
+  step of a manual session.
+
 `scripts/playtest_run.py` / `make playtest*` enforce acquire/heartbeat/release.
 Manual client starts still require agents to hold the same file and refresh
 heartbeat (or release promptly). This is **client exclusivity only**, not task
