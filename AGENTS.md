@@ -195,7 +195,10 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier|staged",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
-Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.
+Public API for external providers: `CaseDef.Live`/`Staged`/`Defer`, `Helpers`,
+`Report`. Visual evidence uses `CaseDef.Staged` — never hand-roll the
+marker/hold/assert triple, that is what made every screenshot loop grep a
+different sentence.
 
 ## Offline gates (no game install)
 

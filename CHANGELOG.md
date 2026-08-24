@@ -28,6 +28,11 @@ Release model (inferred practice, now pinned by `make test`):
   its result, after the hold, so a loop keyed on the result photographs
   whatever came next; providers had each worked around that with their own
   `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- `CaseDef.Staged(suite, id, tags, stage, holdSeconds)`: builds a staging case
+  — put the scene up, announce it immediately, hold it still, fail if it did
+  not stage. Providers had hand-rolled that triple, which is where the
+  per-project marker wording came from. Its assert deliberately establishes
+  only that there was something to photograph.
 - `scripts/capture_frames.sh`: runs a suite, waits for the first staged scene,
   photographs the client window, crops the frames and builds a contact sheet.
   Every project using this harness needed that loop and only had it by writing

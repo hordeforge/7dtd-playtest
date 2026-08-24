@@ -506,12 +506,21 @@ Anything a person has to judge by eye needs a **staged frame**: a case that
 puts the scene on screen, holds it still, and announces itself so an external
 screenshot loop can photograph it.
 
-1. In the staging case, call `Report.Staged("<scene id>", "<context>")` as the
-   **first** thing it does, before the hold.
-2. Hold the scene for long enough to be photographed (ten seconds is the
-   convention).
-3. Assert only that the scene really is staged — the items were given, the
-   window opened, the camera arrived. Never assert how it looks.
+1. Build the case with **`CaseDef.Staged`**, not `CaseDef.Live`. It emits the
+   marker the instant your callback returns, holds the scene, and fails the
+   case if staging did not succeed:
+
+```csharp
+queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
+    ctx => WearSuitAndOpenBackpack(ctx),   // true when the scene is really up
+    holdSeconds: 10f));
+```
+
+2. Your callback returns whether the scene is genuinely on screen — the items
+   were given, the window opened, the camera arrived — and sets `ctx.Detail`
+   to whatever context helps the person reading the frame.
+3. Never assert how it *looks*. No fixture here can see; `CaseDef.Staged`'s
+   assert only establishes that there was something to photograph.
 4. Photograph it with [`scripts/capture_frames.sh`](scripts/capture_frames.sh),
    which runs the suite, waits for that marker in a log written *after* the run
    started, shoots N frames, crops them to the client window and builds a
