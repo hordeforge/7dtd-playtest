@@ -589,6 +589,66 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// A grafted garment's renderer as the engine left it: mesh, vertex
+        /// count, bind poses, bone count, null-bone count, root bone and local
+        /// bounds — one line per matching renderer, sorted.
+        ///
+        /// <para>This is step three of diagnosing gear that does not appear,
+        /// and the step that separates the two failures which look identical
+        /// from a frame. SDCS rebinds a gear prefab's bones to the wearer
+        /// <b>by name</b>, and a name the wearer does not have becomes a null
+        /// bone with <b>no error raised</b>: the garment loads, the renderer
+        /// reports a sensible bounds, and the piece deforms wrongly or hangs in
+        /// space. Nulls mean a name mismatch. Correct names with a piece that
+        /// does not move is the missing-<c>Origin</c> fault instead, and
+        /// collapsed bounds is neither.</para>
+        ///
+        /// <para>Only then dimensions. Reaching for dimensions first is what
+        /// this ordering exists to prevent, and it has cost several sessions of
+        /// widening meshes that were never the problem.</para>
+        /// </summary>
+        public static List<string> GraftReport(EntityAlive entity, string prefix)
+        {
+            var lines = new List<string>();
+            if (entity == null || string.IsNullOrEmpty(prefix)) return lines;
+            try
+            {
+                var renderers = entity.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                if (renderers == null) return lines;
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    var renderer = renderers[i];
+                    if (renderer == null || renderer.sharedMesh == null) continue;
+                    string mesh = renderer.sharedMesh.name;
+                    if (string.IsNullOrEmpty(mesh) || !mesh.StartsWith(prefix)) continue;
+
+                    var bones = renderer.bones;
+                    int nulls = 0;
+                    var names = new List<string>();
+                    for (int b = 0; bones != null && b < bones.Length; b++)
+                    {
+                        if (bones[b] == null) { nulls++; names.Add("<null>"); }
+                        else names.Add(bones[b].name);
+                    }
+                    var root = renderer.rootBone;
+                    var local = renderer.localBounds;
+                    lines.Add("mesh=" + mesh
+                        + " verts=" + renderer.sharedMesh.vertexCount
+                        + " bindposes=" + renderer.sharedMesh.bindposes.Length
+                        + " bones=" + (bones == null ? 0 : bones.Length)
+                        + " nulls=" + nulls
+                        + " root=" + (root == null ? "<null>" : root.name)
+                        + " center=" + local.center.ToString("0.###")
+                        + " extents=" + local.extents.ToString("0.###")
+                        + " boneNames=" + string.Join(",", names.ToArray()));
+                }
+            }
+            catch { /* a partial report still names the failure shape */ }
+            lines.Sort(StringComparer.Ordinal);
+            return lines;
+        }
+
+        /// <summary>
         /// Every skinned renderer on a wearer as
         /// <c>name center=(x,y,z) extents=(x,y,z)</c>, sorted.
         ///
