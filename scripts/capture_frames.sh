@@ -152,11 +152,41 @@ if (( FRAME_COUNT == 0 )); then
 	exit 1
 fi
 
+# Keep the client log with the run.
+#
+# The frames are the *subject*; the client log is the only place that says what
+# was actually in them — which prefabs loaded, which meshes grafted, what the
+# engine warned about. And it is the one file here that does not survive: the
+# client truncates it on its next launch, so the evidence for a run is gone the
+# moment anybody starts the game again, including the person opening the frames
+# to look at what the run produced.
+#
+# That is not a corner case. On 2026-08-24 four runs of a garment suite were
+# judged from frames alone, over an afternoon, because every client log had
+# already been overwritten by the next launch by the time anyone asked what the
+# frames contained. Copying it costs a few hundred kilobytes and makes the run
+# self-contained.
+if [[ -r "$CLIENT_LOG" ]]; then
+	cp -f "$CLIENT_LOG" "$OUT/client.log" 2>/dev/null \
+		&& CLIENT_LOG_SAVED="$OUT/client.log" \
+		|| CLIENT_LOG_SAVED=""
+else
+	CLIENT_LOG_SAVED=""
+fi
+
 echo
 echo "RESULT"
 echo "  frames        $FRAME_COUNT"
 echo "  contact sheet $OUT/contact-sheet.png"
 echo "  suite log     $RUN_LOG"
+if [[ -n "$CLIENT_LOG_SAVED" ]]; then
+	echo "  client log    $CLIENT_LOG_SAVED"
+else
+	# Say so rather than leaving its absence to be discovered later by
+	# somebody trying to explain a frame.
+	echo "  client log    NOT SAVED — $CLIENT_LOG was unreadable; this run cannot" >&2
+	echo "                be explained after the next client launch overwrites it" >&2
+fi
 echo "  staged scenes"
 grep -oE 'scene staged [^ ]+' "$RUN_LOG" "$CLIENT_LOG" 2>/dev/null | sed 's/^/    /' | sort -u || true
 echo
