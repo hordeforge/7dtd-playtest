@@ -933,6 +933,86 @@ def test_telnet_broken_session_degrades_to_empty_reply() -> None:
     print("PASS telnet_broken_session dead session degrades to empty reply")
 
 
+def test_spawn_near_players_trusts_only_live_sessions() -> None:
+    """spawn_near_players books a fixture fire only when the telnet session
+    survived the exchange: exec() closes the socket on transport failure and
+    returns "", indistinguishable from silence, so a dead session must book
+    zero (the barrier retries next poll) instead of counting a spawn that
+    never reached the server (docstring contract on connected())."""
+    class _LiveSock:
+        """Non-None stand-in for an open session socket."""
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+    class SpawnTelnet(playtest_run.TelnetAdmin):
+        """Replays canned replies and can kill the session mid-exchange."""
+
+        def __init__(self, replies: list[str], die_on: str | None = None) -> None:
+            self._replies = list(replies)
+            self.die_on = die_on
+            self.sent: list[str] = []
+            self.host = ""
+            self.port = 0
+            self.password = ""
+            self._sock = None
+
+        def open(self) -> None:
+            self._sock = _LiveSock()  # type: ignore[assignment]
+
+        def exec(self, cmd: str) -> str:
+            self.sent.append(cmd)
+            if self._sock is None:
+                return ""  # real exec sends nothing without a live session
+            if self.die_on is not None and cmd == self.die_on:
+                # Mirror exec(): a broken transport closes the session and
+                # the caller cannot tell silence from failure.
+                self._sock = None
+                return ""
+            return self._replies.pop(0)
+
+    players = "Total of 1 in the game\n'maci' (id=171, pos=(520.0, 62.0, 950.0))"
+
+    # Session survived the exchange and the reply is not a miss: book one.
+    ok = SpawnTelnet([players, "zombieBoe spawned id=3877"])
+    ok.open()
+    assert ok.spawn_near_players("zombieBoe") == 1, f"sent={ok.sent}"
+    assert ok.sent == ["listplayers", "spawnentity 171 zombieBoe"], ok.sent
+
+    # Session died on the spawn command itself: "" is indistinguishable from
+    # silence, so nothing may be booked (the barrier retries next poll). The
+    # fallback attempts run on the dead session and must stay unbooked too.
+    died = SpawnTelnet([players], die_on="spawnentity 171 zombieBoe")
+    died.open()
+    assert died.spawn_near_players("zombieBoe") == 0, (
+        f"a dead session was booked as a spawn: sent={died.sent}"
+    )
+    assert died.sent[:2] == ["listplayers", "spawnentity 171 zombieBoe"]
+    assert all(cmd.startswith("spawnentityat ") for cmd in died.sent[2:]), died.sent
+
+    # Alive session but every shape misses ("No spawn point" primary, ERR /
+    # Unknown fallback replies): zero bookings, all three pad offsets tried.
+    misses = SpawnTelnet(
+        [
+            players,
+            "No spawn point found",
+            "ERR: invalid position",
+            "Unknown entity name",
+            "ERR: invalid position",
+        ]
+    )
+    misses.open()
+    assert misses.spawn_near_players("zombieBoe") == 0, f"sent={misses.sent}"
+    assert len(misses.sent) == 2 + 3, f"fallback stopped early: {misses.sent}"
+
+    # Fallback success books exactly one, then stops issuing commands.
+    rescued = SpawnTelnet([players, "No spawn point found", "spawned at pad"])
+    rescued.open()
+    assert rescued.spawn_near_players("zombieBoe") == 1, f"sent={rescued.sent}"
+    assert rescued.sent[-1].startswith("spawnentityat zombieBoe "), rescued.sent
+    print("PASS spawn_trust_only_live_sessions dead sessions never book spawns")
+
+
 def test_safe_barrier_param_rejects_command_shapes() -> None:
     """Barrier parameters are lifted from client-log lines (attacker-reachable
     via remote chat) and interpolated into telnet console commands. Only
@@ -1391,6 +1471,123 @@ def test_acquire_exclusive_lock_refusal_leaves_foreign_record() -> None:
     print("PASS acquire_exclusive_lock_refusal foreign record untouched")
 
 
+def test_rewrite_platform_cfg_backs_up_once_and_forces_surface() -> None:
+    """start_stock_dedicated rewrites the user's platform.cfg in place: the
+    backup must carry the original bytes and be written exactly once (it is
+    the only copy of the user's config), the live file must end at the forced
+    local-auth surface, and the atomic publish must leave no temp droppings."""
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        pcfg = tdp / "platform.cfg"
+        original = b"platform=EAC\ncrossplatform=EOS\n"
+        pcfg.write_bytes(original)
+
+        playtest_run._rewrite_platform_cfg(pcfg)
+
+        bak = pcfg.with_name(pcfg.name + ".playtest-bak")
+        assert bak.is_file(), "first rewrite must create the backup"
+        assert bak.read_bytes() == original, "backup must hold the untouched original"
+        forced = b"platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n"
+        assert pcfg.read_bytes() == forced, f"forced surface drifted: {pcfg.read_bytes()!r}"
+
+        # Backup-once: a second run (already-forced live content) must never
+        # overwrite the only copy of the user's original.
+        playtest_run._rewrite_platform_cfg(pcfg)
+        assert bak.read_bytes() == original, "backup was overwritten on the second run"
+        assert pcfg.read_bytes() == forced
+
+        leftovers = sorted(
+            p.name for p in tdp.iterdir()
+            if p.name not in {pcfg.name, bak.name}
+        )
+        assert not leftovers, f"temp files leaked by the atomic write: {leftovers}"
+    print("PASS platform_cfg_rewrite backup once, forced surface, no temp files")
+
+
+def test_client_mute_env_contract() -> None:
+    """CLIENT_MUTE defaults on and only the documented off-spellings disable
+    it; PLAYTEST_MUTE / SEVEN_DAYS_TO_DIE_CLIENT_MUTE are fallbacks in order.
+    The mute helper silences a real player's audio session when this
+    misreads, so pin the behavior, not just the source text."""
+    names = ("CLIENT_MUTE", "PLAYTEST_MUTE", "SEVEN_DAYS_TO_DIE_CLIENT_MUTE")
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        for n in names:
+            os.environ.pop(n, None)
+        assert playtest_run.client_mute_enabled() is True, "default must be muted"
+        for off in ("0", "false", "No", "OFF", " off "):
+            os.environ["CLIENT_MUTE"] = off
+            assert playtest_run.client_mute_enabled() is False, f"CLIENT_MUTE={off!r}"
+            os.environ["CLIENT_MUTE"] = "1"
+        for on in ("1", "true", ""):
+            os.environ["CLIENT_MUTE"] = on
+            assert playtest_run.client_mute_enabled() is True, f"CLIENT_MUTE={on!r}"
+
+        # First set name wins: an opt-out beats a later alias's default-on,
+        # and each alias disables on its own when the earlier ones are unset.
+        os.environ["CLIENT_MUTE"] = "0"
+        os.environ["PLAYTEST_MUTE"] = "1"
+        assert playtest_run.client_mute_enabled() is False, "CLIENT_MUTE lost to alias"
+        os.environ.pop("CLIENT_MUTE")
+        assert playtest_run.client_mute_enabled() is True, "PLAYTEST_MUTE=1 must keep mute"
+        os.environ["PLAYTEST_MUTE"] = "0"
+        assert playtest_run.client_mute_enabled() is False, "alias opt-out ignored"
+        os.environ.pop("PLAYTEST_MUTE")
+        os.environ["SEVEN_DAYS_TO_DIE_CLIENT_MUTE"] = "off"
+        assert playtest_run.client_mute_enabled() is False, "legacy alias opt-out ignored"
+    finally:
+        for n, old in saved.items():
+            if old is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = old
+    print("PASS client_mute_env_contract default on, documented opt-outs, alias order")
+
+
+def test_write_zdtd_apm_dump_fails_closed_without_markers() -> None:
+    """The APM evidence writer must never invent a live snapshot: only output
+    carrying real zdtd markers becomes a dump (prefixed with run_id for
+    correlation); marker-less or empty output writes the failure sentinel so
+    the client cannot soft-pass synthetic data, and a missing binary writes
+    nothing at all."""
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        dump_path = tdp / "apm" / "dump.txt"
+
+        def fake_zdtd(body: str) -> Path:
+            exe = tdp / "zdtd"
+            exe.write_text(f"#!/bin/sh\ncat <<'EOF'\n{body}EOF\n", encoding="utf-8")
+            exe.chmod(0o755)
+            return exe
+
+        # Live markers: dump written, run_id prefixed, verdict True.
+        exe = fake_zdtd("zdtd-apm tick_total=3 wall_ns=100\n")
+        assert playtest_run.write_zdtd_apm_dump(
+            exe, tdp / "world", tdp / "srv", dump_path, run_id="run-42"
+        )
+        assert dump_path.read_text(encoding="utf-8") == (
+            "run_id=run-42\nzdtd-apm tick_total=3 wall_ns=100\n"
+        ), dump_path.read_text(encoding="utf-8")
+
+        # No markers: fail closed with the sentinel, not synthetic evidence.
+        dump_path.unlink()
+        exe = fake_zdtd("boot noise only\n")
+        assert not playtest_run.write_zdtd_apm_dump(
+            exe, tdp / "world", tdp / "srv", dump_path
+        ), "marker-less output must not read as an APM snapshot"
+        assert dump_path.read_text(encoding="utf-8") == (
+            "APM_DUMP_FAILED no markers from zdtd --ticks\n"
+        )
+
+        # Missing binary: warn + False, nothing is written anywhere.
+        dump_path.unlink()
+        assert not playtest_run.write_zdtd_apm_dump(
+            tdp / "absent-zdtd", tdp / "world", tdp / "srv", dump_path
+        )
+        assert not dump_path.exists(), "a failed run must leave no dump behind"
+    print("PASS apm_dump_fail_closed markers required, sentinel on miss")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -1434,6 +1631,10 @@ def main() -> int:
             test_telnet_broken_session_degrades_to_empty_reply,
         ),
         (
+            "spawn_trust_only_live_sessions",
+            test_spawn_near_players_trusts_only_live_sessions,
+        ),
+        (
             "stock_ready_unreadable_log",
             test_wait_stock_ready_early_exit_survives_unreadable_log,
         ),
@@ -1472,6 +1673,15 @@ def main() -> int:
         (
             "acquire_exclusive_lock_refusal",
             test_acquire_exclusive_lock_refusal_leaves_foreign_record,
+        ),
+        (
+            "platform_cfg_rewrite",
+            test_rewrite_platform_cfg_backs_up_once_and_forces_surface,
+        ),
+        ("client_mute_env_contract", test_client_mute_env_contract),
+        (
+            "apm_dump_fail_closed",
+            test_write_zdtd_apm_dump_fails_closed_without_markers,
         ),
     ):
         try:

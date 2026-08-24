@@ -289,7 +289,7 @@ def main() -> int:
     assert "def client_mute_enabled" in orch
     assert "def mute_client_audio_async" in orch
     assert "mute_client_audio_async()" in orch
-    assert 'or "1"' in orch or 'or "1"' in orch.replace(" ", "")
+    assert 'or "1"' in orch
     assert "CLIENT_MUTE" in orch and "CLIENT_MUTE=0" in readme
     assert "mute" in readme.lower() and "default" in readme.lower()
     print("OK client mute default-on (opt-out CLIENT_MUTE=0)")

@@ -1,4 +1,4 @@
-# 🛡️ Vanguard (7DTD Playtest Runner)
+# 7dtd-playtest
 
 > **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
 
