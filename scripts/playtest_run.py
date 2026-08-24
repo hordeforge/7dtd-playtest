@@ -1377,6 +1377,11 @@ def suite_wants_host_fixtures(suite: str) -> bool:
     )
 
 
+def host_fixtures_enabled(suite: str, *, disabled: bool, requested: bool) -> bool:
+    """Resolve built-in fixture discovery and the provider-suite opt-in."""
+    return not disabled and (requested or suite_wants_host_fixtures(suite))
+
+
 # Every barrier the orchestrator counts in the client log and services over
 # telnet/admin. Single source for both the fired-count and seen-count tables
 # in main(), so a new barrier cannot be added to one and missed by the other.
@@ -1628,6 +1633,11 @@ def main(argv: list[str] | None = None) -> int:
         "--no-fixtures",
         action="store_true",
         help="do not telnet-spawn zombies / host fixtures",
+    )
+    ap.add_argument(
+        "--host-fixtures",
+        action="store_true",
+        help="service host barriers emitted by an external provider suite",
     )
     ap.add_argument(
         "--fresh-save",
@@ -1927,8 +1937,10 @@ def main(argv: list[str] | None = None) -> int:
         # zdtd admin TCP speaks the same command surface the orch uses for stock
         # telnet (listplayers/listents/kill/spawnentity/settime). Enable fixtures
         # for both backends so kill/spawn barriers actually fire on playtest-zdtd.
-        want_fixtures = (
-            not args.no_fixtures and suite_wants_host_fixtures(args.suite)
+        want_fixtures = host_fixtures_enabled(
+            args.suite,
+            disabled=args.no_fixtures,
+            requested=args.host_fixtures,
         )
 
         # Poll budget on the monotonic clock so a wall-clock step (NTP or

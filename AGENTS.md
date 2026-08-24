@@ -140,6 +140,10 @@ make playtest-zdtd        # demo suite against zdtd (port 27025)
 make playtest SUITE=core SERVER=stock
 ```
 
+External scenario providers whose cases emit host barriers pass
+`--host-fixtures` to `scripts/playtest_run.py`. Built-in fixture suites are
+recognized automatically. `--no-fixtures` remains the overriding opt-out.
+
 ## Env (client)
 
 | Var | Meaning |

@@ -363,6 +363,10 @@ def test_suite_wants_host_fixtures_selection_table() -> None:
     assert not wants("smoke core")
     assert wants("smoke,combat")
     assert wants("demo;world")
+    enabled = playtest_run.host_fixtures_enabled
+    assert enabled("external-provider-suite", disabled=False, requested=True)
+    assert not enabled("external-provider-suite", disabled=False, requested=False)
+    assert not enabled("combat", disabled=True, requested=True)
     print("PASS fixture_gate_selection fixture suites arm, telnet-free suites do not")
 
 

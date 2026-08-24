@@ -286,6 +286,16 @@ provider cases):
 Any other name is inert on this host (third-party hosts may grep their own).
 Repeated identical lines are separate requests; handlers count hits.
 
+Built-in fixture suites arm these handlers automatically. An external provider
+suite must opt in explicitly so an unrelated client-only suite remains
+telnet-free:
+
+```bash
+uv run --locked --project . python scripts/playtest_run.py --suite your_suite --host-fixtures
+```
+
+`--no-fixtures` is the overriding opt-out when both options are present.
+
 Public surface for providers: `CaseDef.Live` / `CaseDef.Defer`, `CaseCtx`,
 `IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`).
 
