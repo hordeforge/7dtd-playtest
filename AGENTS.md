@@ -185,7 +185,12 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
   `spawn_vehicle:<entityClass>` asks the host for one vehicle of that class
   (the bare `spawn_vehicle` spawns a bicycle); client-created vehicles are
   unknown to a dedicated server and cannot be driven there.
-- JSON: `{"v":1,"t":"result|summary|done|log|barrier",...}`
+- Staged frame: `scene staged <name> <detail>` (`Report.Staged`). Emitted the
+  moment a scene is on screen, for an external screenshot loop to key on — a
+  case's detail is flushed with its *result*, tens of seconds later, so a loop
+  waiting on the result photographs the disconnect dialog instead. A suite
+  proves data, never appearance; see "Visual confirmation" in the README.
+- JSON: `{"v":1,"t":"result|summary|done|log|barrier|staged",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 
 Public API for external providers: `CaseDef.Live`/`Defer`, `Helpers`, `Report`.

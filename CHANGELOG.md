@@ -20,6 +20,19 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Added
+
+- `Report.Staged(name, detail)` and the stable `scene staged <name>` log line
+  (JSON `"t":"staged"`), announcing that a scene is on screen *now* so an
+  external screenshot loop can photograph it. A case's `Detail` is flushed with
+  its result, after the hold, so a loop keyed on the result photographs
+  whatever came next; providers had each worked around that with their own
+  `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- README "Visual confirmation: what a suite cannot tell you" — a suite proves
+  data and never appearance, the client is only up for as long as the cases
+  take, and the supported staged-frame path for anything a person must judge by
+  eye.
+
 No breaking changes: verified against the `v0.7.1` tag, the public C#
 provider surface, log contract tokens, lock payload keys
 (`running`/`session`/`acquired`/`heartbeat`), and suite env names are
