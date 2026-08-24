@@ -8,7 +8,10 @@ to `Helpers`, a new `[7dtd-playtest]` log line pair, and a new host script
 frame per staged case. Feeds [VIDEO_MODEL_FEEDBACK.md](VIDEO_MODEL_FEEDBACK.md)
 (what a clip is reviewed for) and
 [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md) (what a clip is
-used for once reviewed).
+used for once reviewed); the cross-repo consumer of the capability is
+`7dtd-asset-pipeline`'s
+[docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
+whose generated acceptance cases are what stage most clips.
 
 ## Problem
 

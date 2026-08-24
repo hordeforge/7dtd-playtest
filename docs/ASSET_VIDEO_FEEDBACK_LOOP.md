@@ -8,9 +8,10 @@ Proposal. Depends on both
 built first; this document does not duplicate their design. The
 `7dtd-asset-pipeline` half of this plan (a `shamway review-video` operation)
 is specified as its own PRD in that repository,
-`docs/prds/0002-video-based-asset-review.md`, following that repo's own PRD
-template and numbering, kept a separate document because it lives in a
-separate repository with its own registries, gates, and release process.
+[docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
+following that repo's own PRD template and numbering, kept a separate
+document because it lives in a separate repository with its own registries,
+gates, and release process.
 
 ## Problem
 
@@ -39,8 +40,9 @@ iterating the asset, and shamway's own generation pipeline.
    a single frame.
 2. A vision-model critique of that clip is addressed to the same "does this
    fit its purpose" question `shamway review-audio`
-   (`docs/prds/0001-contextual-model-audio-review.md`) already asks of sound,
-   with the same advisory, never-auto-accepting posture.
+   ([docs/prds/0001-contextual-model-audio-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0001-contextual-model-audio-review.md))
+   already asks of sound, with the same advisory, never-auto-accepting
+   posture.
 3. The critique is traceable to the exact generation parameters (mesh seed,
    shape, size, or the source file's hash) that produced the reviewed
    candidate, so one revision's evidence is comparable to the one it
@@ -73,8 +75,9 @@ iterating the asset, and shamway's own generation pipeline.
 
 `shamway acceptance-provider` already generates a 7dtd-playtest scenario
 provider with one case per manifest entry, each loading the asset through
-`DataLoader.LoadAsset<T>` in a live client (asset-pipeline README, "Proving
-it works"). That generated provider is the one place that already knows,
+`DataLoader.LoadAsset<T>` in a live client (asset-pipeline README,
+["Proving it works"](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/README.md#proving-it-works)).
+That generated provider is the one place that already knows,
 per asset, its stem and kind. It gains one more manifest field a mesh/prefab
 entry can carry: a motion kind for the generated case's `onHold` (`turntable`
 | `walk-cycle` | `fixed`, defaulting to `turntable` for a bare mesh/prefab
@@ -99,9 +102,12 @@ directory (frames, mp4, `client.log`) into shamway's own
 ### Where the model critique lands
 
 This is the payload of the sibling PRD,
-`7dtd-asset-pipeline/docs/prds/0002-video-based-asset-review.md`, which
-specifies `shamway review-video` following that repository's PRD template
-(`docs/prds/TEMPLATE.md`) exactly the way `0001-contextual-model-audio-review.md`
+[7dtd-asset-pipeline/docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
+which specifies `shamway review-video` following that repository's PRD
+template
+([docs/prds/TEMPLATE.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/TEMPLATE.md))
+exactly the way
+[0001-contextual-model-audio-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0001-contextual-model-audio-review.md)
 already does for sound: Problem / Goals / Non-goals / Design / Gates /
 Registries / Implementation / Failure modes / Acceptance criteria / Open
 questions, with `review_video` added to `operations.OPERATIONS` and
@@ -166,7 +172,7 @@ justify one would come from.
 | Manifest entry requests a motion kind that does not fit the asset (a world-fixed decoration asked to turntable) | `acceptance-provider` defaults that entry to `fixed` and states why in the generated provider, rather than producing a meaningless spin |
 | Two reviews of the same revision disagree | Both kept; disagreement surfaced, never averaged, matching the audio-review PRD's rule |
 | Model critique is acted on but the next revision is worse | Both revisions' evidence remain, hash-addressed; nothing here prevents or flags a regression automatically, that judgement stays with the person iterating |
-| `shamway review-video` unavailable (PRD 0002 not yet built) | The loop still works manually: a person watches the adopted clip directly, same as any staged clip today |
+| `shamway review-video` unavailable ([PRD 0002](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md)'s operation not yet built) | The loop still works manually: a person watches the adopted clip directly, same as any staged clip today |
 
 ## Implementation
 
@@ -175,9 +181,10 @@ justify one would come from.
    `review_video.py` ([VIDEO_MODEL_FEEDBACK.md](VIDEO_MODEL_FEEDBACK.md)).
    Both are prerequisites; this plan adds nothing to `7dtd-playtest` beyond
    what those two already specify.
-2. In `7dtd-asset-pipeline`: land
-   `docs/prds/0002-video-based-asset-review.md`, then its `review-video`
-   operation, then the `acceptance-provider` manifest's motion-kind field and
+2. In `7dtd-asset-pipeline`: its PRD,
+   [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
+   has landed; next build its `review-video` operation, then the
+   `acceptance-provider` manifest's motion-kind field and
    `shamway client capture --clip`.
 3. Run the full loop once, end to end, on a real modlet asset with a known
    defect (an intentionally clipping garment, matching README's own worked
@@ -210,7 +217,8 @@ justify one would come from.
 - Should `shamway review-video` accept only an already-muxed mp4, or also a
   raw frame directory, given provider capability for actual video ingestion
   varies and `7dtd-playtest`'s own clip directory always has both?
-- Once `docs/prds/0002-video-based-asset-review.md` exists in
-  `7dtd-asset-pipeline`, should its rubric be versioned jointly with
-  `7dtd-playtest`'s, or independently, given the two repos ship on separate
-  schedules?
+- Now that
+  [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md)
+  exists in `7dtd-asset-pipeline`, should its rubric be versioned jointly
+  with `7dtd-playtest`'s, or independently, given the two repos ship on
+  separate schedules?
