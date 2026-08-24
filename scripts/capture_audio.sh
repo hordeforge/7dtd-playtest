@@ -18,8 +18,9 @@
 # Options / env:
 #   --suite <id>   suite to run (required; or PLAYTEST_SUITE)
 #   --out <dir>    output directory (default under ./.local/capture)
-#   --runner <cmd> command that runs one suite; invoked as `<cmd> <id>`,
-#                  so a project wrapper passes e.g. `my-wrapper.sh --suite`.
+#   --runner <cmd> command that runs one suite; invoked as
+#                  `<cmd> --suite <id>`, so a project with its own wrapper
+#                  (deploys, .local.env, lock handling) passes that here.
 #                  Default: this repo's own scripts/playtest_run.py.
 set -euo pipefail
 

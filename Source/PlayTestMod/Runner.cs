@@ -124,9 +124,6 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
-        /// Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
-        /// </summary>
-        /// <summary>
         /// Build a **staging** case: put a scene on screen, announce it, and hold
         /// it still long enough to be photographed.
         ///
@@ -232,6 +229,7 @@ namespace ZdtdPlaytest
                 pause: pause);
         }
 
+        /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).</summary>
         public static CaseDef Defer(string suite, string id, string[] tags, string reason)
         {
             return new CaseDef
