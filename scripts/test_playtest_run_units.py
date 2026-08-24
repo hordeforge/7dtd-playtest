@@ -695,6 +695,47 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
     assert "no players from listplayers" in errbuf.getvalue(), errbuf.getvalue()
 
 
+def test_telnet_broken_session_degrades_to_empty_reply() -> None:
+    """A telnet session that dies mid-poll (server restart, pipe reset) must
+    degrade like every other telnet failure: exec closes the socket and
+    returns "", and list_player_ids' lag re-read then sees no session. The
+    old `assert self._sock` turned that expected operating error into an
+    AssertionError that escaped the poll loop and killed the whole run with
+    a traceback instead of a warn-and-retry next poll."""
+    class BrokenPipe:
+        """Socket stub whose transport is already gone."""
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+        def sendall(self, _b: bytes) -> None:
+            raise OSError("broken pipe")
+
+        def recv(self, _n: int) -> bytes:
+            raise OSError("connection reset")
+
+        def close(self) -> None:
+            return None
+
+    tn = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    tn._sock = BrokenPipe()  # type: ignore[assignment]
+    errbuf = io.StringIO()
+    with contextlib.redirect_stderr(errbuf):
+        ids = tn.list_player_ids()
+    assert ids == [], f"broken session must parse no players: {ids}"
+    assert tn._sock is None, "exec must close the broken session"
+    assert "telnet exec fail" in errbuf.getvalue(), errbuf.getvalue()
+
+    # The same path with no socket at all (post-close callers): empty reply,
+    # never an assert, and no 1.5s settle sleep on the dead handle.
+    gone = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    gone._sock = None
+    t0 = time.monotonic()
+    assert gone.list_player_ids() == []
+    assert time.monotonic() - t0 < 1.0, "dead-session read must not settle-wait"
+    print("PASS telnet_broken_session dead session degrades to empty reply")
+
+
 def test_safe_barrier_param_rejects_command_shapes() -> None:
     """Barrier parameters are lifted from client-log lines (attacker-reachable
     via remote chat) and interpolated into telnet console commands. Only
@@ -945,6 +986,95 @@ def test_write_stock_config_unreadable_template_names_the_file() -> None:
             raise AssertionError("undecodable template accepted silently")
 
 
+def test_write_stock_config_unwritable_output_names_the_file() -> None:
+    """An output path that cannot be created (parent exists as a file) must
+    raise a named RuntimeError carrying the destination and cause, not a bare
+    OSError traceback: this fires after --fresh-save already moved the save
+    aside, mirroring the read-side guard right above it."""
+    src = (
+        "<ServerSettings>\n"
+        '  <property name="TelnetPassword" value="old"/>\n'
+        "</ServerSettings>\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        src_cfg = tdp / "serverconfig.xml"
+        src_cfg.write_text(src, encoding="utf-8")
+        blocker = tdp / "out"
+        blocker.write_text("a file where the output dir must go", encoding="utf-8")
+        out_cfg = blocker / "serverconfig_playtest.xml"
+        try:
+            playtest_run.write_stock_config(
+                src_cfg,
+                out_cfg,
+                tdp / "userdata",
+                world_name="Navezgane",
+                game_name="PlaytestNav",
+                port=26900,
+                telnet_port=8081,
+                telnet_password="pw",
+            )
+        except RuntimeError as ex:
+            assert str(out_cfg) in str(ex), f"destination missing from error: {ex}"
+            assert "cannot write generated serverconfig" in str(ex)
+        except Exception as ex:
+            raise AssertionError(f"wrong error type: {type(ex).__name__}: {ex}") from ex
+        else:
+            raise AssertionError("unwritable generated config accepted silently")
+    print(
+        "PASS stock_config_unwritable_output named RuntimeError carries destination"
+    )
+
+
+def test_wait_stock_ready_early_exit_survives_unreadable_log() -> None:
+    """When the dedicated exits before StartGame done, the diagnostic tail of
+    its unity log is best-effort: a readable log must be echoed scrubbed,
+    and an unreadable one (rotation, EIO, permissions) must warn and still
+    return False instead of raising out of main()'s startup path."""
+    class DeadProc:
+        returncode = 137
+
+        def poll(self) -> int:
+            return 137
+
+    orig_timeout = playtest_run.STOCK_READY_TIMEOUT_SEC
+    playtest_run.STOCK_READY_TIMEOUT_SEC = 0.05
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            unity_log = tdp / "server_playtest.txt"
+
+            # Readable log: tail reaches stderr, verdict is False.
+            unity_log.write_text(
+                "line one\nERROR: world load failed\nline three\n",
+                encoding="utf-8",
+            )
+            errbuf = io.StringIO()
+            with contextlib.redirect_stderr(errbuf):
+                ready = playtest_run.wait_stock_dedicated_ready(DeadProc(), unity_log)  # type: ignore[arg-type]
+            assert ready is False, "exited-early dedicated must not read as ready"
+            errs = errbuf.getvalue()
+            assert "exited early code=137" in errs, errs
+            assert "tail server log" in errs and "world load failed" in errs, errs
+
+            # Unreadable log: warn + same False verdict, no exception.
+            if os.geteuid() != 0:
+                unity_log.chmod(0o000)
+                try:
+                    errbuf = io.StringIO()
+                    with contextlib.redirect_stderr(errbuf):
+                        ready = playtest_run.wait_stock_dedicated_ready(DeadProc(), unity_log)  # type: ignore[arg-type]
+                    assert ready is False
+                    assert "could not read server log tail" in errbuf.getvalue(), (
+                        errbuf.getvalue()
+                    )
+                finally:
+                    unity_log.chmod(0o644)
+    finally:
+        playtest_run.STOCK_READY_TIMEOUT_SEC = orig_timeout
+    print("PASS stock_ready_unreadable_log tail read is best-effort, verdict stands")
+
+
 def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
     """A signal-driven SystemExit escaping after the claim was published must
     not leave it standing: main() has not set lock_held yet, so its finally
@@ -1042,6 +1172,14 @@ def main() -> int:
         ("tcp_port_range", test_tcp_port_type_range),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
+        (
+            "telnet_broken_session",
+            test_telnet_broken_session_degrades_to_empty_reply,
+        ),
+        (
+            "stock_ready_unreadable_log",
+            test_wait_stock_ready_early_exit_survives_unreadable_log,
+        ),
         ("barrier_param_validation", test_safe_barrier_param_rejects_command_shapes),
         (
             "barrier_param_wiring",
@@ -1065,6 +1203,10 @@ def main() -> int:
         (
             "stock_config_unreadable_template",
             test_write_stock_config_unreadable_template_names_the_file,
+        ),
+        (
+            "stock_config_unwritable_output",
+            test_write_stock_config_unwritable_output_names_the_file,
         ),
         (
             "acquire_exclusive_lock_undo",

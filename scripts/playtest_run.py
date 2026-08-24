@@ -295,15 +295,19 @@ def wait_stock_dedicated_ready(proc: subprocess.Popen, unity_log: Path) -> bool:
         return True
     if proc.poll() is not None:
         err(f"stock dedicated exited early code={proc.returncode}")
-        if unity_log.is_file():
+        try:
+            tail = unity_log.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()[-40:]
+        except OSError as ex:
+            # The exit-code verdict stands on its own; a log that cannot be
+            # re-read (rotation, EIO) must not become a raw traceback here,
+            # same boundary as the client-log grep at the final verdict.
+            warn(f"could not read server log tail {unity_log}: {ex}")
+        else:
             err(
                 "tail server log:\n"
-                + "\n".join(
-                    scrub(line)
-                    for line in unity_log.read_text(
-                        encoding="utf-8", errors="replace"
-                    ).splitlines()[-40:]
-                )
+                + "\n".join(scrub(line) for line in tail)
             )
         return False
     warn("no StartGame done yet; server still running, proceeding")
@@ -412,8 +416,16 @@ def write_stock_config(
             _literal_replacement(f'name="{k}" value="{xml_attr(v)}"'),
             text,
         )
-    out_cfg.parent.mkdir(parents=True, exist_ok=True)
-    out_cfg.write_text(text, encoding="utf-8")
+    try:
+        out_cfg.parent.mkdir(parents=True, exist_ok=True)
+        out_cfg.write_text(text, encoding="utf-8")
+    except OSError as ex:
+        # Named like the read failure above: this runs after --fresh-save
+        # already moved the save aside, so the operator needs the destination
+        # path and cause, not a bare OSError traceback from deep in main().
+        raise RuntimeError(
+            f"cannot write generated serverconfig {out_cfg}: {ex}"
+        ) from ex
     # The generated config carries TelnetPassword; keep it user-only instead
     # of inheriting a world-readable umask.
     try:
@@ -1102,11 +1114,18 @@ class TelnetAdmin:
         return spawned
 
     def _send(self, line: str) -> None:
-        assert self._sock
+        # Same contract as exec(): no session means nothing was sent.
+        # list_player_ids calls _recv after exec may have closed a broken
+        # socket, so a bare assert here would turn an expected operating
+        # error (pipe reset mid-poll) into a run-killing AssertionError
+        # instead of the warn-and-retry every other telnet path uses.
+        if not self._sock:
+            return
         self._sock.sendall((line + "\n").encode("utf-8", errors="replace"))
 
     def _recv(self, settle: float) -> str:
-        assert self._sock
+        if not self._sock:
+            return ""
         time.sleep(settle)
         chunks: list[bytes] = []
         self._sock.settimeout(0.25)
