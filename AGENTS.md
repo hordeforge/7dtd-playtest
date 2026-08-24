@@ -93,6 +93,9 @@ When free: `running=no` (omit session / timestamps).
 
 Inspect: `cat` the lock file, or from the repo root
 `PYTHONPATH=scripts python3 -c "import playtest_lock as p; print(p.read_lock())"`.
+Wait until a new session could acquire (missing heartbeat is stale):
+`python3 scripts/playtest_lock.py wait`. Do not parse `running=` /
+`heartbeat=` in a consumer.
 
 ### Acquire / release / process check
 
