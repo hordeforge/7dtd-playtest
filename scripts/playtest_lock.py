@@ -858,12 +858,16 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(opt + " requires a value\n")
                 return 2
             val = rest[i + 1]
-            if opt == "--timeout":
-                timeout_sec = float(val)
-            elif opt == "--interval":
-                interval_sec = float(val)
-            else:
-                path = Path(val)
+            try:
+                if opt == "--timeout":
+                    timeout_sec = float(val)
+                elif opt == "--interval":
+                    interval_sec = float(val)
+                else:
+                    path = Path(val)
+            except ValueError:
+                sys.stderr.write(opt + " requires a number, got " + val + "\n")
+                return 2
             i += 2
             continue
         sys.stderr.write("unknown option " + opt + "\n")

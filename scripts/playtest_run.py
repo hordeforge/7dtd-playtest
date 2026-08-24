@@ -1354,7 +1354,10 @@ class TelnetAdmin:
             return 0
         # One passive-ish spawn near first player only (no scouts: they swarm and kill).
         r = self.exec(f"spawnentity {ids[0]} {entity}")
-        spawned = 0 if "No spawn point" in r else 1
+        # A broken session returns "" exactly like a silent success; only
+        # trust the fire when the socket survived the exchange (exec closes
+        # it on failure), so callers fall back or retry instead of skipping.
+        spawned = 1 if self._sock is not None and "No spawn point" not in r else 0
         if spawned == 0:
             # Offset from known pad so the zombie is visible but not on top of the player.
             for pos in (PERSIST_PAD_COORDS, "530 62 960", "515 62 955"):
@@ -1609,21 +1612,26 @@ def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
     )
 
 
-def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> None:
+def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> bool:
     """Copy the previous run's log into the quarantine before truncation.
 
-    The truncation itself stays: incremental readers depend on starting from
-    an empty file. Only the evidence of the previous run is preserved.
+    Returns True when truncation is safe (nothing to preserve, copy done) or
+    False when the quarantine is unusable and the caller must leave the bytes
+    in place per the no-destruction rule (README "State, backups, and
+    recovery"). The truncation itself stays part of the normal path:
+    incremental readers depend on starting from an empty file.
     """
     if path is None or not path.is_file():
-        return
+        return True
     entry = _quarantine_entry(qroot, kind)
     if entry is None:
-        return
+        return False
     try:
         shutil.copy2(path, entry / path.name)
     except OSError as ex:
         warn(f"could not preserve previous {kind}: {ex}")
+        return False
+    return True
 
 
 # Suite ids whose live cases depend on host-serviced admin fixtures. The
@@ -1762,7 +1770,7 @@ def barrier_ensure_bots(tn: TelnetAdmin) -> None:
     # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if
     # needed (lines with "Bot " in bot list).
     out = tn.exec("bot list")
-    if len(re.findall(r"Bot ", out)) < 4:
+    if len(re.findall(r"Bot ", out)) < 6:
         r = tn.exec("bot count 6")
         log(f"telnet bot count 6 -> {r[:120]!r}")
 
@@ -2337,21 +2345,35 @@ def main(argv: list[str] | None = None) -> int:
                 # args.world always carries a Path default; only zdtd reads it.
                 fresh_zdtd_world(args.world, qroot)
 
-        snapshot_previous_log(args.client_log, qroot, "client-log")
-        if peer_client_log is not None:
-            snapshot_previous_log(peer_client_log, qroot, "peer-client-log")
-        truncate_file(args.client_log, "client log")
+        preserved_client = snapshot_previous_log(
+            args.client_log, qroot, "client-log"
+        )
+        preserved_peer = snapshot_previous_log(
+            peer_client_log, qroot, "peer-client-log"
+        ) if peer_client_log is not None else True
+        if preserved_client:
+            truncate_file(args.client_log, "client log")
+        else:
+            # Quarantine unusable: the previous generation's bytes stay in
+            # place; the tail starts past them so stale events cannot be
+            # re-parsed as this run's.
+            warn("previous client log kept untruncated; run events are read "
+                 "from the end of the existing bytes")
         if peer_client_log is not None:
             peer_client_log.parent.mkdir(parents=True, exist_ok=True)
-            truncate_file(peer_client_log, "peer client log")
+            if preserved_peer:
+                truncate_file(peer_client_log, "peer client log")
 
         # Incremental readers created right after the truncation above so every
         # later append is seen exactly once. Later truncations (rejoin phases)
-        # are detected by LogTail as a shrink and restart from zero.
-        client_tail = LogTail(args.client_log)
+        # are detected by LogTail as a shrink and restart from zero. A log left
+        # untruncated (quarantine unavailable) starts past its existing bytes.
+        client_tail = LogTail(args.client_log, from_end=not preserved_client)
         client_scan = ClientLogScan()
         peer_tail = (
-            LogTail(peer_client_log) if peer_client_log is not None else None
+            LogTail(peer_client_log, from_end=not preserved_peer)
+            if peer_client_log is not None
+            else None
         )
         peer_scan = ClientLogScan()
 
@@ -2553,7 +2575,13 @@ def main(argv: list[str] | None = None) -> int:
                 client_launch_log,
                 extra_env=client_extra_env,
             )
-            setup_deadline = time.monotonic() + min(args.timeout, 300)
+            # Phase budgets stay inside the documented harness wall clock
+            # (--timeout bounds the whole run): each rejoin phase is bounded
+            # by its own per-phase cap AND what remains of the run deadline.
+            remaining_sec = max(0.0, deadline - time.monotonic())
+            setup_deadline = time.monotonic() + min(
+                min(args.timeout, 300), remaining_sec
+            )
             last_setup_progress = float("-inf")
             rejoin_setup_seen = 0
 
@@ -2656,6 +2684,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 write_junit(junit_path, args.suite, results)
                 prune_run_artifacts(args.logdir)
+                if setup_done and setup_fail > 0:
+                    # A completed setup phase that reported FAIL rows is "one
+                    # or more case failures" (exit 1 per the README table),
+                    # not a harness error; only an aborted phase is exit 2.
+                    err(
+                        f"FAIL: {rejoin_label} setup reported {setup_fail} case "
+                        f"failure(s); rejoin verify not run"
+                    )
+                    return 1
                 err(f"FAIL harness: {rejoin_label} setup incomplete")
                 return 2
 
@@ -2712,7 +2749,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             ready_seen = False
             rejoin_teleport_done = args.rejoin_teleport is None
-            deadline = time.monotonic() + min(args.timeout, 400)
+            # Same run-budget discipline as the setup phase above: the verify
+            # phase cannot push the total past --timeout.
+            deadline = time.monotonic() + min(
+                min(args.timeout, 400),
+                max(0.0, deadline - time.monotonic()),
+            )
 
         # Always defined so timeout / missing client logs cannot UnboundLocalError.
         peer_parsed: dict = {}
@@ -2963,11 +3005,15 @@ def main(argv: list[str] | None = None) -> int:
                         # is interpolated into spawnentityat/spawnentity.
                         warn(f"spawn_vehicle:{cls!r}: unsafe entity class, dropped")
                         continue
-                    vehicle_seen[cls] = vehicle_seen.get(cls, 0) + 1
-                for cls in vehicle_seen:
+                    # Key by the full barrier name so service_barrier's
+                    # counts/seen lookup sees it (it compares on name).
+                    key = f"spawn_vehicle:{cls}"
+                    vehicle_seen[key] = vehicle_seen.get(key, 0) + 1
+                for key in vehicle_seen:
                     def spawn_class_vehicle(
-                        tn: TelnetAdmin, cls: str = cls
+                        tn: TelnetAdmin, key: str = key
                     ) -> None:
+                        cls = key.split(":", 1)[-1]
                         n = tn.spawn_near_players(cls)
                         if n == 0:
                             r = tn.exec(f"spawnentityat {cls} {PERSIST_PAD_COORDS}")
@@ -2976,7 +3022,7 @@ def main(argv: list[str] | None = None) -> int:
                             log(f"telnet spawn vehicle {cls} near players units~={n}")
 
                     service_barrier(
-                        f"spawn_vehicle:{cls}",
+                        key,
                         counts=vehicle_spawns_fired,
                         seen=vehicle_seen,
                         act=spawn_class_vehicle,

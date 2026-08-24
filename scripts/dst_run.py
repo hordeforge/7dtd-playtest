@@ -104,15 +104,25 @@ def replay_flags(cfg: SimConfig) -> str:
         f"--heartbeat-sec {cfg.heartbeat_sec:g}",
     ]
     faults = cfg.faults
-    if faults == Faults.none():
-        flags.append("--no-faults")
-    elif faults.clock_skew_sec > 0.0 and faults == Faults(
-        clock_skew_sec=faults.clock_skew_sec
-    ):
-        # Only the skew knob moved off the default; --clock-skew rebuilds it.
+    if faults == Faults():
+        # Parser defaults rebuild this shape; no fault flag needed.
+        pass
+    else:
+        happy_with_skew = Faults.none()
+        happy_with_skew.clock_skew_sec = faults.clock_skew_sec
+        if faults == happy_with_skew:
+            # --no-faults, optionally with --clock-skew, rebuilds this shape
+            # through config_from_args exactly (including skew-only moves).
+            flags.append("--no-faults")
+            if faults.clock_skew_sec > 0.0:
+                flags.append("--clock-skew")
+        elif faults.clock_skew_sec > 0.0 and faults == Faults(
+            clock_skew_sec=faults.clock_skew_sec
+        ):
+            # Only the skew knob moved off the default; --clock-skew rebuilds it.
+            flags.append("--clock-skew")
         # Any other shape is not expressible on the CLI, so emit nothing
         # rather than a command that lies about the fault set.
-        flags.append("--clock-skew")
     return " ".join(flags)
 
 

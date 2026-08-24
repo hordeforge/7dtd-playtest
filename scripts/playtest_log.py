@@ -19,7 +19,9 @@ RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
 SUMMARY_RE = re.compile(
     r"\[7dtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
 )
-DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?:\s+exit_hint=(\d+))?")
+# Whole-token match like barrier_line_hits: a foreign "[7dtd-playtest]
+# DONExxx" line must not parse as the run-completion marker.
+DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?![\w:])(?:\s+exit_hint=(\d+))?")
 JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
@@ -225,11 +227,21 @@ class LogTail:
     (truncated before a restart), reading restarts from zero. Decoding happens
     per completed line, so a multi-byte character split across polls stays
     intact inside the byte buffer.
+
+    ``from_end`` starts the tail at the file's current size instead of zero:
+    for a log that must not be truncated (its previous generation could not
+    be preserved), only bytes appended after construction are returned.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, from_end: bool = False) -> None:
         self._path = path
-        self._offset = 0
+        if from_end:
+            try:
+                self._offset = path.stat().st_size
+            except OSError:
+                self._offset = 0
+        else:
+            self._offset = 0
         self._pending = b""
 
     def poll(self) -> str:

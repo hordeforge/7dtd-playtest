@@ -58,16 +58,37 @@ command -v pactl >/dev/null || { echo "ERROR: pactl is required" >&2; exit 2; }
 # an overlapping run's audio lands in this recording and nobody can tell whose
 # blast was heard.
 #
-# pgrep -x on the process NAME, never -f on the command line: -f matches any
-# process whose cmdline merely contains the game's name, which includes the
-# monitoring commands a session runs while watching a run.
-if pgrep -x '7DaysToDieServer.x86_64' >/dev/null 2>&1 \
-	|| pgrep -x '7DaysToDie.exe' >/dev/null 2>&1 \
-	|| pgrep -x '7DaysToDie_EAC.exe' >/dev/null 2>&1; then
-	echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
-	echo "       Let it finish before capturing; overlapping runs record each other." >&2
-	exit 1
-fi
+# pgrep -f on the command line would match any process whose cmdline merely
+# contains the game's name, which includes the monitoring commands a session
+# runs while watching a run. Instead reuse the orchestrator's own runtime
+# probe (playtest_lock): it inspects each process's executable, so stock/Proton
+# clients (including the Wine preloader phase), the stock dedicated, and zdtd
+# are all covered with no drift between this guard and the runner's lock.
+runtime_rc=0
+python3 - "$HERE" <<'PYEOF' || runtime_rc=$?
+import sys
+
+sys.path.insert(0, sys.argv[1])
+try:
+    import playtest_lock
+    live = bool(playtest_lock.default_live_runtime_running())
+except Exception as ex:  # noqa: BLE001 - guard must never fail open silently
+    print(f"capture_audio: cannot inspect live runtimes: {ex}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(1 if live else 0)
+PYEOF
+case $runtime_rc in
+	0) : ;;
+	1)
+		echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
+		echo "       Let it finish before capturing; overlapping runs record each other." >&2
+		exit 1
+		;;
+	*)
+		echo "ERROR: could not verify that no 7 Days to Die runtime is live; refusing." >&2
+		exit 2
+		;;
+esac
 
 SINK="$(pactl get-default-sink 2>/dev/null)"
 [[ -n "$SINK" ]] || { echo "ERROR: no default sink" >&2; exit 2; }

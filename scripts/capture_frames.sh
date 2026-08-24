@@ -78,17 +78,39 @@ CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/A
 # writing that log, so a "newer than start" check passes against ITS marker and
 # the frames belong to the wrong run.
 #
-# pgrep -x on the process NAME, never -f on the command line: -f matches any
-# process whose cmdline merely contains the game's name, which includes the
-# monitoring commands a session runs while watching a run (a `tail -f` of the
-# client log, a `pgrep` in a wait loop). That false positive is not theoretical.
-if pgrep -x '7DaysToDieServer.x86_64' >/dev/null 2>&1 \
-	|| pgrep -x '7DaysToDie.exe' >/dev/null 2>&1 \
-	|| pgrep -x '7DaysToDie_EAC.exe' >/dev/null 2>&1; then
-	echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
-	echo "       Let it finish before capturing; overlapping runs photograph the wrong one." >&2
-	exit 1
-fi
+# pgrep -f on the command line would match any process whose cmdline merely
+# contains the game's name, which includes the monitoring commands a session
+# runs while watching a run (a `tail -f` of the client log, a `pgrep` in a
+# wait loop). That false positive is not theoretical. Instead reuse the
+# orchestrator's own runtime probe (playtest_lock): it inspects each
+# process's executable, so stock/Proton clients (including the Wine preloader
+# phase), the stock dedicated, and zdtd are all covered with no drift between
+# this guard and the lock the runner itself enforces.
+runtime_rc=0
+python3 - "$HERE" <<'PYEOF' || runtime_rc=$?
+import sys
+
+sys.path.insert(0, sys.argv[1])
+try:
+    import playtest_lock
+    live = bool(playtest_lock.default_live_runtime_running())
+except Exception as ex:  # noqa: BLE001 - guard must never fail open silently
+    print(f"capture_frames: cannot inspect live runtimes: {ex}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(1 if live else 0)
+PYEOF
+case $runtime_rc in
+	0) : ;;
+	1)
+		echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
+		echo "       Let it finish before capturing; overlapping runs photograph the wrong one." >&2
+		exit 1
+		;;
+	*)
+		echo "ERROR: could not verify that no 7 Days to Die runtime is live; refusing." >&2
+		exit 2
+		;;
+esac
 
 mkdir -p "$OUT"
 START="$(date +%s)"
