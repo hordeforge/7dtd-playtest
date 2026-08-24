@@ -147,6 +147,10 @@ unchanged.
 
 ### Fixed
 
+- Server CVar oracle parsing now requires the value delimiter immediately
+  after the requested name, so a telnet command echo cannot be mistaken for
+  the player entity ID supplied through `-p`.
+
 - `loot_bag_pickup` no longer parks the dropped item's entity id in the
   float context slot: entity ids above 2^24 lost precision through the
   `float`/`(int)` round-trip and corrupted the gone-check verdict. The id
