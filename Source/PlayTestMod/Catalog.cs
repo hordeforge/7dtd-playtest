@@ -1015,9 +1015,17 @@ namespace ZdtdPlaytest
                 // Chunk settle after tele.
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 if (elapsed < 1.2f) return false;
-                var pos = ctx.Player.GetPosition();
-                int m = Helpers.MaxBlockTypeInRadius(ctx.World, pos, 32);
-                if (m > ctx.IntA) ctx.IntA = m;
+                // The radius-32 scan walks ~38k blocks per call; sampling it at
+                // 2 Hz keeps that off the frame loop while still resolving
+                // well inside the 4s window (same pulse idiom as water_plane).
+                int pulse = (int)(elapsed * 2f);
+                if (pulse != ctx.IntB)
+                {
+                    ctx.IntB = pulse;
+                    var pos = ctx.Player.GetPosition();
+                    int m = Helpers.MaxBlockTypeInRadius(ctx.World, pos, 32);
+                    if (m > ctx.IntA) ctx.IntA = m;
+                }
                 ctx.Detail = "maxBlockType=" + ctx.IntA + " t=" + elapsed.ToString("0.0");
                 return ctx.IntA >= 256 || elapsed >= 4f;
             }, assert: ctx =>
@@ -1132,9 +1140,17 @@ namespace ZdtdPlaytest
                     string d;
                     Helpers.RequestWaterSet(ctx.Player, ctx.TargetBlock, out d);
                 }
-                int n = Helpers.CountWaterInRadius(ctx.World, ctx.Player.GetPosition(), 64);
+                // The radius-64 count scan walks ~7.6k blocks per call; sample it
+                // at 2 Hz (IntB is free in this case) so the frame loop only pays
+                // the cheap single-cell mass probe between samples.
+                int scanPulse = (int)(elapsed * 2f);
+                if (scanPulse != ctx.IntB)
+                {
+                    ctx.IntB = scanPulse;
+                    int n = Helpers.CountWaterInRadius(ctx.World, ctx.Player.GetPosition(), 64);
+                    if (n > ctx.IntA) ctx.IntA = n;
+                }
                 bool mass = Helpers.CellHasWaterMass(ctx.World, ctx.TargetBlock);
-                if (n > ctx.IntA) ctx.IntA = n;
                 if (mass) ctx.IntA = Math.Max(ctx.IntA, 1);
                 ctx.Detail = "water=" + ctx.IntA + " mass=" + mass + " t=" + elapsed.ToString("0.0");
                 return ctx.IntA > 0 || mass || elapsed >= 5f;
@@ -4495,6 +4511,11 @@ namespace ZdtdPlaytest
         static void AddApm(List<CaseDef> q, string suite)
         {
             // Host attaches zdtd APM dump; client signals barrier then asserts dump path/env.
+            // Captured by the wait closure: next unscaled time a poll may run. The
+            // host writes the dump asynchronously, so sampling ~4x/s observes it
+            // far inside the 55s budget; reading + scanning the file every frame
+            // burns disk I/O on the game thread for the whole wait instead.
+            float nextPollAt = -1f;
             q.Add(Live(suite, "soak_apm_budget", new[] { "soak", "apm" }, ctx =>
             {
                 Report.Barrier("apm_dump");
@@ -4502,7 +4523,10 @@ namespace ZdtdPlaytest
                 ctx.Detail = "request APM dump";
             }, wait: ctx =>
             {
-                float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
+                float now = Time.unscaledTime;
+                if (now < nextPollAt) return false;
+                nextPollAt = now + 0.25f;
+                float elapsed = now - ctx.CaseStartUnscaled;
                 string path = ResolveApmDumpPath();
                 string runId = Environment.GetEnvironmentVariable("ZDTD_APM_RUN_ID") ?? "";
                 bool ok = false;
