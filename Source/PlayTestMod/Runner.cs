@@ -6,19 +6,6 @@ using UnityEngine;
 
 namespace ZdtdPlaytest
 {
-    /// <summary>
-    /// Scenario runner on GameManager.gmUpdate. Act → Wait → Assert per case.
-    /// Suites are named demos (smoke, core, demo, benchmark, …); see SCENARIOS.md.
-    /// </summary>
-    [HarmonyPatch(typeof(GameManager), "gmUpdate")]
-    static class Patch_GameManager_PlayTest
-    {
-        static void Postfix()
-        {
-            Runner.Tick();
-        }
-    }
-
     enum Phase
     {
         WaitReady,
@@ -871,6 +858,19 @@ namespace ZdtdPlaytest
             }
             why = "ok";
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Scenario runner on GameManager.gmUpdate. Act → Wait → Assert per case.
+    /// Suites are named demos (smoke, core, demo, benchmark, …); see SCENARIOS.md.
+    /// </summary>
+    [HarmonyPatch(typeof(GameManager), "gmUpdate")]
+    static class Patch_GameManager_PlayTest
+    {
+        static void Postfix()
+        {
+            Runner.Tick();
         }
     }
 }

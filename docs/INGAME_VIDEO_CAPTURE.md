@@ -21,7 +21,7 @@ is unreliable (the window may be unfocused, occluded, or not mapped, so it
 shows a stale or empty frame) and, on a host running more than one client,
 unsound (it photographs whatever is in front, which has repeatedly meant
 another session's client). `CaseDef.Staged` (Runner.cs:167) solves this for
-one frame: it calls `Helpers.CaptureFrame` (Helpers.cs:1917), which uses
+one frame: it calls `Helpers.CaptureFrame` (Helpers.Ui.cs), which uses
 Unity's own `ScreenCapture.CaptureScreenshot`, this client process's own
 framebuffer, from inside the game.
 
@@ -87,7 +87,7 @@ single-shot capture running elsewhere. This needs one small addition to
 `Helpers`, not a new capture API:
 
 ```csharp
-// Helpers.cs, beside CaptureFrame
+// Helpers.Ui.cs, beside CaptureFrame
 public static string CaptureClipFrame(string clipId, int frameIndex, int superSize = 2)
 {
     // Same profile/dir resolution as CaptureFrame, under
@@ -240,7 +240,7 @@ environment variables.
 
 ## Implementation
 
-1. `Helpers.CaptureClipFrame` in `Source/PlayTestMod/Helpers.cs`, beside
+1. `Helpers.CaptureClipFrame` in `Source/PlayTestMod/Helpers.Ui.cs`, beside
    `CaptureFrame`, with the same profile-resolution and `SafeFileName` reuse.
 2. `CaseDef.StagedClip` in `Source/PlayTestMod/Runner.cs`, beside `Staged`,
    sharing `Live` the same way `Staged` does.

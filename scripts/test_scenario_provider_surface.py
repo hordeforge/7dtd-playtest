@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 PROVIDER = ROOT / "Source" / "PlayTestMod" / "ScenarioProvider.cs"
-HELPERS = ROOT / "Source" / "PlayTestMod" / "Helpers.cs"
+HELPERS_GLOB = sorted((ROOT / "Source" / "PlayTestMod").glob("Helpers*.cs"))
 REPORT = ROOT / "Source" / "PlayTestMod" / "Report.cs"
 README = ROOT / "README.md"
 AGENTS = ROOT / "AGENTS.md"
@@ -133,7 +133,10 @@ def main() -> int:
         "Catalog.Defer must not construct CaseDef by hand"
     )
 
-    helpers = HELPERS.read_text(encoding="utf-8")
+    # Helpers is one public static class split across partial-class files
+    # (Helpers.Ui.cs, Helpers.World.cs, ...); assert against the joined text.
+    assert HELPERS_GLOB, "Helpers partial files missing"
+    helpers = "\n".join(p.read_text(encoding="utf-8") for p in HELPERS_GLOB)
     report = REPORT.read_text(encoding="utf-8")
     agents = AGENTS.read_text(encoding="utf-8")
     makefile = MAKEFILE.read_text(encoding="utf-8")
@@ -144,7 +147,7 @@ def main() -> int:
     assert "CaseDef.Defer" in readme, "README must document CaseDef.Defer"
 
     # Public Helpers + Report for external providers (give/equip/vehicle/barriers).
-    assert re.search(r"public\s+static\s+class\s+Helpers\b", helpers), (
+    assert re.search(r"public\s+static\s+(partial\s+)?class\s+Helpers\b", helpers), (
         "Helpers must be public static for external providers"
     )
     assert re.search(r"public\s+static\s+class\s+Report\b", report), (
