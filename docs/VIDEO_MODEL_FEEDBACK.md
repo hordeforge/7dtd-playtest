@@ -9,7 +9,10 @@ sibling, also-unbuilt PRD in `7dtd-asset-pipeline`,
 [`docs/prds/0001-contextual-model-audio-review.md`](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0001-contextual-model-audio-review.md),
 which specifies the same shape for sound. Depends on
 [INGAME_VIDEO_CAPTURE.md](INGAME_VIDEO_CAPTURE.md) for the clip itself; feeds
-[ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md).
+[ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md), whose shamway
+counterpart is specified as
+[docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md)
+in `7dtd-asset-pipeline`.
 
 ## Problem
 
@@ -236,9 +239,10 @@ Three integration points, deliberately the only three:
   video/multi-frame support, structured output, retention controls, and cost
   vary independently across sight and sound?
 - Should the versioned rubric live in this repo, or move somewhere shared
-  once `7dtd-asset-pipeline`'s `review-video` (see
-  [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md)) exists, so
-  the two do not drift into incompatible rubrics for the same kind of
+  once `7dtd-asset-pipeline`'s `review-video` (specified in its
+  [PRD 0002](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md);
+  see [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md)) is built,
+  so the two do not drift into incompatible rubrics for the same kind of
   judgement?
 - Does `--attach-reviews` belong as a first-class report field eventually, or
   stay a filesystem convention indefinitely? The stable log contract table
