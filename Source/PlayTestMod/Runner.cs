@@ -126,6 +126,77 @@ namespace ZdtdPlaytest
         /// <summary>
         /// Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
         /// </summary>
+        /// <summary>
+        /// Build a **staging** case: put a scene on screen, announce it, and hold
+        /// it still long enough to be photographed.
+        ///
+        /// <para>This is the shape every visual-evidence fixture needs, and until
+        /// now every provider hand-rolled it — emit a bespoke
+        /// <see cref="Report.Info"/> line, run a hold timer, assert a flag —
+        /// which is how screenshot loops ended up grepping a different sentence
+        /// per project. Here it is once: <paramref name="stage"/> does the work
+        /// and returns whether the scene really is up; this emits
+        /// <see cref="Report.Staged"/> with <paramref name="id"/> the instant it
+        /// returns, holds for <paramref name="holdSeconds"/>, and fails the case
+        /// if staging did not succeed.</para>
+        ///
+        /// <para>The assert deliberately only establishes that there was
+        /// something to photograph. A staging case must never claim the scene
+        /// looked right — no fixture in this harness can see. Pair it with
+        /// <c>scripts/capture_frames.sh</c>, and leave the verdict to a person.</para>
+        /// </summary>
+        /// <param name="stage">
+        /// Stages the scene and returns true when it is genuinely on screen.
+        /// Its optional string return is passed to <see cref="Report.Staged"/> as
+        /// detail for the human reading the frame.
+        /// </param>
+        /// <param name="holdSeconds">How long to hold the scene still.</param>
+        public static CaseDef Staged(
+            string suite,
+            string id,
+            string[] tags,
+            Func<CaseCtx, bool> stage,
+            float holdSeconds = 10f,
+            string fail = null,
+            float pause = 0.5f)
+        {
+            if (stage == null)
+                throw new ArgumentException(
+                    "CaseDef.Staged(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") has no stage callback; it would hold an empty scene and "
+                    + "record a pass for photographing nothing");
+            if (!(holdSeconds > 0f))
+                throw new ArgumentOutOfRangeException(nameof(holdSeconds), holdSeconds,
+                    "CaseDef.Staged(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") holdSeconds must be > 0: a scene nobody can photograph is "
+                    + "not evidence");
+
+            return Live(
+                suite,
+                id,
+                tags,
+                act: ctx =>
+                {
+                    bool ok = false;
+                    try { ok = stage(ctx); }
+                    catch (Exception e)
+                    {
+                        ctx.Detail = "stage threw: " + e.Message;
+                    }
+                    ctx.IntA = ok ? 1 : 0;
+                    ctx.FloatA = Time.unscaledTime;
+                    // Immediately, not at result time: a screenshot loop keyed on
+                    // the result photographs the disconnect dialog.
+                    Report.Staged(id, ctx.Detail);
+                },
+                wait: ctx => Time.unscaledTime - ctx.FloatA >= holdSeconds,
+                assert: ctx => ctx.IntA == 1,
+                timeout: holdSeconds + 20f,
+                fail: fail ?? ("the " + id + " scene did not stage, so any frames taken during it "
+                    + "show something else"),
+                pause: pause);
+        }
+
         public static CaseDef Defer(string suite, string id, string[] tags, string reason)
         {
             return new CaseDef
