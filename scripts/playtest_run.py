@@ -341,7 +341,6 @@ def write_stock_config(
     port: int,
     telnet_port: int,
     telnet_password: str,
-    max_players: int = 8,
 ) -> None:
     text = src_cfg.read_text(encoding="utf-8")
     ud = str(userdata.resolve())
@@ -378,7 +377,7 @@ def write_stock_config(
         "WorldGenSeed": "playtest",
         "WorldGenSize": "4096",
         "ServerPort": str(port),
-        "ServerMaxPlayerCount": str(max_players),
+        "ServerMaxPlayerCount": "8",
         "EACEnabled": "false",
         "ServerAllowCrossplay": "false",
         "ServerDisabledNetworkProtocols": "SteamNetworking",
@@ -957,10 +956,10 @@ class TelnetAdmin:
         self.password = password
         self._sock: socket.socket | None = None
 
-    def connect(self, timeout: float = 5.0) -> bool:
+    def connect(self) -> bool:
         try:
             self.close()
-            s = socket.create_connection((self.host, self.port), timeout=timeout)
+            s = socket.create_connection((self.host, self.port), timeout=5.0)
             s.settimeout(2.0)
             self._sock = s
             banner = self._recv(0.8)
@@ -2018,7 +2017,15 @@ def main(argv: list[str] | None = None) -> int:
                     break
                 counts[name] = counts.get(name, 0) + 1
 
-        if not args.no_server:
+        def start_server() -> bool:
+            """Start the selected backend (unless --no-server) and wait ready.
+
+            One path for the initial start and the rejoin restart so they
+            cannot drift (same reason the ready-wait budgets are shared).
+            """
+            nonlocal server_proc, unity_log
+            if args.no_server:
+                return True
             if args.server == "stock":
                 server_proc, unity_log = start_stock_dedicated(
                     args.game_srv,
@@ -2030,19 +2037,19 @@ def main(argv: list[str] | None = None) -> int:
                     telnet_port=args.admin_port,
                     telnet_password=telnet_password,
                 )
-                if not wait_stock_dedicated_ready(server_proc, unity_log):
-                    return 2
-            else:
-                server_proc = start_zdtd(
-                    args.zdtd,
-                    args.world,
-                    args.port,
-                    args.admin_port,
-                    args.game_srv,
-                    server_log,
-                )
-                if not wait_zdtd_ready(server_proc, server_log):
-                    return 2
+                return wait_stock_dedicated_ready(server_proc, unity_log)
+            server_proc = start_zdtd(
+                args.zdtd,
+                args.world,
+                args.port,
+                args.admin_port,
+                args.game_srv,
+                server_log,
+            )
+            return wait_zdtd_ready(server_proc, server_log)
+
+        if not start_server():
+            return 2
 
         # zdtd admin TCP speaks the same command surface the orch uses for stock
         # telnet (listplayers/listents/kill/spawnentity/settime). Enable fixtures
@@ -2287,30 +2294,8 @@ def main(argv: list[str] | None = None) -> int:
             pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
             time.sleep(5)
             # Restart dedicated on same save (no fresh_save).
-            if args.server == "stock" and not args.no_server:
-                server_proc, unity_log = start_stock_dedicated(
-                    args.game_srv,
-                    args.userdata,
-                    server_log,
-                    world_name=args.world_name,
-                    game_name=args.game_name,
-                    port=args.port,
-                    telnet_port=args.admin_port,
-                    telnet_password=telnet_password,
-                )
-                if not wait_stock_dedicated_ready(server_proc, unity_log):
-                    return 2
-            elif args.server == "zdtd" and not args.no_server:
-                server_proc = start_zdtd(
-                    args.zdtd,
-                    args.world,
-                    args.port,
-                    args.admin_port,
-                    args.game_srv,
-                    server_log,
-                )
-                if not wait_zdtd_ready(server_proc, server_log):
-                    return 2
+            if not start_server():
+                return 2
             truncate_file(args.client_log, "client log")
             # Fresh readers + fresh counter pair for the verify generation: the
             # old log's barrier lines were already serviced (or deliberately
