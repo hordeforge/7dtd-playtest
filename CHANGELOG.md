@@ -20,6 +20,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- `test_mining_probe_surface.py` now matches the full `PressPrimary` /
+  `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped
+  at `(` and never found the method body), and ruff F401/RET504 on that
+  gate. `MiningProbe.TryResolveBlock` initializes `error` to `""`.
+
 ### Added
 
 - `MiningSpec` / `MiningProbe` / `MiningResult`: public real-mining driver for

@@ -425,7 +425,7 @@ namespace ZdtdPlaytest
         bool TryResolveBlock(out BlockValue seed, out string error)
         {
             seed = BlockValue.Air;
-            error = null;
+            error = "";
             try
             {
                 seed = Block.GetBlockValue(_spec.BlockName, true);
