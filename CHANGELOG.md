@@ -27,6 +27,8 @@ unchanged.
 
 ### Added
 
+- `--loadgen-server-cvar-tolerance` for bounded comparison of time-varying
+  server and peer CVar samples; the exact default remains `0.0001`.
 - Generic loadgen replicated-state orchestration: exact CVar/buff filters and
   expectations consume structured joined/state events, teleport the exact
   joined entity, and fail the harness on missing or contradictory peer state.

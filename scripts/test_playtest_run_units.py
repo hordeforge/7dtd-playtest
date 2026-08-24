@@ -101,6 +101,16 @@ def test_loadgen_structured_events_and_expectations() -> None:
             Oracle("127.0.0.1", 1, ""), 171, ["raw", "net"], latest
         ) == []
 
+        class DriftOracle(Oracle):
+            def get_cvar(
+                self, name: str, entity_id: int, timeout: float = 8.0
+            ) -> float | None:
+                return 4.02
+
+        assert playtest_run.server_cvar_oracle_failures(
+            DriftOracle("127.0.0.1", 1, ""), 171, ["net"], latest, 0.05
+        ) == []
+
 
 def test_loadgen_observer_wiring_is_generic() -> None:
     source = PLAYTEST_RUN.read_text(encoding="utf-8")
@@ -112,6 +122,7 @@ def test_loadgen_observer_wiring_is_generic() -> None:
         "--loadgen-expect-cvar-equal",
         "--loadgen-expect-buff",
         "--loadgen-server-cvar-oracle",
+        "--loadgen-server-cvar-tolerance",
         "--loadgen-teleport",
     ):
         assert flag in source
