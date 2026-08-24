@@ -9,7 +9,7 @@ dependencies = []
 # so uv.lock pins the exact version with sha256 hashes instead of resolving
 # unpinned from PyPI on every `make test`.
 dev = [
-    "pytest>=8",
+    "pytest==9.1.1",
     "ruff==0.16.4",
     "mypy==2.1.0",
 ]
