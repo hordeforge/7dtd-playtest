@@ -545,6 +545,36 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Shows or hides the whole in-game HUD.
+        ///
+        /// <para>For a fixture whose frames are the deliverable. Anything a
+        /// person is meant to judge — a worn garment, a placed block, a
+        /// detonation — is competing with the toolbelt, the compass, the stat
+        /// bars and the tutorial callout, and none of those are the subject.
+        /// The game already has one switch for all of it, and this is the same
+        /// call <c>GameManager</c> makes during startup.</para>
+        ///
+        /// <para>Best effort and deliberately quiet. A fixture that cannot hide
+        /// the HUD should still stage its scene: a photograph with a compass in
+        /// the corner is worth having, and an exception thrown while tidying up
+        /// the frame is not.</para>
+        /// </summary>
+        public static bool ShowHud(bool visible)
+        {
+            try
+            {
+                var manager = GameManager.Instance;
+                if (manager == null || manager.nguiWindowManager == null) return false;
+                manager.nguiWindowManager.Show(EnumNGUIWindow.InGameHUD, visible);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Every bone name the wearer's skinned renderers are bound to,
         /// distinct and sorted.
         ///
