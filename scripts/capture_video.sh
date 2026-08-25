@@ -142,10 +142,20 @@ CLIP_DIR="$(echo "$CLIP_LINE" | awk -F'-> ' '{print $2}')"
 	echo "ERROR: could not parse the clip completion line: $CLIP_LINE" >&2
 	exit 2
 }
-# Resolve against the client's user profile the way the mod resolves it.
-PROFILE_DIR="$HOME"
-SHOTS_DIR="$PROFILE_DIR/AppData/Roaming/7DaysToDie/playtest-shots"
-[[ -d "$SHOTS_DIR/clips/$CLIP_ID" ]] || SHOTS_DIR="$HOME/.steam/steam/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/playtest-shots"
+# Resolve the frames directory the way the mod and launch_client.sh do:
+# the Proton prefix's playtest-shots lives under COMPAT (env, set by the
+# same run that launched the client). A hardcoded default library silently
+# breaks on a Steam library on another disk.
+if [[ -n "${COMPAT:-}" ]]; then
+    SHOTS_DIR="$COMPAT/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/playtest-shots"
+else
+    SHOTS_DIR="$HOME/AppData/Roaming/7DaysToDie/playtest-shots"
+    [[ -d "$SHOTS_DIR" ]] || SHOTS_DIR="$HOME/.steam/steam/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/playtest-shots"
+fi
+if [[ ! -d "$SHOTS_DIR/clips/$CLIP_ID" ]]; then
+    echo "ERROR: no frames found at $SHOTS_DIR/clips/$CLIP_ID; is COMPAT set to the Proton prefix this client ran in?" >&2
+    exit 1
+fi
 
 # The write is asynchronous: Unity flushes the PNG at the end of the frame it
 # was requested on, so the completion line can beat the last file to disk.
