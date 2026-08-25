@@ -493,7 +493,9 @@ Host runners (including third-party) scrape **stable** prefixes and tokens:
 [7dtd-playtest] barrier name
 [7dtd-playtest] scene staged name detail
 [7dtd-playtest] clip frame id index -> path
+[7dtd-playtest] clip recording id superSize=N fps=M
 [7dtd-playtest] clip complete id frames=N -> playtest-shots/clips/id
+[7dtd-playtest] clip abandoned id frames=N -> playtest-shots/clips/id
 [7dtd-playtest] {"v":1,"t":"result|summary|done|log|barrier|staged",…}
 [7dtd-playtest] SUMMARY pass=N fail=M skip=K total=T wall_ms=…
 [7dtd-playtest] DONE exit_hint=0|1
@@ -503,9 +505,11 @@ Legacy log prefix `[zdtd-playtest]` may appear in older builds; new code emits
 `[7dtd-playtest]` only. JSON `t` values and human `PASS|FAIL|SKIP` /
 `SUMMARY` / `DONE` / `barrier` / `clip complete` tokens are part of the
 contract. `clip frame` names each frame of a `CaseDef.StagedClip` sequence;
-`clip complete` is the single completion signal a waiting host process greps
-for, emitted once the hold ends with the real frame count (never a padded
-one). Optional host
+`clip recording` announces an on-demand `Helpers.BeginClip`; `clip complete`
+is the single completion signal a waiting host process greps for, emitted
+once the hold (or an on-demand `EndClip`) ends with the real frame count
+(never a padded one); `clip abandoned` marks a clip a failed case left
+active, which is never the completion marker. Optional host
 reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 
 ### Visual confirmation: what a suite cannot tell you
@@ -647,6 +651,16 @@ Same `--runner` contract and the same refuse-to-overlap guard as
 `capture_frames.sh`; without `ffmpeg` it exits non-zero and names the raw
 frame directory as the evidence that does exist. If `ffmpeg` is missing, the
 frames are still the evidence.
+
+A staged hold is not the only thing worth recording. `Helpers.BeginClip(id, superSize, fps)`
+and `Helpers.EndClip(id)` start and stop an **on-demand** in-game recording
+from any case — a `Live` case included — so the client can capture what the
+player actually does: a worn garment walked, a VFX firing, an item used.
+Same guarantee (this process's own rendering, super-resolution, not the
+desktop's), same frames directory, same `clip complete` marker, so
+`capture_video.sh` muxes it unchanged. A clip a failed or timed-out case left
+recording is abandoned by the runner at suite end (logged `clip abandoned`,
+never the completion marker), so a partial clip can never read as complete.
 
 The clip is material for a human verdict — and, optionally, a prescreen:
 [`scripts/review_video.py`](scripts/review_video.py) submits the clip plus a

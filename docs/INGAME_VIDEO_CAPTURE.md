@@ -4,8 +4,10 @@
 
 Implemented (2026-08-25). `CaseDef.StagedClip` (CaseDef.cs, beside `Staged`),
 `Helpers.CaptureClipFrame` (Helpers.Ui.cs, beside `CaptureFrame`), the
-`clip frame`/`clip complete` log line pair, and `scripts/capture_video.sh`
-all shipped. The structural tests in `scripts/test_scenario_provider_surface.py`
+`clip frame`/`clip complete` log line pair, `scripts/capture_video.sh`,
+and the on-demand recorder `ClipRecorder` / `Helpers.BeginClip` / `EndClip`
+(recording decoupled from staging, ticked on the same gmUpdate hook) all
+shipped. The structural tests in `scripts/test_scenario_provider_surface.py`
 pin the public surface and the log contract; `make test` covers the rest
 offline. The acceptance boxes below that need a real client stay unchecked:
 no live run has been photographed and muxed by a person yet. The cross-repo
@@ -197,7 +199,31 @@ single swing, a short cue) should raise `clipFps` and lower `superSize`
 rather than raising both; the table exists so that trade is made
 deliberately, not discovered by a disk-full run.
 
-### Host-side: `scripts/capture_video.sh`
+### On-demand recording: `ClipRecorder` / `Helpers.BeginClip` / `EndClip`
+
+`StagedClip` ties a clip to a staged hold. Not every moment worth recording
+can be staged — a worn garment needs the player actually walking, a VFX fires
+in the world, an item-use animation is the game's own. `ClipRecorder` is the
+same frame-sequence guarantee decoupled from staging:
+
+- `Helpers.BeginClip(id, superSize = 2, fps = 4f)` starts a clip; the
+  recorder ticks on the same `GameManager.gmUpdate` hook as the scenario
+  runner (`Runner.Patch_GameManager_PlayTest.Postfix`), so it captures
+  between case callbacks and from any case, `Live` included.
+- `Helpers.EndClip(id)` stops it and emits the same
+  `clip complete <id> frames=N` line, so `capture_video.sh` muxes the result
+  unchanged.
+- Frames land in the same `playtest-shots/clips/<id>/frame-XXXX.png` shape
+  via `Helpers.CaptureClipFrame`, at the same super-resolution independence
+  from the desktop.
+
+Abandonment is explicit: a clip a failed or timed-out case left active is
+abandoned when the runner finishes (`clip abandoned <id> frames=N`), and a
+hard cap (300 s) abandons a clip nobody stopped. `clip abandoned` is
+deliberately not the completion marker, so a collector never muxes a partial
+clip as if it were complete.
+
+## Host-side: `scripts/capture_video.sh`
 
 Modeled directly on `scripts/capture_frames.sh`: same suite-run-in-background
 shape, same "refuse to start on top of a live run" guard (`pgrep -x` on the

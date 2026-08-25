@@ -245,6 +245,29 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Start an on-demand in-game clip recording.
+        ///
+        /// <para>The on-demand twin of <see cref="CaseDef.StagedClip"/>: start
+        /// recording whatever is actually happening (a worn garment walked, a
+        /// VFX firing, an item used) from any case, do the thing, then call
+        /// <see cref="EndClip"/>. Frames are the client's own rendering at
+        /// <paramref name="superSize"/> resolution into
+        /// <c>playtest-shots/clips/&lt;id&gt;/</c>, exactly like a staged clip,
+        /// and <c>scripts/capture_video.sh</c> muxes them on the same
+        /// <c>clip complete</c> marker.</para>
+        /// </summary>
+        public static void BeginClip(string id, int superSize = 2, float fps = 4f)
+        {
+            ClipRecorder.Begin(id, superSize, fps);
+        }
+
+        /// <summary>Stop the clip started with <see cref="BeginClip"/> and emit its completion line.</summary>
+        public static void EndClip(string id)
+        {
+            ClipRecorder.End(id);
+        }
+
+        /// <summary>
         /// Photograph one frame of a **clip**: the same in-game framebuffer
         /// guarantee as <see cref="CaptureFrame"/>, written into a per-clip
         /// subdirectory so a multi-frame sequence never collides with the flat

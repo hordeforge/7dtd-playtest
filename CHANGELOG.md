@@ -40,6 +40,14 @@ Release model (inferred practice, now pinned by `make test`):
   reaches the report, so it can never change a case's result.
 - `make playtest-review-video SUITE=<id> INTENT=<path>`: capture then review
   against one output directory.
+- `Helpers.BeginClip` / `Helpers.EndClip` and `ClipRecorder`: on-demand
+  in-game recording decoupled from staging, so any case (Live included) can
+  record what the player actually does — walk a worn garment, fire a VFX,
+  use an item. Same super-resolution in-game frames and `clip complete`
+  marker as staged clips; a clip a failed case left active is abandoned at
+  suite end (`clip abandoned`), never completed.
+- `Helpers.TryEquipItem(player, name)`: the public give+equip-by-name route
+  generated walk-cycle cases use.
 
 ### Changed
 
