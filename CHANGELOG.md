@@ -101,6 +101,12 @@ Release model (inferred practice, now pinned by `make test`):
   `loadgen_events.jsonl`. Two separate reads could straddle an append and
   make the expectation failures disagree with the CVar-oracle state they are
   judged against.
+- SIGINT (Ctrl+C) joins SIGTERM/SIGHUP in the orchestrator's termination
+  handling: converted to SystemExit during normal operation so teardown runs,
+  and blocked/ignored inside main's finally. A KeyboardInterrupt landing
+  mid-cleanup used to skip stop_proc / lock release and strand a live runtime
+  under a published claim, the exact wedge the TERM/HUP machinery exists to
+  prevent.
 - The `spawn_loadgen_peer` rebind routes the prior (exited) loadgen instance
   through `stop_proc`, which reaps it. Dropping the `Popen` after only closing
   its log handle left one zombie per peer barrier fire until orchestrator exit
@@ -116,6 +122,12 @@ Release model (inferred practice, now pinned by `make test`):
   `done`, `timeout`, or `client_exit` on one line. This is the deterministic
   end of the run for consumers keyed on the staged marker (a screenshot loop
   exits on it instead of waiting out its own timeout).
+- A new `lock_lost` run-ended reason: when the exclusivity heartbeat reports
+  the lock file stopped naming our session (foreign takeover after a stale
+  window, or the shared file was reset), the orchestrator aborts with exit 2
+  instead of finishing the suite against a runtime it may no longer own.
+  Previously the detection existed in `HeartbeatLoop.lost_claim` but no
+  consumer read it, so two agents could drive one machine concurrently.
 - `playtest_lock.wait_until_can_start` and CLI `playtest_lock.py wait`:
   poll `can_start` (missing heartbeat is stale) so consumers do not parse
   `running=` / `heartbeat=` themselves. Matrix runners call this instead

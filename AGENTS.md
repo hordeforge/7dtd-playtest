@@ -206,8 +206,10 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier|staged",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 - Run ended: `<logdir>/run-ended` written when the orchestrator's poll loop
-  ends, containing the reason on one line — `done`, `timeout`, or
-  `client_exit`. This is the deterministic end of the run for consumers that
+  ends, containing the reason on one line: `done`, `timeout`, `client_exit`,
+  or `lock_lost` (heartbeat saw a foreign holder take the claim; the run
+  aborts instead of sharing the machine). This is the deterministic end of
+  the run for consumers that
   key on the staged marker (a screenshot loop exits when it appears instead
   of waiting out its own timeout). `--logdir` defaults to `$LOGDIR` or
   `~/.cache/7dtd-playtest`.

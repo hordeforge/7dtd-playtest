@@ -1666,7 +1666,7 @@ def test_acquire_exclusive_lock_marks_held_inside_guarded_region() -> None:
 
 
 def test_block_termination_signals_blocks_then_restores() -> None:
-    """The finally's first action must mask TERM/HUP on this thread so a
+    """The finally's first action must mask TERM/HUP/INT on this thread so a
     first-ever signal landing between cleanup entry and the SIG_IGN disarm
     is pended instead of raising SystemExit mid-teardown; the helper must be
     transparent about the prior mask so tests (and any future caller) can
@@ -1675,7 +1675,7 @@ def test_block_termination_signals_blocks_then_restores() -> None:
     playtest_run._block_termination_signals()
     try:
         after = signal.pthread_sigmask(signal.SIG_BLOCK, set())
-        for name in ("SIGTERM", "SIGHUP"):
+        for name in ("SIGTERM", "SIGHUP", "SIGINT"):
             sig = getattr(signal, name, None)
             if sig is None:
                 continue
@@ -1683,7 +1683,88 @@ def test_block_termination_signals_blocks_then_restores() -> None:
             assert sig not in before, f"{name} unexpectedly blocked beforehand"
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, before)
-    print("PASS block_termination_signals masks TERM/HUP until restored")
+    print("PASS block_termination_signals masks TERM/HUP/INT until restored")
+
+
+def test_termination_signal_family_covers_sigint() -> None:
+    """SIGINT must be a member of the shared signal tuple: handler install,
+    teardown disarm, and the cleanup mask all derive from it, so leaving
+    Ctrl+C out of the tuple re-opens the strand-a-runtime-under-a-claim
+    wedge through KeyboardInterrupt."""
+    assert "SIGINT" in playtest_run._TERMINATION_SIGNAL_NAMES, (
+        f"termination family {playtest_run._TERMINATION_SIGNAL_NAMES} "
+        "must include SIGINT"
+    )
+    print("PASS termination_signal_family covers SIGINT")
+
+
+def test_heartbeat_claim_lost_policy() -> None:
+    """heartbeat_claim_lost is the orchestrator's read of HeartbeatLoop's
+    takeover detection: False while we own (or no heartbeat at all), True as
+    soon as a refresh was refused because the file names someone else."""
+    assert playtest_run.heartbeat_claim_lost(None) is False
+
+    with tempfile.TemporaryDirectory(prefix="playtest-lostclaim-") as td:
+        lock = Path(td) / "playtest_running"
+        owner = "owner-20260810-000000-aaaaaaaaaaaa"
+        taker = "taker-20260810-000001-bbbbbbbbbbbb"
+
+        # A real HeartbeatThread, never started: constructing it spawns
+        # nothing, so the policy loop can be driven synchronously here.
+        # The flag is read into a local before each assert because mypy
+        # otherwise carries the first False narrow across the mutating
+        # tick() calls and declares the takeover branch unreachable.
+        pl.acquire(owner, path=lock, live_probe=lambda: False)
+        thread = pl.HeartbeatThread(owner, path=lock)
+        assert playtest_run.heartbeat_claim_lost(thread) is False
+
+        thread.loop.tick(force=True)
+        lost_after_own = thread.loop.lost_claim
+        assert lost_after_own is False
+        assert playtest_run.heartbeat_claim_lost(thread) is False
+
+        # Foreign takeover while our heartbeat is still running (the stale
+        # reclaim case): the next refresh must flip lost_claim.
+        pl.release(owner, path=lock)
+        pl.acquire(taker, path=lock, live_probe=lambda: False)
+        thread.loop.tick(force=True)
+        lost_after_takeover = thread.loop.lost_claim
+        assert lost_after_takeover is True
+        assert playtest_run.heartbeat_claim_lost(thread) is True
+    print("PASS heartbeat_claim_lost flips only on foreign takeover")
+
+
+def test_lock_lost_abort_wired_into_poll_loops() -> None:
+    """Both long-lived poll loops (rejoin setup and main) must consult the
+    heartbeat's lost-claim flag and write the run-ended marker on that exit
+    path, or a mid-run takeover would let this run keep driving client and
+    server concurrently with the new holder's."""
+    text = PLAYTEST_RUN.read_text(encoding="utf-8")
+    guards = re.findall(r"^\s+if abort_if_lock_lost\(\):", text, re.M)
+    assert len(guards) == 2, (
+        f"expected the lost-claim guard in both poll loops, found {len(guards)}"
+    )
+    tree = ast.parse(text)
+
+    def _find_main() -> ast.FunctionDef:
+        mains = [
+            n for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "main"
+        ]
+        assert len(mains) == 1, "expected exactly one main() definition"
+        return mains[0]
+
+    main_fn = _find_main()
+    names = {
+        n.func.id
+        for n in ast.walk(main_fn)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    for required in ("abort_if_lock_lost", "write_run_ended"):
+        assert required in names, (
+            f"main() never calls {required}; the guard or marker is unwired"
+        )
+    print("PASS lock_lost_abort wired into both poll loops")
 
 
 def test_rewrite_platform_cfg_backs_up_once_and_forces_surface() -> None:
@@ -1910,6 +1991,18 @@ def main() -> int:
         (
             "block_termination_signals",
             test_block_termination_signals_blocks_then_restores,
+        ),
+        (
+            "termination_signal_family",
+            test_termination_signal_family_covers_sigint,
+        ),
+        (
+            "heartbeat_claim_lost_policy",
+            test_heartbeat_claim_lost_policy,
+        ),
+        (
+            "lock_lost_abort_wiring",
+            test_lock_lost_abort_wired_into_poll_loops,
         ),
         (
             "platform_cfg_rewrite",

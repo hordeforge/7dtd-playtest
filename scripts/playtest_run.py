@@ -4,7 +4,8 @@
 Exit codes:
   0  all cases pass (DONE with fail=0)
   1  playtest assertion failures
-  2  harness error (no DONE, server/client fail, timeout, lock refused)
+  2  harness error (no DONE, server/client fail, timeout, lock refused,
+     lock claim lost mid-run)
 """
 
 from __future__ import annotations
@@ -1529,12 +1530,16 @@ class TelnetAdmin:
 
 
 # Signals converted to SystemExit during normal operation and ignored during
-# teardown (see install_signal_handlers / main's finally).
-_TERMINATION_SIGNAL_NAMES = ("SIGTERM", "SIGHUP")
+# teardown (see install_signal_handlers / main's finally). SIGINT belongs with
+# TERM/HUP: Ctrl+C raises KeyboardInterrupt from wherever the main thread is,
+# and one landing inside main()'s cleanup would skip stop_proc / release and
+# strand a live runtime under a published claim, exactly like an unconverted
+# TERM. Converting it routes abort through the same graceful path.
+_TERMINATION_SIGNAL_NAMES = ("SIGTERM", "SIGHUP", "SIGINT")
 
 
 def _ignore_termination_signals() -> None:
-    """Set SIG_IGN for both termination signals; safe to call anywhere.
+    """Set SIG_IGN for every termination signal; safe to call anywhere.
 
     Re-registering can fail once the interpreter is tearing down, hence the
     suppression.
@@ -1547,11 +1552,11 @@ def _ignore_termination_signals() -> None:
 
 
 def _block_termination_signals() -> None:
-    """Block TERM/HUP delivery on this thread; safe to call anywhere.
+    """Block TERM/HUP/INT delivery on this thread; safe to call anywhere.
 
     Closes the last interrupt window in main()'s finally: disarming through
     signal.signal only takes effect after those calls complete, so a
-    first-ever TERM/HUP landing between entering the cleanup and finishing
+    first-ever TERM/HUP/INT landing between entering the cleanup and finishing
     the disarm still raises SystemExit from inside it, skipping stop_proc /
     release and stranding a live runtime under a published claim. Blocking
     keeps such a delivery pending instead, and the process exits right after
@@ -1572,18 +1577,21 @@ def _block_termination_signals() -> None:
 
 
 def install_signal_handlers() -> None:
-    """Convert SIGTERM/SIGHUP into SystemExit so the finally-based cleanup runs.
+    """Convert SIGTERM/SIGHUP/SIGINT into SystemExit so the finally-based
+    cleanup runs.
 
     Default signal action kills the process without unwinding: the detached
     client/server survive (start_new_session) and the lock file goes stale
     while a live runtime blocks takeover (stale_but_live wedge). Raising
     SystemExit routes termination through main()'s finally, which stops the
-    runtime processes and releases the exclusivity lock.
+    runtime processes and releases the exclusivity lock. SIGINT's default is
+    KeyboardInterrupt instead of death, but an interrupt mid-cleanup strands
+    the runtime all the same, so it takes the same conversion.
 
-    Once that finally is running, both signals are ignored instead (see the
-    disarm at the top of the block): delivery there would raise SystemExit
-    from inside the cleanup itself and strand a live runtime under a
-    published claim.
+    Once that finally is running, all three signals are ignored instead (see
+    the disarm at the top of the block): delivery there would raise
+    SystemExit from inside the cleanup itself and strand a live runtime under
+    a published claim.
     """
     def _exit_fast(signum: int, _frame: object) -> None:
         # Ignore repeats while we unwind so a second hit during cleanup
@@ -2079,6 +2087,21 @@ def acquire_exclusive_lock(
         raise
 
 
+def heartbeat_claim_lost(heartbeat: playtest_lock.HeartbeatThread | None) -> bool:
+    """True once our heartbeat saw the lock file stop naming our session.
+
+    ``HeartbeatLoop.lost_claim`` is set when a refresh is refused because
+    another session holds (or the shared file was reset): from that moment
+    exclusivity is gone and another agent may take over the stale claim and
+    start its own client/server. Continuing would interleave two runs on one
+    machine (double-bound ports, one run's clean_processes killing the
+    other's client), so every long-lived poll loop treats this as an
+    immediate harness failure instead of finishing the suite against a
+    runtime we may no longer own.
+    """
+    return heartbeat is not None and heartbeat.loop.lost_claim
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="stock-client playtest orchestrator",
@@ -2507,6 +2530,29 @@ def main(argv: list[str] | None = None) -> int:
         )
         lock_heartbeat.start()
 
+        def write_run_ended(reason: str) -> None:
+            """Record why the orchestrator's poll loop ended (log contract)."""
+            try:
+                (args.logdir / "run-ended").write_text(
+                    reason + "\n", encoding="utf-8"
+                )
+            except OSError as ex:
+                warn(f"could not write run-ended marker in {args.logdir}: {ex}")
+
+        def abort_if_lock_lost() -> bool:
+            """True when the caller must return immediately: the exclusivity
+            heartbeat saw the file stop naming our session, so another agent
+            may now drive this machine and finishing the suite would race
+            its run."""
+            if not heartbeat_claim_lost(lock_heartbeat):
+                return False
+            err(
+                "playtest lock claim lost (heartbeat saw a foreign holder); "
+                "stopping instead of sharing this machine with another run"
+            )
+            write_run_ended("lock_lost")
+            return True
+
         if not args.skip_clean:
             clean_processes(kill_wine=args.kill_wine)
 
@@ -2796,6 +2842,8 @@ def main(argv: list[str] | None = None) -> int:
             rejoin_setup_seen = 0
 
             while time.monotonic() < setup_deadline:
+                if abort_if_lock_lost():
+                    return 2
                 reap_finished_helpers()
                 note_backend_exit()
                 chunk = pump_log_tail(client_tail, client_scan)
@@ -3005,6 +3053,8 @@ def main(argv: list[str] | None = None) -> int:
 
         run_end_reason = "timeout"
         while time.monotonic() < deadline:
+            if abort_if_lock_lost():
+                return 2
             reap_finished_helpers()
             note_backend_exit()
             chunk = pump_log_tail(client_tail, client_scan)
@@ -3366,10 +3416,7 @@ def main(argv: list[str] | None = None) -> int:
         # ran out. Record it for any consumer watching this run (the capture
         # loop ends when this file appears) instead of leaving them to wait
         # out their own timeout.
-        try:
-            (args.logdir / "run-ended").write_text(run_end_reason + "\n", encoding="utf-8")
-        except OSError as ex:
-            warn(f"could not write run-ended marker in {args.logdir}: {ex}")
+        write_run_ended(run_end_reason)
 
         # Final parse from everything drained so far, plus any bytes appended
         # between the last poll and here.
