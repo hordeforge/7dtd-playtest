@@ -244,6 +244,48 @@ namespace ZdtdPlaytest
             return path;
         }
 
+        /// <summary>
+        /// Photograph one frame of a **clip**: the same in-game framebuffer
+        /// guarantee as <see cref="CaptureFrame"/>, written into a per-clip
+        /// subdirectory so a multi-frame sequence never collides with the flat
+        /// single-shot folder.
+        /// </summary>
+        /// <remarks>
+        /// <para>A clip is a sampled sequence at a chosen cadence, not a
+        /// real-time-rate recording: it answers "does the motion look right",
+        /// not "does it feel smooth". Frames land in
+        /// <c>playtest-shots/clips/&lt;clipId&gt;/frame-XXXX.png</c>; the muxing
+        /// to a video is the host script's job (<c>scripts/capture_video.sh</c>),
+        /// which waits for the <c>clip complete</c> marker <see cref="CaseDef.StagedClip"/>
+        /// emits once the hold ends.</para>
+        /// </remarks>
+        public static string CaptureClipFrame(string clipId, int frameIndex, int superSize = 2)
+        {
+            if (string.IsNullOrEmpty(clipId)) clipId = "clip";
+            if (superSize < 1) superSize = 1;
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(profile)) return null;
+            string shots = System.IO.Path.Combine(profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots");
+            string safe = SafeFileName(clipId);
+            string dir = System.IO.Path.Combine(shots, "clips", safe);
+            try { System.IO.Directory.CreateDirectory(dir); }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] cannot create " + dir + ": " + e.Message);
+                return null;
+            }
+            string path = System.IO.Path.Combine(dir, string.Format("frame-{0:D4}.png", frameIndex));
+            try { ScreenCapture.CaptureScreenshot(path, superSize); }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] clip frame " + safe + " " + frameIndex + " failed: " + e.Message);
+                return null;
+            }
+            // The line a collector greps for; the file appears a frame later.
+            Log.Out("[7dtd-playtest] clip frame " + safe + " " + frameIndex + " x" + superSize + " -> " + path);
+            return path;
+        }
+
 
         /// <summary>A file name that cannot escape its directory.</summary>
         static string SafeFileName(string name)

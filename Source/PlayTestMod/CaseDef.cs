@@ -204,9 +204,118 @@ namespace ZdtdPlaytest
                 pause: pause);
         }
 
-        /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).</summary>
-        public static CaseDef Defer(string suite, string id, string[] tags, string reason)
+        /// <summary>
+        /// Build a **staged clip** case: stage a scene, announce it, and capture
+        /// a sampled frame sequence of the hold from inside the game.
+        ///
+        /// <para>This is <see cref="Staged"/> with the single photograph
+        /// replaced by a frame sequence: instead of one
+        /// <see cref="Helpers.CaptureFrame"/> a little way into the hold, the
+        /// wait callback writes <paramref name="clipFps"/> frames per second of
+        /// the hold into <c>playtest-shots/clips/&lt;id&gt;/</c>, and emits
+        /// <c>[7dtd-playtest] clip complete &lt;id&gt; frames=N -&gt; playtest-shots/clips/&lt;id&gt;</c>
+        /// once the hold ends. <c>scripts/capture_video.sh</c> waits for that
+        /// line and muxes the frames.</para>
+        /// <param name="clipFps">Frames per second of the hold. The render thread
+        /// encodes and flushes at the end of each requested frame, so a cadence
+        /// the game cannot keep simply lands fewer frames in the same hold time;
+        /// the completion line reports the real count, never a padded one.</param>
+        /// <param name="captureSuperSize">Resolution multiplier, as in
+        /// <see cref="Helpers.CaptureFrame"/>.</param>
+        /// </summary>
+        /// <remarks>
+        /// Same boundaries as <see cref="Staged"/>: <paramref name="stage"/>
+        /// returns whether the scene is genuinely on screen, the assert only
+        /// establishes that there was something to photograph, and
+        /// <paramref name="onHold"/> (called every tick with the hold fraction,
+        /// throwing does not fail the case) is how a clip becomes more than a
+        /// static hold with repeated photographs of the same angle — rotate the
+        /// subject here and the frames are a turntable. The verdict belongs to
+        /// a person watching the muxed clip, never to the case itself.
+        /// </remarks>
+        public static CaseDef StagedClip(
+            string suite,
+            string id,
+            string[] tags,
+            Func<CaseCtx, bool> stage,
+            float holdSeconds = 10f,
+            float clipFps = 4f,
+            int captureSuperSize = 2,
+            string fail = null,
+            float pause = 0.5f,
+            Action<CaseCtx, float> onHold = null)
         {
+            if (stage == null)
+                throw new ArgumentException(
+                    "CaseDef.StagedClip(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") has no stage callback; it would hold an empty scene and "
+                    + "record a pass for photographing nothing");
+            if (!(holdSeconds > 0f))
+                throw new ArgumentOutOfRangeException(nameof(holdSeconds), holdSeconds,
+                    "CaseDef.StagedClip(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") holdSeconds must be > 0: a clip nobody can photograph is "
+                    + "not evidence");
+            if (!(clipFps > 0f))
+                throw new ArgumentOutOfRangeException(nameof(clipFps), clipFps,
+                    "CaseDef.StagedClip(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") clipFps must be > 0");
+
+            return Live(
+                suite,
+                id,
+                tags,
+                act: ctx =>
+                {
+                    bool ok = false;
+                    try { ok = stage(ctx); }
+                    catch (Exception e)
+                    {
+                        ctx.Detail = "stage threw: " + e.Message;
+                    }
+                    ctx.IntA = ok ? 1 : 0;
+                    ctx.FloatA = Time.unscaledTime;
+                    // Immediately, not at result time: a collector keyed on the
+                    // result photographs the disconnect dialog.
+                    Report.Staged(id, ctx.Detail);
+                },
+                wait: ctx =>
+                {
+                    float elapsed = Time.unscaledTime - ctx.FloatA;
+                    if (onHold != null)
+                    {
+                        try { onHold(ctx, Mathf.Clamp01(elapsed / holdSeconds)); }
+                        catch (Exception e) { Log.Warning("[7dtd-playtest] staged clip hold callback threw: " + e.Message); }
+                    }
+                    if (ctx.IntA == 1)
+                    {
+                        float interval = 1f / clipFps;
+                        int due = Mathf.FloorToInt(elapsed / interval);
+                        while (ctx.IntB < due)
+                        {
+                            Helpers.CaptureClipFrame(id, ctx.IntB, captureSuperSize);
+                            ctx.IntB++;
+                        }
+                    }
+                    bool done = elapsed >= holdSeconds;
+                    if (done && ctx.IntC == 0)
+                    {
+                        ctx.IntC = 1;
+                        // The single, well-defined completion signal a waiting
+                        // host process greps for; the count is the real one.
+                        Log.Out("[7dtd-playtest] clip complete " + id + " frames=" + ctx.IntB
+                            + " -> playtest-shots/clips/" + id);
+                    }
+                    return done;
+                },
+                assert: ctx => ctx.IntA == 1,
+                timeout: holdSeconds + 20f,
+                fail: fail ?? ("the " + id + " scene did not stage, so any clip frames taken during it "
+                    + "show something else"),
+                pause: pause);
+        }
+
+        /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).</summary>
+        public static CaseDef Defer(string suite, string id, string[] tags, string reason)        {
             return new CaseDef
             {
                 Suite = suite,

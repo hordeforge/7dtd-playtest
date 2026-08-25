@@ -154,6 +154,7 @@ make install-pair         # playtest + connect
 make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
 make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
+make playtest-review-video SUITE=<id> INTENT=<path>  # capture staged clips, then vision-review them through deadeye
 make playtest SUITE=core SERVER=stock
 ```
 

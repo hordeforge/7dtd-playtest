@@ -5,6 +5,9 @@ DIST := $(ROOT)/dist/$(MOD_NAME)
 INSTALL_DIR := $(GAME)/Mods/$(MOD_NAME)
 CONNECT_DIR := $(ROOT)/../7dtd-fastconnect
 SUITE ?= demo
+# Where playtest-review-video puts the captured clip and its review evidence;
+# the SUITE names the fixed directory, so repeated runs replace it.
+OUT ?= $(ROOT)/.local/capture/$(SUITE)-review
 # Default target is stock dedicated (Navezgane). Override SERVER=zdtd for zig dedi.
 SERVER ?= stock
 WORLD_NAME ?= Navezgane
@@ -118,6 +121,7 @@ test: lint typecheck
 	$(UV) "$(ROOT)/scripts/test_report_surface.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_run_units.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_compare.py"
+	$(UV) "$(ROOT)/scripts/test_video_review.py"
 
 # Line coverage of the orchestrator modules under the same offline suites
 # `make test` runs (same order, same interpreter pin). Writes .coverage in
@@ -139,6 +143,7 @@ coverage:
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_report_surface.py"
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_run_units.py"
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_compare.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_video_review.py"
 	$(COV) -m coverage report -m
 
 # One gate while iterating: make test-one GATE=test_dst.py
@@ -225,6 +230,20 @@ playtest-mp:
 # Real ≥15 min host soak (wall clock).
 playtest-soak-long:
 	$(MAKE) playtest SUITE=soak_long SERVER="$(SERVER)" EXTRA_ARGS="--fresh-save --timeout 1200"
+
+# Capture the suite's staged clips, then (with INTENT=) review them through
+# the deadeye gateway. One self-contained folder under .local/capture/: the
+# clip's mp4, contact sheet, client.log, and the review evidence. Repeated
+# runs of the same SUITE replace the fixed target directory.
+playtest-review-video:
+	@test -n "$(SUITE)" || { echo "playtest-review-video: SUITE=<id> is required" >&2; exit 2; }
+	@$(ROOT)/scripts/capture_video.sh --suite "$(SUITE)" --out "$(OUT)"
+	@if [ -n "$(INTENT)" ]; then \
+		$(UV) $(ROOT)/scripts/review_video.py "$(OUT)" --intent "$(INTENT)" \
+			$(if $(PROVIDER),--provider "$(PROVIDER)",) --allow-network --json; \
+	else \
+		echo "note: INTENT= not set; clip captured, review skipped"; \
+	fi
 
 # Flake detection: run a suite LAPS times, fresh server each lap, aggregate
 # the per-lap report JSON (playtest_repeat.sh). Exit nonzero unless every lap

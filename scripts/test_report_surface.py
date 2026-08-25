@@ -709,9 +709,44 @@ def main() -> int:
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
     test_contract_lines_must_start_the_log_line()
     test_contract_lines_parse_under_the_games_log_prefix()
+    test_collect_visual_reviews_maps_paths_and_never_verdicts()
+    test_collect_visual_reviews_is_empty_without_a_directory()
     print("RESULT PASS")
     return 0
 
+
+def test_collect_visual_reviews_maps_paths_and_never_verdicts() -> None:
+    """--attach-reviews attaches evidence paths only, keyed by suite/case.
+
+    A review must never be able to change a case's result by existing, so the
+    report field is paths; any verdict-shaped field would fail here.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        evidence = root / "reviews"
+        evidence.mkdir()
+        review = {
+            "kind": "deadeye-review",
+            "intent": {
+                "content": {"suite": "demo", "case": "motion_thing"},
+            },
+            "result": {"summary": "clips at the shoulder"},
+        }
+        (evidence / "review-gemini-20260825.json").write_text(
+            __import__("json").dumps(review), encoding="utf-8"
+        )
+        (root / "not-a-review.json").write_text("{}", encoding="utf-8")
+
+        reviews = playtest_run.collect_visual_reviews(evidence)
+        assert reviews == {
+            "demo/motion_thing": str(evidence / "review-gemini-20260825.json")
+        }, "reviews must map suite/case to the evidence path only"
+
+
+def test_collect_visual_reviews_is_empty_without_a_directory() -> None:
+    assert playtest_run.collect_visual_reviews(None) == {}
+    with tempfile.TemporaryDirectory() as temporary:
+        assert playtest_run.collect_visual_reviews(Path(temporary) / "missing") == {}
 
 if __name__ == "__main__":
     sys.exit(main())

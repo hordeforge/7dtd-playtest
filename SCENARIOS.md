@@ -346,6 +346,12 @@ Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
 (smoke…finale attract path; residual suites separate). Residual promotion gate:
 `make playtest-residual` (persist+mp+apm+soak_long, fail=0).
 
+External providers (asset-pipeline's generated acceptance provider,
+for example) follow the same rule with a documented suffix convention:
+`look_<stem>` is the staged single-frame case and `motion_<stem>` is the
+`CaseDef.StagedClip` case whose frames `scripts/capture_video.sh` muxes; the
+`clip complete <motion_<stem>>` completion line is what a collector waits for.
+
 ## Adding a scenario
 
 1. Add a row here (status live or deferred).

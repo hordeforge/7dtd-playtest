@@ -20,6 +20,27 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Added
+
+- `CaseDef.StagedClip` and `Helpers.CaptureClipFrame`: a staged case that
+  captures a sampled frame sequence of its hold from inside the game
+  (`playtest-shots/clips/<id>/frame-XXXX.png`), with a single
+  `clip complete <id> frames=N` completion line added to the stable log
+  contract. See `docs/INGAME_VIDEO_CAPTURE.md`.
+- `scripts/capture_video.sh`: waits for `clip complete`, polls for the last
+  frame, and muxes the clip into an mp4 plus a contact sheet. Same runner
+  contract and refuse-to-overlap guard as `capture_frames.sh`.
+- `scripts/review_video.py` and `scripts/video_review.py`: prescreen a staged
+  clip with a vision model through the deadeye gateway
+  (`hordeforge/7dtd-vision-review`), with explicit `--allow-network` consent
+  and the same advisory, never-accepting posture as the human-watch gate.
+  See `docs/VIDEO_MODEL_FEEDBACK.md`.
+- `playtest_run.py --attach-reviews DIR`: attaches review evidence paths to
+  the report keyed by suite/case. Paths only: a review's verdict never
+  reaches the report, so it can never change a case's result.
+- `make playtest-review-video SUITE=<id> INTENT=<path>`: capture then review
+  against one output directory.
+
 ### Changed
 
 - The provider-facing case contract (`PlayerGate`, `CaseDef`, `CaseCtx`)

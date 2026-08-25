@@ -2,15 +2,22 @@
 
 ## Status
 
-Proposal. Specifies an unbuilt `scripts/review_video.py`, an intent/result
-schema, and an optional `--attach-reviews` pointer on the host report. No
-current code sends a frame or a clip to a model. Modeled directly on the
-sibling, also-unbuilt PRD in `7dtd-asset-pipeline`,
+Implemented (2026-08-25), with one design change recorded here: the model I/O
+runs through the **deadeye** gateway (`hordeforge/7dtd-vision-review`), the
+shared vision-model review component created for this loop, rather than a
+provider adapter this repository owns. `scripts/video_review.py` (intent and
+result schemas, consent gate, gateway boundary with a stubbed-runner test)
+and `scripts/review_video.py` (the CLI) ship; `playtest_run.py --attach-reviews`
+attaches evidence paths to the report keyed by suite/case — paths only, so a
+review can never change a case's result. The offline acceptance boxes below
+are pinned by `scripts/test_video_review.py` and the report-surface test; the
+live-provider run and the human-watch comparison stay unchecked. Modeled on
+the sibling
 [`docs/prds/0001-contextual-model-audio-review.md`](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0001-contextual-model-audio-review.md),
 which specifies the same shape for sound. Depends on
 [INGAME_VIDEO_CAPTURE.md](INGAME_VIDEO_CAPTURE.md) for the clip itself; feeds
 [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md), whose shamway
-counterpart is specified as
+counterpart is
 [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md)
 in `7dtd-asset-pipeline`.
 

@@ -84,6 +84,39 @@ def main() -> int:
         r"public\s+static\s+CaseDef\s+Defer\s*\(",
         casedef,
     ), "CaseDef.Defer must be a public static factory"
+    assert re.search(
+        r"public\s+static\s+CaseDef\s+Staged\s*\(",
+        casedef,
+    ), "CaseDef.Staged must be a public static factory"
+    assert re.search(
+        r"public\s+static\s+CaseDef\s+StagedClip\s*\(",
+        casedef,
+    ), "CaseDef.StagedClip must be a public static factory"
+
+    # The clip contract is part of the public surface and the log contract:
+    # a StagedClip case writes frames from inside the game and emits the
+    # completion marker capture_video.sh waits for.
+    helpers = "\n".join(p.read_text(encoding="utf-8") for p in HELPERS_GLOB)
+    assert "public static string CaptureClipFrame" in helpers, (
+        "Helpers.CaptureClipFrame must be public for staged-clip providers"
+    )
+    assert "clip complete " in casedef, (
+        "CaseDef.StagedClip must emit the 'clip complete' completion line"
+    )
+    assert "clip complete" in readme, (
+        "README's log contract must document the 'clip complete' line"
+    )
+    assert "StagedClip" in readme, (
+        "README's public surface must document CaseDef.StagedClip"
+    )
+    clip_body = method_body(
+        casedef,
+        r"public\s+static\s+CaseDef\s+StagedClip\s*\([^)]*\)",
+    )
+    assert "CaptureClipFrame(id, ctx.IntB" in clip_body, (
+        "StagedClip must capture a frame sequence, not one shot"
+    )
+    assert "clipFps" in clip_body, "StagedClip must take a clipFps cadence"
 
     live_body = method_body(
         casedef,

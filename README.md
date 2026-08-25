@@ -314,7 +314,8 @@ uv run --locked --project . python scripts/playtest_run.py --suite your_suite --
 
 `--no-fixtures` is the overriding opt-out when both options are present.
 
-Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged`, `CaseCtx`,
+Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged` /
+`StagedClip`, `CaseCtx`,
 `IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`),
 `MiningSpec` / `MiningProbe` / `MiningResult`. The stock `mining_harvest`
 case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
@@ -491,6 +492,8 @@ Host runners (including third-party) scrape **stable** prefixes and tokens:
 [7dtd-playtest] SKIP suite/case detail
 [7dtd-playtest] barrier name
 [7dtd-playtest] scene staged name detail
+[7dtd-playtest] clip frame id index -> path
+[7dtd-playtest] clip complete id frames=N -> playtest-shots/clips/id
 [7dtd-playtest] {"v":1,"t":"result|summary|done|log|barrier|staged",…}
 [7dtd-playtest] SUMMARY pass=N fail=M skip=K total=T wall_ms=…
 [7dtd-playtest] DONE exit_hint=0|1
@@ -498,7 +501,11 @@ Host runners (including third-party) scrape **stable** prefixes and tokens:
 
 Legacy log prefix `[zdtd-playtest]` may appear in older builds; new code emits
 `[7dtd-playtest]` only. JSON `t` values and human `PASS|FAIL|SKIP` /
-`SUMMARY` / `DONE` / `barrier` tokens are part of the contract. Optional host
+`SUMMARY` / `DONE` / `barrier` / `clip complete` tokens are part of the
+contract. `clip frame` names each frame of a `CaseDef.StagedClip` sequence;
+`clip complete` is the single completion signal a waiting host process greps
+for, emitted once the hold ends with the real frame count (never a padded
+one). Optional host
 reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 
 ### Visual confirmation: what a suite cannot tell you
@@ -602,6 +609,63 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 ./scripts/capture_audio.sh --suite <id>
 ./scripts/capture_audio.sh --suite <id> --out ./audio --runner ./my-wrapper.sh
 ```
+
+#### Staged motion clips: a turntable, not one face
+
+A single staged frame cannot show a defect that only exists in motion: a
+garment that clips only mid-turn, a prop whose silhouette reads wrong only
+while carried. `CaseDef.StagedClip` is the same guarantee, sampled over time —
+every frame written by this client process's own `ScreenCapture`, into
+`playtest-shots/clips/<id>/`, at a chosen cadence (`clipFps`, default 4):
+
+```csharp
+GameObject stagedProp = null;
+queue.Add(CaseDef.StagedClip(suite, "motion_myProp", new[] { "capture", "clip" },
+    ctx => StagePropInFrontOfCamera(ctx, out stagedProp),
+    holdSeconds: 12f,
+    onHold: (ctx, t) =>
+    {
+        if (stagedProp != null)
+            stagedProp.transform.Rotate(0f, 30f * Time.deltaTime, 0f);
+    }));
+```
+
+`onHold` is what makes a clip a turntable: pass the same rotate-as-you-hold
+callback `CaseDef.Staged` already documents. The completion line
+`clip complete <id> frames=N` fires once, when the hold ends, with the real
+count — never a padded one — and
+[`scripts/capture_video.sh`](scripts/capture_video.sh) waits for it, polls for
+the last frame to land (the write is asynchronous), and muxes the frames into
+an mp4 with `ffmpeg` plus a contact sheet:
+
+```bash
+./scripts/capture_video.sh --suite <id>
+./scripts/capture_video.sh --suite <id> --clip-id motion_myProp
+```
+
+Same `--runner` contract and the same refuse-to-overlap guard as
+`capture_frames.sh`; without `ffmpeg` it exits non-zero and names the raw
+frame directory as the evidence that does exist. If `ffmpeg` is missing, the
+frames are still the evidence.
+
+The clip is material for a human verdict — and, optionally, a prescreen:
+[`scripts/review_video.py`](scripts/review_video.py) submits the clip plus a
+recorded intent to the **deadeye** vision-model gateway
+(`hordeforge/7dtd-vision-review`) and returns structured, advisory criticism
+that names moments worth a person's attention. It is explicitly advisory: it
+uploads the clip to a third party, refuses without `--allow-network`, and can
+never satisfy the human-watch gate this section exists to preserve.
+
+```bash
+uv run scripts/review_video.py .local/capture/<suite>-<stamp> \
+    --intent docs/reviews/myProp.review.json --allow-network
+```
+
+`playtest_run.py --attach-reviews DIR` attaches the review evidence paths to
+the report, keyed by suite/case, so a person auditing a run can find them — a
+review's verdict never reaches the report, so it can never change a case's
+result. `make playtest-review-video SUITE=<id> INTENT=<path>` runs the
+capture and the review against one output directory.
 
 `Report.Staged` exists because `ctx.Detail` does not work for this: a case's
 detail is flushed **with its result**, which is after the hold, so a loop

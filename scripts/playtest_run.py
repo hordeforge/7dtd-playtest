@@ -1210,6 +1210,32 @@ def write_report(path: Path, payload: dict) -> None:
     log(f"report → {path}")
 
 
+def collect_visual_reviews(directory: Path | None) -> dict[str, str]:
+    """Evidence paths keyed by suite/case, from review envelopes under `directory`.
+
+    Discovers `review-*.json` (the default evidence name the deadeye gateway
+    and `scripts/review_video.py` write) and maps each envelope to
+    `"<suite>/<case>"` from the recorded intent. Only **paths** reach the
+    report: no verdict, score, or pass/fail derived from a review is ever
+    included, so a review can never change a case's result by existing.
+    """
+    if directory is None or not directory.is_dir():
+        return {}
+    reviews: dict[str, str] = {}
+    for path in sorted(directory.rglob("review-*.json")):
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        intent = document.get("intent") or {}
+        content = intent.get("content") or {}
+        suite = content.get("suite") or ""
+        case = content.get("case") or ""
+        key = f"{suite}/{case}" if suite and case else path.stem
+        reviews[key] = str(path)
+    return reviews
+
+
 # Characters that are illegal anywhere in an XML 1.0 document: C0 controls
 # except tab/LF/CR, DEL plus C1 controls, surrogates, and the noncharacters
 # U+FFFE/U+FFFF. They cannot be escaped (no numeric reference exists for
@@ -2173,6 +2199,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="client output log to parse for results "
         "(default: the log under the discovered client install's Proton prefix)",
+    )
+    ap.add_argument(
+        "--attach-reviews",
+        type=Path,
+        default=None,
+        help="directory of deadeye review evidence files (review-*.json); their "
+        "paths are attached to the report keyed by suite/case, and no verdict "
+        "from them ever reaches the report",
     )
     ap.add_argument(
         "--peer-client-name",
@@ -3409,6 +3443,9 @@ def main(argv: list[str] | None = None) -> int:
                 "barrier_counts": dict(barrier_counts),
                 "fresh_save": bool(args.fresh_save),
             },
+            # Additive, optional, paths only: a review's verdict never reaches
+            # the report, so a review can never change a case's result.
+            "visual_reviews": collect_visual_reviews(args.attach_reviews),
         }
         write_report(report_path, payload)
         junit_path = args.junit or (args.logdir / f"junit-{int(time.time())}.xml")
