@@ -2827,6 +2827,14 @@ def main(argv: list[str] | None = None) -> int:
                     if client_scan.result().get("done") is not None:
                         log(f"{rejoin_label} setup DONE (client exited)")
                         break
+                    # Same fail-fast as the main poll loop: a setup client that
+                    # died without DONE should abort the rejoin, not sit out
+                    # the loop's whole budget.
+                    log(
+                        f"{rejoin_label} setup client exited before DONE; "
+                        "aborting rejoin instead of waiting out the timeout"
+                    )
+                    break
                 time.sleep(0.5)
             # Require setup DONE before rejoin verify; otherwise fixtures never existed.
             setup_parsed = client_scan.result()
@@ -3297,6 +3305,12 @@ def main(argv: list[str] | None = None) -> int:
                 peer_parsed = read_peer_results()
                 if parsed.get("done") is not None and peer_suite_done():
                     break
+                # The client exited without the suite's DONE. Waiting out the
+                # timeout hides a mid-suite crash behind a 15-minute stall;
+                # the 2s drain above already gave the client its last chance
+                # to write DONE before the process vanished.
+                log("client exited before DONE; failing instead of waiting out the timeout")
+                break
             time.sleep(0.5)
         else:
             log(f"timeout after {time.monotonic() - t0:.0f}s waiting for DONE")

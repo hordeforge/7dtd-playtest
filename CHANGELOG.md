@@ -36,6 +36,11 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- Orchestrator fails fast when the client exits before the suite's `DONE`
+  (both the main poll loop and the rejoin setup loop): a mid-suite client
+  crash used to wait out the full `--timeout`, hiding the failure behind a
+  15-minute stall. The 2s post-exit drain still gives a client that wrote
+  `DONE` in its final moments its success break.
 - The orchestrator now announces a dedicated/zdtd backend that exits after
   readiness (`<backend> backend exited mid-run code=…`, once per server
   process, echoed as `server_exited_mid_run` in the report JSON, including
@@ -50,7 +55,6 @@ Release model (inferred practice, now pinned by `make test`):
   through `stop_proc`, which reaps it. Dropping the `Popen` after only closing
   its log handle left one zombie per peer barrier fire until orchestrator exit
   on long soak / mp runs.
-
 - `test_mining_probe_surface.py` now matches the full `PressPrimary` /
   `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped
   at `(` and never found the method body), and ruff F401/RET504 on that
