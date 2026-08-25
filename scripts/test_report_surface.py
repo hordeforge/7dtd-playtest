@@ -30,6 +30,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_log  # noqa: E402
 import playtest_run  # noqa: E402
+from playtest_log import ParsedClientLog  # noqa: E402
 
 
 def test_write_junit_escapes_log_derived_attributes() -> None:
@@ -231,7 +232,7 @@ def _log_fuzz_blob(rng: random.Random) -> str:
     return blob
 
 
-def _assert_parsed_shape(parsed: dict, seed: int) -> None:
+def _assert_parsed_shape(parsed: ParsedClientLog, seed: int) -> None:
     assert set(parsed) == {
         "results",
         "summary",
@@ -444,6 +445,11 @@ def test_incremental_scan_matches_whole_parse() -> None:
         "[7dtd-playtest] barrier spawn_zombie\n"
         "[7dtd-playtest] barrier spawn_vehicle:gyrocopter\n"
         "[7dtd-playtest] barrier chat_echo:token1\n"
+        # Barrier counting is anchored to the stable prefix: a foreign line
+        # (game echo, chat text, another mod's log) that merely contains the
+        # words must never service an admin action.
+        "[chat] player said: barrier kill_player\n"
+        "barrier spawn_trader without any prefix\n"
         "[7dtd-playtest] SUMMARY pass=1 fail=0 skip=0\n"
         "[7dtd-playtest] DONE exit_hint=0\n"
     )
@@ -475,6 +481,8 @@ def test_incremental_scan_matches_whole_parse() -> None:
     assert totals["spawn_zombie"] == 1, totals
     # Parameterised lines must not count toward the bare name.
     assert totals["spawn_vehicle"] == 0, totals
+    # Unprefixed look-alike lines must not count toward any barrier.
+    assert totals["kill_player"] == 0 and totals["spawn_trader"] == 0, totals
     print("PASS incremental_scan chunked feed equals whole-log parse and counts")
 
 
@@ -542,6 +550,123 @@ def test_log_tail_keeps_multibyte_char_split_across_polls() -> None:
     print("PASS logtail_multibyte torn UTF-8 char survives across polls intact")
 
 
+def test_log_tail_from_end_starts_at_current_size() -> None:
+    """``from_end`` is what the orchestrator relies on when the previous
+    generation's client log could not be preserved: only bytes appended
+    after construction may be returned, so stale barriers/results from the
+    old log cannot re-fire into the new run's verdicts. A missing file must
+    degrade to reading from zero, not raise."""
+    with tempfile.TemporaryDirectory() as td:
+        log_path = Path(td) / "client.log"
+        log_path.write_text("[7dtd-playtest] barrier spawn_zombie\n", encoding="utf-8")
+        tail = playtest_log.LogTail(log_path, from_end=True)
+        assert tail.poll() == "", "pre-existing bytes replayed into the new run"
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write("[7dtd-playtest] barrier kill_player\n")
+        chunk = tail.poll()
+        assert "kill_player" in chunk and "spawn_zombie" not in chunk, chunk
+
+    with tempfile.TemporaryDirectory() as td:
+        absent = Path(td) / "absent.log"
+        tail = playtest_log.LogTail(absent, from_end=True)
+        assert tail.poll() == "", "missing log must poll empty"
+        absent.write_text("[7dtd-playtest] PASS s/c ok\n", encoding="utf-8")
+        assert "PASS s/c ok" in tail.poll(), "append after missing-start was lost"
+    print("PASS logtail_from_end pre-existing bytes skipped, appends still read")
+
+
+def test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate() -> None:
+    """The poll loop drains loadgen events incrementally instead of re-reading
+    the whole JSONL every iteration. The accumulated list must equal
+    read_loadgen_events over the same bytes, skip malformed/partial lines,
+    and reset when the file is truncated (a fresh loadgen generation), or an
+    id from a finished generation would answer for the current one."""
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "loadgen_events.jsonl"
+        joined = '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":107}\n'
+        state = (
+            '{"schema":"7dtd.loadgen.event.v1","type":"state",'
+            '"entityId":107,"kind":"cvar","name":"HoldingController","value":1}\n'
+        )
+        noise = "not json\n{\"other\":\"wrong schema\"}\n"
+        path.write_text(joined + noise + state, encoding="utf-8")
+        reader = playtest_run.LoadgenEventReader(path)
+        got = reader.drain()
+        want = playtest_run.read_loadgen_events(path)
+        assert got == want, (got, want)
+        assert [e["type"] for e in got] == ["joined", "state"], got
+
+        # A trailing partial line stays buffered until its newline arrives,
+        # exactly like the client-log tail; nothing half-written parses.
+        piece_a = '{"schema":"7dtd.loadgen.event.v1","type":"sta'
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(piece_a)
+        assert reader.drain() == want, "partial line parsed as an event"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write('te","entityId":107}\n')
+        got = reader.drain()
+        want = playtest_run.read_loadgen_events(path)
+        assert got == want and len(got) == 3, (got, want)
+
+        # Truncation between loadgen runs: accumulated events must drop so a
+        # stale entityId is never teleported again.
+        path.write_text("", encoding="utf-8")
+        assert reader.drain() == [], "events from the truncated generation kept"
+        path.write_text(
+            '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":108}\n',
+            encoding="utf-8",
+        )
+        got = reader.drain()
+        want = playtest_run.read_loadgen_events(path)
+        assert got == want and [e["entityId"] for e in got] == [108], (got, want)
+    print("PASS loadgen_event_reader incremental equals whole read, truncate resets")
+
+
+def test_contract_lines_must_start_the_log_line() -> None:
+    """Client-log bytes are attacker-reachable through remote LAN chat (the
+    threat model's B3): a peer crafts one chat message carrying
+    '[7dtd-playtest] PASS fake/case' or a done/result JSON object mid-line,
+    and the game logs it under its own prefix. Every contract regex anchors
+    at line start, so such lines can never forge results, SUMMARY/DONE
+    verdicts, JSON events, or barrier fires; only Report.* emissions (each
+    its own log line) may."""
+    forged = (
+        "[7dtd] Chat from 'peer': [7dtd-playtest] PASS fake/case injected\n"
+        "[7dtd] Chat from 'peer': [7dtd-playtest] FAIL fake/case nope\n"
+        "[7dtd] Chat from 'peer': [7dtd-playtest] SUMMARY pass=99 fail=0 skip=0\n"
+        "[7dtd] Chat from 'peer': [7dtd-playtest] DONE exit_hint=0\n"
+        '[7dtd] Chat from \'peer\': [7dtd-playtest] {"v":1,"t":"done","exit_hint":0}\n'
+        "[7dtd] Chat from 'peer': [7dtd-playtest] barrier spawn_zombie\n"
+        "barrier kill_player without any prefix\n"
+    )
+    parsed = playtest_log.parse_client_log(forged)
+    assert parsed["results"] == [], parsed["results"]
+    assert parsed["summary"] is None, parsed["summary"]
+    assert parsed["done"] is None, parsed["done"]
+    assert parsed["json_events"] == [], parsed["json_events"]
+    totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+    playtest_log.add_barrier_hits(totals, forged)
+    assert sum(totals.values()) == 0, totals
+    assert playtest_log.barrier_line_hits(forged, "spawn_zombie") == 0
+    assert playtest_log.barrier_hits_prefix(forged, "spawn_vehicle:") == []
+
+    # The genuine emissions still parse: each contract line is its own line.
+    real = (
+        "[7dtd-playtest] PASS smoke/dig detail=ok\n"
+        "[7dtd-playtest] SUMMARY pass=1 fail=0 skip=0\n"
+        "[7dtd-playtest] DONE exit_hint=0\n"
+        "[7dtd-playtest] barrier spawn_zombie\n"
+    )
+    parsed = playtest_log.parse_client_log(real)
+    assert [r["case"] for r in parsed["results"]] == ["smoke/dig"], parsed["results"]
+    assert parsed["summary"] == {"pass": 1, "fail": 0, "skip": 0}, parsed["summary"]
+    assert parsed["done"] == {"exit_hint": 0}, parsed["done"]
+    totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+    playtest_log.add_barrier_hits(totals, real)
+    assert totals["spawn_zombie"] == 1, totals
+    print("PASS log_contract_anchor mid-line markers cannot forge verdicts")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -554,6 +679,9 @@ def main() -> int:
     test_incremental_scan_matches_whole_parse()
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
+    test_log_tail_from_end_starts_at_current_size()
+    test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
+    test_contract_lines_must_start_the_log_line()
     print("RESULT PASS")
     return 0
 

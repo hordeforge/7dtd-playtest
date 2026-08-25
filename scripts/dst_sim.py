@@ -507,17 +507,21 @@ class Agent:
 # ---------------------------------------------------------------------------
 
 
-def install_invariants(sim: Simulation, world: World, storage: SimStorage) -> None:
+def install_invariants(
+    sim: Simulation, world: World, storage: SimStorage
+) -> set[str]:
     """Install the properties checked after **every** scheduler step.
 
     Each one encodes a belief about the design, written down before the
     simulator was pointed at it. The simulator's job is to find holes in
     these beliefs, not to substitute for having them.
+
+    Returns the set of sessions I4 has blessed so far; the caller keeps it
+    current as agents claim and rotate sessions.
     """
 
     known_sessions: set[str] = set()
     last_heartbeat: dict[str, tuple[str | None, float | None]] = {}
-    sim.known_sessions = known_sessions  # type: ignore[attr-defined]
 
     def _state() -> pl.LockState:
         """Read the lock on a canonical clock, not a skewed agent's."""
@@ -631,6 +635,8 @@ def install_invariants(sim: Simulation, world: World, storage: SimStorage) -> No
     sim.add_invariant("I6_stale_lock_reclaimable", i6_stale_lock_is_reclaimable)
     sim.add_invariant("I7_holder_claim_persists", i7_holder_claim_persists)
 
+    return known_sessions
+
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -661,7 +667,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
     storage = SimStorage(sim, cfg.faults)
     env = SimEnv(sim, cfg, storage)
     world = World(sim)
-    install_invariants(sim, world, storage)
+    known_sessions = install_invariants(sim, world, storage)
 
     previous = pl.set_env(env)
     try:
@@ -677,7 +683,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
                 )
             agents.append(Agent(name, sim, env, world, cfg))
         for a in agents:
-            sim.known_sessions.add(a.session)  # type: ignore[attr-defined]
+            known_sessions.add(a.session)
 
         # Sessions rotate after each crash/release; keep I4's set current.
         original_new_session = pl.new_session_id
@@ -686,7 +692,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
             prefix: str = "playtest", *, env: pl.LockEnv | None = None
         ) -> str:
             sid = original_new_session(prefix, env=env)
-            sim.known_sessions.add(sid)  # type: ignore[attr-defined]
+            known_sessions.add(sid)
             return sid
 
         pl.new_session_id = tracking_new_session

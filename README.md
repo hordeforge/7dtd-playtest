@@ -1,4 +1,4 @@
-# 🛡️ Vanguard (7DTD Playtest Runner)
+# 7dtd-playtest
 
 > **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
 
@@ -672,12 +672,12 @@ Legacy: `PLAYTEST=1` or `ZDTD_PLAYTEST=1` arms `demo`.
 ## Suites (catalog summary)
 
 Full tables: **[SCENARIOS.md](SCENARIOS.md)** (every Live case id). Built-in
-counts from `Catalog.cs` (108 Live, 0 Defer):
+counts from `Catalog.cs` (109 Live, 0 Defer):
 
 | Suite | Live cases |
 |---|---:|
 | `smoke` | 5 (`join_ready`, `cgo_ready`, `ground`, `stats`, `day_clock`) |
-| `core` | 18 (look / motors / dig / place / inventory / …) |
+| `core` | 19 (look / motors / dig / place / inventory / …) |
 | `world` / `ui` / `combat` / … | see SCENARIOS |
 | `persist_setup` / `persist` | 6 setup + 5 verify |
 | `mp` | 6 |

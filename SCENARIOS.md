@@ -50,7 +50,7 @@ Make:
 make playtest-demo
 make playtest-bench LAPS=3
 make playtest-gate
-make playtest-full            # long (85 cases); no persist/mp/apm/bot
+make playtest-full            # long (86 cases); no persist/mp/apm/bot
 make playtest SUITE=combat
 ```
 

@@ -340,6 +340,65 @@ def test_orchestrator_payload_keys_match_consumer_contract() -> None:
     )
 
 
+def test_hostile_case_cannot_author_markdown(tmp_path: Path) -> None:
+    """Result rows are parsed back out of client-log bytes, and the JSON event
+    path carries any string as the case id, including real newlines (\\n
+    escapes materialize in json.loads), pipes, and backticks. playtest-compare.md
+    renders for humans, so a crafted id must stay inside its table cell: the
+    md row is single-line with structural characters neutralized, while the
+    JSON payload keeps the raw value as data."""
+    hostile = "a|b\nc`d"
+    event = {
+        "v": 1,
+        "t": "result",
+        "suite": "smoke",
+        "case": hostile,
+        "status": "pass",
+        "ms": 1,
+        "detail": "",
+    }
+    stock_log = (
+        "[7dtd-playtest] " + json.dumps(event) + "\n"
+        "[7dtd-playtest] SUMMARY pass=1 fail=0\n"
+        "[7dtd-playtest] DONE\n"
+    )
+    r = _run(tmp_path, stock_log, ZDTD_LOG)
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(
+        (tmp_path / "out" / "playtest-compare.json").read_text(encoding="utf-8")
+    )
+    # Data fidelity survives in the machine-readable artifact.
+    assert any(c["case"] == f"smoke/{hostile}" for c in payload["cases"])
+    report_md = (tmp_path / "out" / "playtest-compare.md").read_text(encoding="utf-8")
+    # Pipe escaped, backtick replaced, newline dropped: one intact table row
+    # (the parser prefixes the suite, hence smoke/).
+    assert "| `smoke/a\\|bc'd` | PASS | MISSING |" in report_md
+    assert any("smoke/a\\|bc'd: ran only on stock" in f for f in payload["findings"])
+
+
+def test_non_string_case_in_report_does_not_crash_diff(tmp_path: Path) -> None:
+    """A report JSON can carry any JSON value where a case id belongs; the
+    diff must coerce it like every other parser here instead of crashing
+    sorted() on a str/int key mix."""
+    def report(server: str, case: object) -> dict:
+        return {
+            "server": server,
+            "summary": {"pass": 1, "fail": 0, "skip": 0},
+            "results": [{"case": case, "status": "PASS"}],
+        }
+
+    s = tmp_path / "stock.json"
+    z = tmp_path / "zdtd.json"
+    s.write_text(json.dumps(report("stock", 5)), encoding="utf-8")
+    z.write_text(json.dumps(report("zdtd", "")), encoding="utf-8")
+    out = tmp_path / "out"
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
+    assert r.returncode == 0, r.stderr
+    payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
+    by = {c["case"]: c for c in payload["cases"]}
+    assert by["?"]["stock"]["status"] == "PASS"
+
+
 if __name__ == "__main__":
     import sys
 

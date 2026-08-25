@@ -12,18 +12,81 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
+from functools import lru_cache
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypedDict
 
-RESULT_RE = re.compile(r"\[7dtd-playtest\]\s+(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$")
-SUMMARY_RE = re.compile(
-    r"\[7dtd-playtest\]\s+SUMMARY\s+pass=(\d+)\s+fail=(\d+)(?:\s+skip=(\d+))?"
+# Every contract line is matched only at the start of a log line. The mod
+# emits each contract line through Log.Out as its own line, while game/chat
+# lines carry their own prefix first; without the ^ anchor, one chat message
+# containing "[7dtd-playtest] PASS fake/case" mid-line would forge results,
+# SUMMARY/DONE verdicts, JSON events, and barrier fires (client-log bytes are
+# attacker-reachable through remote LAN chat). Horizontal whitespace only:
+# \s would span newlines and let a trailing prefix line pair with the next
+# line's payload.
+RESULT_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+(PASS|FAIL|SKIP)[ \t]+(\S+)[ \t]*(.*)$",
+    re.MULTILINE,
 )
-DONE_RE = re.compile(r"\[7dtd-playtest\]\s+DONE(?:\s+exit_hint=(\d+))?")
-JSON_RE = re.compile(r"\[7dtd-playtest\]\s+(\{.*\})\s*$")
+SUMMARY_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+SUMMARY[ \t]+pass=(\d+)[ \t]+fail=(\d+)"
+    r"(?:[ \t]+skip=(\d+))?",
+    re.MULTILINE,
+)
+# Whole-token match like barrier_line_hits: a foreign "[7dtd-playtest]
+# DONExxx" line must not parse as the run-completion marker.
+DONE_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+DONE(?![\w:])(?:[ \t]+exit_hint=(\d+))?",
+    re.MULTILINE,
+)
+JSON_RE = re.compile(
+    r"^[ \t]*\[7dtd-playtest\][ \t]+(\{.*\})[ \t]*$", re.MULTILINE
+)
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
 NRE_SAMPLE_CAP = 50
+
+
+class ParsedClientLog(TypedDict):
+    """Shape of :meth:`ClientLogScan.result` / :func:`parse_client_log`.
+
+    Single home of the parsed-log contract shared by the orchestrator, the
+    comparison tool, and the offline gates. ``json_events`` entries are
+    whatever JSON objects the client emitted; every other field is coerced
+    by the parser to the types shown here.
+    """
+
+    results: list[dict[str, str]]
+    summary: dict[str, int] | None
+    done: dict[str, int | None] | None
+    json_events: list[dict[str, object]]
+    nre_like: list[str]
+    nre_like_total: int
+    malformed_events: int
+
+
+def empty_client_log() -> ParsedClientLog:
+    """Placeholder before any log bytes exist; same shape as :meth:`ClientLogScan.result`."""
+    return {
+        "results": [],
+        "summary": None,
+        "done": None,
+        "json_events": [],
+        "nre_like": [],
+        "nre_like_total": 0,
+        "malformed_events": 0,
+    }
+
+
+@lru_cache(maxsize=64)
+def _barrier_prefix_re(prefix: str) -> re.Pattern[str]:
+    """Compiled line-initial ``barrier <prefix>...`` grep; names repeat every
+    poll chunk."""
+    return re.compile(
+        rf"^[ \t]*\[7dtd-playtest\][ \t]+barrier[ \t]+({re.escape(prefix)}[^\s\"]*)",
+        re.MULTILINE,
+    )
 
 
 def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
@@ -33,24 +96,34 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     the same class during one composed run. Consumers keep their own fired
     counts or token sets, so collapsing identical names here loses events.
     """
-    return [
-        match.group(1)
-        for match in re.finditer(
-            rf"\[7dtd-playtest\]\s+barrier\s+({re.escape(prefix)}[^\s\"]*)",
-            blob,
-        )
-    ]
+    return [match.group(1) for match in _barrier_prefix_re(prefix).finditer(blob)]
+
+
+@lru_cache(maxsize=64)
+def _barrier_line_re(name: str) -> re.Pattern[str]:
+    """Compiled line-initial whole-name ``barrier <name>`` counter; see
+    barrier_line_hits."""
+    return re.compile(
+        rf"^[ \t]*\[7dtd-playtest\][ \t]+barrier {re.escape(name)}(?![\w:])",
+        re.MULTILINE,
+    )
 
 
 def barrier_line_hits(blob: str, name: str) -> int:
     """Count human `barrier <name>` lines in ``blob`` (whole-name match).
+
+    Anchored to the stable ``[7dtd-playtest]`` prefix at the start of a line
+    like every other contract regex (RESULT_RE, SUMMARY_RE, DONE_RE,
+    barrier_hits_prefix): only Report.Barrier emissions may count toward
+    servicing an admin action, never a game/chat/mod line that merely
+    contains the words.
 
     Report.Barrier also emits JSON with the same name; summing both
     double-fires handlers (e.g. kills bots). The whole-name match keeps
     "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
     lines, which are collected separately via barrier_hits_prefix.
     """
-    return len(re.findall(rf"barrier {re.escape(name)}(?![\w:])", blob))
+    return len(_barrier_line_re(name).findall(blob))
 
 
 def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
@@ -79,13 +152,13 @@ class ClientLogScan:
     """
 
     def __init__(self) -> None:
-        self.human_results: list[dict] = []
-        self.json_results: list[dict] = []
-        self.json_events: list[dict] = []
-        self.json_summary: dict | None = None
-        self.json_done: dict | None = None
-        self.human_summary: dict | None = None
-        self.human_done: dict | None = None
+        self.human_results: list[dict[str, str]] = []
+        self.json_results: list[dict[str, str]] = []
+        self.json_events: list[dict[str, object]] = []
+        self.json_summary: dict[str, int] | None = None
+        self.json_done: dict[str, int | None] | None = None
+        self.human_summary: dict[str, int] | None = None
+        self.human_done: dict[str, int | None] | None = None
         self.nre_hits: list[str] = []
         self.nre_total = 0
         # Lines that looked like events but failed to parse. Skipped on
@@ -160,15 +233,24 @@ class ClientLogScan:
             hint = int(m.group(1)) if m.group(1) is not None else None
             self.human_done = {"exit_hint": hint}
 
-    def feed_chunk(self, chunk: str) -> None:
-        """Feed text made of complete newline-terminated lines (see LogTail)."""
-        for line in chunk.splitlines():
-            if NRE_RE.search(line):
-                self.nre_total += 1
-                if len(self.nre_hits) < NRE_SAMPLE_CAP:
-                    self.nre_hits.append(line)
+    def _count_nre(self, line: str) -> None:
+        if NRE_RE.search(line):
+            self.nre_total += 1
+            if len(self.nre_hits) < NRE_SAMPLE_CAP:
+                self.nre_hits.append(line)
 
-    def result(self) -> dict:
+    def feed_lines(self, lines: Iterable[str]) -> None:
+        """Parse already-split complete lines (see LogTail) in one pass.
+
+        Per line this is :meth:`feed_line` plus the NRE scan, without
+        splitting (and re-iterating) the same bytes twice on the
+        orchestrator's ~2 Hz poll path.
+        """
+        for line in lines:
+            self.feed_line(line)
+            self._count_nre(line)
+
+    def result(self) -> ParsedClientLog:
         if self.json_results:
             results = self.json_results
             summary = self.json_summary or self.human_summary
@@ -195,14 +277,12 @@ class ClientLogScan:
         }
 
 
-def parse_client_log(text: str) -> dict:
+def parse_client_log(text: str) -> ParsedClientLog:
     """Parse a whole playtest log at once. Prefer JSON events when present
     (avoid double human+JSON). Incremental consumers should use
     :class:`ClientLogScan` instead of re-running this over the full text."""
     scan = ClientLogScan()
-    for line in text.splitlines():
-        scan.feed_line(line)
-        scan.feed_chunk(line)
+    scan.feed_lines(text.splitlines())
     return scan.result()
 
 
@@ -225,12 +305,28 @@ class LogTail:
     (truncated before a restart), reading restarts from zero. Decoding happens
     per completed line, so a multi-byte character split across polls stays
     intact inside the byte buffer.
+
+    ``from_end`` starts the tail at the file's current size instead of zero:
+    for a log that must not be truncated (its previous generation could not
+    be preserved), only bytes appended after construction are returned.
+
+    ``generations`` counts detected shrinks (truncation before a restart).
+    A consumer that accumulates parsed state across polls must reset it when
+    this advances, or events from the previous generation would answer for
+    the new one.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, from_end: bool = False) -> None:
         self._path = path
-        self._offset = 0
+        if from_end:
+            try:
+                self._offset = path.stat().st_size
+            except OSError:
+                self._offset = 0
+        else:
+            self._offset = 0
         self._pending = b""
+        self.generations = 0
 
     def poll(self) -> str:
         """Return newly appended complete-line text since the previous call."""
@@ -241,6 +337,7 @@ class LogTail:
         if size < self._offset:
             self._offset = 0
             self._pending = b""
+            self.generations += 1
         if size <= self._offset:
             return ""
         try:

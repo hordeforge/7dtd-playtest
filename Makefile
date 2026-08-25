@@ -43,7 +43,7 @@ help:
 	@echo "Offline dev loop (no game install needed):"
 	@echo "  make test                        run all offline gates (lint + typecheck + suites)"
 	@echo "  make test-one GATE=test_dst.py   run one gate (file name under scripts/)"
-	@echo "  make lint                        ruff over scripts/ ([tool.ruff] in pyproject.toml)"
+	@echo "  make lint                        ruff + shellcheck over scripts/ (pyproject.toml)"
 	@echo "  make typecheck                   mypy over scripts/ ([tool.mypy] in pyproject.toml)"
 	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
 	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
@@ -96,9 +96,11 @@ clean:
 UV := uv run --locked --project "$(ROOT)" python
 
 # Lint gate: ruff with the defect-oriented rule set from pyproject.toml
-# ([tool.ruff]). Same locked tool version locally and in CI.
+# ([tool.ruff]) plus shellcheck over the bash helpers under scripts/. Both are
+# preinstalled on GitHub runners, so local and CI run one identical gate.
 lint:
 	@cd "$(ROOT)" && uv run --locked ruff check scripts
+	@cd "$(ROOT)" && shellcheck scripts/*.sh
 
 # Type gate: mypy baseline strictness from pyproject.toml ([tool.mypy]).
 typecheck:
@@ -121,7 +123,9 @@ test: lint typecheck
 # `make test` runs (same order, same interpreter pin). Writes .coverage in
 # the repo root; CI renders it into the README badge with
 # scripts/coverage_badge.py. Subprocess-based DST simulation is not traced.
-COV := uv run --locked --project "$(ROOT)" --with coverage python
+# coverage comes from the locked dev group (pyproject.toml), not a
+# `--with` side-install, so CI measures with hash-pinned bytes.
+COV := $(UV)
 
 coverage:
 	rm -f .coverage .coverage.*

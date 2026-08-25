@@ -67,6 +67,33 @@ def load_results(path: Path) -> dict:
             "ran_epoch": None}
 
 
+# Characters that cannot appear inside a markdown table cell or list item:
+# C0 controls including CR/LF/TAB (a newline would break the row into
+# arbitrary markdown), DEL, and C1 controls. They are dropped before the
+# structural escapes in md_cell. Result rows are parsed back out of client
+# log bytes, so this is the same boundary playtest_run.xml_attr guards for
+# the JUnit artifact; the markdown writer was the one report surface left
+# without it.
+_MD_ILLEGAL_RE = re.compile("[\x00-\x1f\x7f-\x9f]")
+
+
+def md_cell(text: str) -> str:
+    """Make log-derived text safe inside one markdown cell or list entry.
+
+    Case ids come from client-log result lines (the JSON event path carries
+    any string, including real newlines via \\n escapes), so structural
+    characters must not reach playtest-compare.md raw: an unescaped pipe
+    breaks out of the table cell and a newline lets a crafted row author
+    arbitrary markdown below it, which renders when the report is viewed.
+    """
+    return (
+        _MD_ILLEGAL_RE.sub("", str(text))
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("`", "'")
+    )
+
+
 def ran_epoch_of(path: Path, res: dict) -> float | None:
     """Best-known run epoch for a side: payload field, report-<epoch>.json
     filename, or file mtime as a last resort. None when unknown."""
@@ -183,7 +210,13 @@ def main() -> int:
     def by_case(res: dict[str, Any]) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
         for r in res["results"]:
-            case = r.get("case") or "?"
+            # A report JSON can carry any JSON value where a case id belongs
+            # (hand-built fixtures, older tools); a non-string key would
+            # crash sorted() below on the str/int mix, so coerce like
+            # ClientLogScan coerces its event fields.
+            case = r.get("case")
+            if not isinstance(case, str) or not case:
+                case = "?"
             out.setdefault(case, []).append(r)
         return out
 
@@ -200,12 +233,15 @@ def main() -> int:
             "zdtd": {"status": z_st, "detail": (z.get("detail") or "")[:120]},
         })
         if s_st != z_st:
+            # Findings are display prose shared by the md and JSON payloads;
+            # md_cell keeps a log-derived id from authoring markdown there.
+            shown = md_cell(case)
             if "MISSING" in (s_st, z_st):
-                findings.append(f"{case}: ran only on "
+                findings.append(f"{shown}: ran only on "
                                 f"{'stock' if z_st == 'MISSING' else 'zdtd'} "
                                 f"({s_st} vs {z_st})")
             else:
-                findings.append(f"{case}: status differs ({s_st} vs {z_st})")
+                findings.append(f"{shown}: status differs ({s_st} vs {z_st})")
 
     def summary(res: dict[str, Any]) -> dict[str, int]:
         s = res.get("summary") or {}
@@ -248,7 +284,10 @@ def main() -> int:
     lines.append("| case | stock | zdtd |")
     lines.append("|---|---|---|")
     for r in rows:
-        lines.append(f"| `{r['case']}` | {r['stock']['status']} | {r['zdtd']['status']} |")
+        lines.append(
+            f"| `{md_cell(r['case'])}` | {r['stock']['status']} "
+            f"| {r['zdtd']['status']} |"
+        )
     lines.append("\n## Findings\n")
     if findings:
         for f in findings:

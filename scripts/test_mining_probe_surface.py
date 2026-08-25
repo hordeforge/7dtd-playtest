@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "Source" / "PlayTestMod" / "MiningProbe.cs"
-HELPERS = ROOT / "Source" / "PlayTestMod" / "Helpers.cs"
+HELPERS_GLOB = sorted((ROOT / "Source" / "PlayTestMod").glob("Helpers*.cs"))
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 README = ROOT / "README.md"
 SCENARIOS = ROOT / "SCENARIOS.md"
@@ -46,7 +46,10 @@ def forbidden_in(body: str, needles: tuple[str, ...]) -> list[str]:
 def main() -> int:
     src = PROBE.read_text(encoding="utf-8")
     catalog = CATALOG.read_text(encoding="utf-8")
-    helpers = HELPERS.read_text(encoding="utf-8")
+    # Helpers is one public static class split across partial-class files;
+    # assert against the joined text.
+    assert HELPERS_GLOB, "Helpers partial files missing"
+    helpers = "\n".join(p.read_text(encoding="utf-8") for p in HELPERS_GLOB)
     readme = README.read_text(encoding="utf-8")
     scenarios = SCENARIOS.read_text(encoding="utf-8")
     makefile = MAKEFILE.read_text(encoding="utf-8")

@@ -18,8 +18,9 @@
 # Options / env:
 #   --suite <id>   suite to run (required; or PLAYTEST_SUITE)
 #   --out <dir>    output directory (default under ./.local/capture)
-#   --runner <cmd> command that runs one suite; invoked as `<cmd> <id>`,
-#                  so a project wrapper passes e.g. `my-wrapper.sh --suite`.
+#   --runner <cmd> command that runs one suite; invoked as
+#                  `<cmd> --suite <id>`, so a project with its own wrapper
+#                  (deploys, .local.env, lock handling) passes that here.
 #                  Default: this repo's own scripts/playtest_run.py.
 set -euo pipefail
 
@@ -58,16 +59,26 @@ command -v pactl >/dev/null || { echo "ERROR: pactl is required" >&2; exit 2; }
 # an overlapping run's audio lands in this recording and nobody can tell whose
 # blast was heard.
 #
-# pgrep -x on the process NAME, never -f on the command line: -f matches any
-# process whose cmdline merely contains the game's name, which includes the
-# monitoring commands a session runs while watching a run.
-if pgrep -x '7DaysToDieServer.x86_64' >/dev/null 2>&1 \
-	|| pgrep -x '7DaysToDie.exe' >/dev/null 2>&1 \
-	|| pgrep -x '7DaysToDie_EAC.exe' >/dev/null 2>&1; then
-	echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
-	echo "       Let it finish before capturing; overlapping runs record each other." >&2
-	exit 1
-fi
+# pgrep -f on the command line would match any process whose cmdline merely
+# contains the game's name, which includes the monitoring commands a session
+# runs while watching a run. Instead reuse the orchestrator's own runtime
+# probe (playtest_lock): it inspects each process's executable, so stock/Proton
+# clients (including the Wine preloader phase), the stock dedicated, and zdtd
+# are all covered with no drift between this guard and the runner's lock.
+runtime_rc=0
+python3 "$HERE/playtest_lock.py" live || runtime_rc=$?
+case $runtime_rc in
+	0) : ;;
+	1)
+		echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
+		echo "       Let it finish before capturing; overlapping runs record each other." >&2
+		exit 1
+		;;
+	*)
+		echo "ERROR: could not verify that no 7 Days to Die runtime is live; refusing." >&2
+		exit 2
+		;;
+esac
 
 SINK="$(pactl get-default-sink 2>/dev/null)"
 [[ -n "$SINK" ]] || { echo "ERROR: no default sink" >&2; exit 2; }

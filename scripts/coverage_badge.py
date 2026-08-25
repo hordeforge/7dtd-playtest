@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render the line-coverage badge SVG from the local .coverage file.
 
-Must be run by an interpreter that has coverage importable: the Makefile
-`coverage` target arranges that (`--with coverage` under uv, the dev
-dependency group otherwise). Usage: coverage_badge.py OUTPUT.svg
+Must be run by an interpreter that has coverage importable: the locked dev
+dependency group provides it (`uv run --locked`, as `make coverage` does).
+Usage: coverage_badge.py OUTPUT.svg
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def percentage() -> int:
         [sys.executable, "-m", "coverage", "json", "-q", "-o", str(out)],
         check=True,
     )
-    data = json.loads(out.read_text())
+    data = json.loads(out.read_text(encoding="utf-8"))
     out.unlink()
     totals = data["totals"]
     return round(float(totals["percent_covered"]))
@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
         print("usage: coverage_badge.py OUTPUT.svg", file=sys.stderr)
         return 2
     pct = percentage()
-    Path(argv[1]).write_text(badge(pct, colour(pct)))
+    Path(argv[1]).write_text(badge(pct, colour(pct)), encoding="utf-8")
     return 0
 
 

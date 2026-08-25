@@ -10,9 +10,10 @@ from playtest_log import barrier_hits_prefix
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
+CASEDEF = ROOT / "Source" / "PlayTestMod" / "CaseDef.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 PROVIDER = ROOT / "Source" / "PlayTestMod" / "ScenarioProvider.cs"
-HELPERS = ROOT / "Source" / "PlayTestMod" / "Helpers.cs"
+HELPERS_GLOB = sorted((ROOT / "Source" / "PlayTestMod").glob("Helpers*.cs"))
 REPORT = ROOT / "Source" / "PlayTestMod" / "Report.cs"
 README = ROOT / "README.md"
 AGENTS = ROOT / "AGENTS.md"
@@ -43,6 +44,7 @@ def method_body(src: str, signature_re: str) -> str:
 
 def main() -> int:
     runner = RUNNER.read_text(encoding="utf-8")
+    casedef = CASEDEF.read_text(encoding="utf-8")
     catalog = CATALOG.read_text(encoding="utf-8")
     provider = PROVIDER.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
@@ -61,8 +63,11 @@ def main() -> int:
         "spawn_vehicle:vehicleBicycle",
     ], "repeated parameterized barriers must remain separate fixture requests"
 
-    assert "public sealed class CaseDef" in runner
-    assert "public sealed class CaseCtx" in runner
+    # The provider-facing case contract lives in its own file (CaseDef.cs),
+    # beside the other public surfaces (Report.cs, MiningProbe.cs, Helpers).
+    assert "public sealed class CaseDef" in casedef
+    assert "public sealed class CaseCtx" in casedef
+    assert "public enum PlayerGate" in casedef
     assert "public interface IScenarioProvider" in provider
     assert "IEnumerable<string> SuiteIds" in provider
     assert "void AppendSuite(List<CaseDef> queue, string suite, int lap)" in provider
@@ -73,19 +78,19 @@ def main() -> int:
     # Public factories on CaseDef (external providers must not hand-build fields).
     assert re.search(
         r"public\s+static\s+CaseDef\s+Live\s*\(",
-        runner,
+        casedef,
     ), "CaseDef.Live must be a public static factory"
     assert re.search(
         r"public\s+static\s+CaseDef\s+Defer\s*\(",
-        runner,
+        casedef,
     ), "CaseDef.Defer must be a public static factory"
 
     live_body = method_body(
-        runner,
+        casedef,
         r"public\s+static\s+CaseDef\s+Live\s*\([^)]*\)",
     )
     defer_body = method_body(
-        runner,
+        casedef,
         r"public\s+static\s+CaseDef\s+Defer\s*\([^)]*\)",
     )
 
@@ -133,7 +138,10 @@ def main() -> int:
         "Catalog.Defer must not construct CaseDef by hand"
     )
 
-    helpers = HELPERS.read_text(encoding="utf-8")
+    # Helpers is one public static class split across partial-class files
+    # (Helpers.Ui.cs, Helpers.World.cs, ...); assert against the joined text.
+    assert HELPERS_GLOB, "Helpers partial files missing"
+    helpers = "\n".join(p.read_text(encoding="utf-8") for p in HELPERS_GLOB)
     report = REPORT.read_text(encoding="utf-8")
     agents = AGENTS.read_text(encoding="utf-8")
     makefile = MAKEFILE.read_text(encoding="utf-8")
@@ -144,7 +152,7 @@ def main() -> int:
     assert "CaseDef.Defer" in readme, "README must document CaseDef.Defer"
 
     # Public Helpers + Report for external providers (give/equip/vehicle/barriers).
-    assert re.search(r"public\s+static\s+class\s+Helpers\b", helpers), (
+    assert re.search(r"public\s+static\s+(partial\s+)?class\s+Helpers\b", helpers), (
         "Helpers must be public static for external providers"
     )
     assert re.search(r"public\s+static\s+class\s+Report\b", report), (
@@ -286,7 +294,7 @@ def main() -> int:
     assert "def client_mute_enabled" in orch
     assert "def mute_client_audio_async" in orch
     assert "mute_client_audio_async()" in orch
-    assert 'or "1"' in orch or 'or "1"' in orch.replace(" ", "")
+    assert 'or "1"' in orch
     assert "CLIENT_MUTE" in orch and "CLIENT_MUTE=0" in readme
     assert "mute" in readme.lower() and "default" in readme.lower()
     print("OK client mute default-on (opt-out CLIENT_MUTE=0)")

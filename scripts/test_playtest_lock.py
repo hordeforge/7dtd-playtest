@@ -340,11 +340,30 @@ def test_wait_until_can_start(tmp: Path) -> None:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         _assert(
             proc.returncode == 0,
             "CLI wait on a free path exits 0: " + proc.stderr,
         )
+
+    # The capture scripts consume only the exit code, so it must track the
+    # probe exactly: 1 with a runtime up, 0 without.
+    expected_live_rc = 1 if pl.default_live_runtime_running() else 0
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPTS / "playtest_lock.py"), "live"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    _assert(
+        proc.returncode == expected_live_rc,
+        f"CLI live exit {proc.returncode} must match probed state "
+        f"{expected_live_rc}: {proc.stderr}",
+    )
 
 
 def test_playtest_run_wiring() -> None:
@@ -408,6 +427,35 @@ def test_heartbeat_thread_stop_before_start(tmp: Path) -> None:
     th.stop()
     th.stop()  # idempotent
     _assert(not lock.is_file(), "no tick ran, so no lock file")
+
+
+def test_heartbeat_thread_ticks_until_stopped(tmp: Path) -> None:
+    """A started thread must actually refresh the claim and stop() must join
+    it for good: a heartbeat thread that never ticks (or keeps ticking after
+    stop) either lets every other agent watch the hold go stale and take
+    over a live run, or writes behind a released lock."""
+    lock = tmp / "playtest_running"
+    sid = "grok-20260810-231500-a1b2c3d4e5f6"
+    pl.acquire(sid, path=lock, live_probe=lambda: False)
+    th = pl.HeartbeatThread(sid, path=lock, interval_sec=0.05)
+    th.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while th.loop.touches < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        _assert(
+            th.loop.touches >= 2,
+            f"started thread never refreshed the claim: touches={th.loop.touches}",
+        )
+        _assert(pl.read_lock(lock).session == sid, "heartbeat kept the owner")
+    finally:
+        th.stop()
+    ticks_at_stop = th.loop.touches
+    time.sleep(0.15)  # three full intervals: a live thread would tick again
+    _assert(
+        th.loop.touches == ticks_at_stop,
+        f"thread kept writing after stop(): {ticks_at_stop} -> {th.loop.touches}",
+    )
 
 
 def test_sigterm_becomes_graceful_exit() -> None:
@@ -685,6 +733,12 @@ def main() -> int:
             (
                 "heartbeat_thread_stop_before_start",
                 lambda: test_heartbeat_thread_stop_before_start(tmp / "hbstopped"),
+            ),
+            (
+                "heartbeat_thread_ticks_until_stopped",
+                lambda: test_heartbeat_thread_ticks_until_stopped(
+                    tmp / "hbticks"
+                ),
             ),
             (
                 "session_field_injection_refused",

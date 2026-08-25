@@ -145,7 +145,7 @@ that module, or the simulation stops covering it.
 
 ```bash
 make test                 # offline gates (lint + typecheck + suites), no game install needed
-make lint                 # ruff over scripts/ ([tool.ruff])
+make lint                 # ruff + shellcheck over scripts/ ([tool.ruff])
 make typecheck            # mypy over scripts/ ([tool.mypy])
 make test-one GATE=test_dst.py   # run one gate while iterating
 make check                # exactly what CI runs: test + dst DST_SEEDS=200
@@ -207,13 +207,14 @@ different sentence.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the ten offline suites on every push
+`make test` runs lint + typecheck plus the eleven offline suites on every push
 (CI: `.github/workflows/ci.yml`). The analysis gates come first and are
 blocking:
 
-0. ruff over `scripts/` (`make lint`, `[tool.ruff]` in pyproject.toml) and
-   mypy over `scripts/` (`make typecheck`, `[tool.mypy]`); both tools are
-   pinned in the dev dependency-group so local and CI versions match uv.lock.
+0. ruff over `scripts/` plus shellcheck over the bash helpers (`make lint`,
+   `[tool.ruff]` in pyproject.toml) and mypy over `scripts/` (`make
+   typecheck`, `[tool.mypy]`); ruff and mypy are pinned in the dev
+   dependency-group so local and CI versions match uv.lock.
 
 Then the eleven suites:
 

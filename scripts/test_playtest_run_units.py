@@ -20,6 +20,7 @@ import io
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,25 @@ def test_loadgen_structured_events_and_expectations() -> None:
         )
         assert len(failures) == 2 and "CVar protection" in failures[0]
         assert "buff protected" in failures[1]
+
+        # Every rejection path must surface as a named failure instead of a
+        # silent pass: no joined event, unparseable expectation text, and
+        # positive/equality expectations against missing state.
+        assert playtest_run.loadgen_expectation_failures([], [], []) == [
+            "no structured joined event"
+        ]
+        rejected = playtest_run.loadgen_expectation_failures(
+            events,
+            ["protection=abc"],
+            ["protected=maybe"],
+            ["missing_cvar"],
+            ["net=also_missing"],
+        )
+        assert len(rejected) == 4, f"rejection paths drifted: {rejected}"
+        assert "invalid CVar expectation" in rejected[0], rejected
+        assert "invalid buff expectation" in rejected[1], rejected
+        assert "missing_cvar expected positive" in rejected[2], rejected
+        assert "net and also_missing expected equal" in rejected[3], rejected
         assert playtest_run.parse_cvar_value(
             "Player 171: protection = 1.25", "protection"
         ) == 1.25
@@ -111,6 +131,90 @@ def test_loadgen_structured_events_and_expectations() -> None:
             DriftOracle("127.0.0.1", 1, ""), 171, ["net"], latest, 0.05
         ) == []
 
+        # Rejection direction: the oracle decides mp-suite verdicts, so an
+        # implementation that stopped consulting the server or comparing
+        # values would otherwise stay green here forever.
+        class BeyondToleranceOracle(Oracle):
+            def get_cvar(
+                self, name: str, entity_id: int, timeout: float = 8.0
+            ) -> float | None:
+                return 4.5
+
+        drift = playtest_run.server_cvar_oracle_failures(
+            BeyondToleranceOracle("127.0.0.1", 1, ""), 171, ["raw", "net"], latest, 0.05
+        )
+        assert len(drift) == 2 and "CVar raw" in drift[0], f"drift missed: {drift}"
+        assert "expected peer value" in drift[0] and "4.5" in drift[0], drift
+
+        class DeadOracle(Oracle):
+            def get_cvar(
+                self, name: str, entity_id: int, timeout: float = 8.0
+            ) -> float | None:
+                return None
+
+        dead = playtest_run.server_cvar_oracle_failures(
+            DeadOracle("127.0.0.1", 1, ""), 171, ["net"], latest
+        )
+        assert len(dead) == 1 and "observed None" in dead[0], f"None not flagged: {dead}"
+
+        # A name with no peer state event has nothing to compare against and
+        # must fail, not silently pass.
+        unobserved = playtest_run.server_cvar_oracle_failures(
+            Oracle("127.0.0.1", 1, ""), 171, ["never_reported"], latest
+        )
+        assert len(unobserved) == 1 and "never_reported" in unobserved[0], unobserved
+
+
+def test_loadgen_expectations_reject_non_finite_values() -> None:
+    """NaN/inf must fail expectations, never pass them: every comparison on
+    NaN is False, so an '=nan' typo or a non-finite observed value would
+    otherwise read as a green verdict against any state."""
+    nan = float("nan")
+    inf = float("inf")
+    events = [
+        {"type": "joined", "botId": 1, "entityId": 171},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "x",
+         "value": 4.0},
+        # Python JSON producers may emit bare NaN/Infinity tokens.
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "nan_cvar",
+         "value": nan},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "inf_cvar",
+         "value": inf},
+    ]
+
+    # Non-finite expected text is a bad expectation, not a wildcard match-all.
+    rejected = playtest_run.loadgen_expectation_failures(
+        events, ["x=nan", "x=inf", "x=1e999"], [], [], []
+    )
+    assert len(rejected) == 3, rejected
+    assert all("invalid CVar expectation" in r for r in rejected), rejected
+
+    # Non-finite observed values fail exact / positive / equal expectations.
+    failed = playtest_run.loadgen_expectation_failures(
+        events,
+        ["nan_cvar=4"],
+        [],
+        ["nan_cvar", "inf_cvar"],
+        ["nan_cvar=inf_cvar", "x=x"],
+    )
+    assert len(failed) == 4, failed
+
+    # The server oracle must flag a non-finite peer value instead of letting
+    # the NaN comparison (always False) pass any server value.
+    class FixedOracle(playtest_run.TelnetAdmin):
+        def get_cvar(
+            self, name: str, entity_id: int, timeout: float = 8.0
+        ) -> float | None:
+            return 4.0
+
+    _, latest = playtest_run.loadgen_latest_state(events)
+    oracle_failures = playtest_run.server_cvar_oracle_failures(
+        FixedOracle("127.0.0.1", 1, ""), 171, ["nan_cvar"], latest
+    )
+    assert len(oracle_failures) == 1 and "nan_cvar" in oracle_failures[0], (
+        oracle_failures
+    )
+
 
 def test_loadgen_observer_wiring_is_generic() -> None:
     source = PLAYTEST_RUN.read_text(encoding="utf-8")
@@ -126,7 +230,14 @@ def test_loadgen_observer_wiring_is_generic() -> None:
         "--loadgen-teleport",
     ):
         assert flag in source
-    assert "loadgen_joined_entity(read_loadgen_events(loadgen_events_path))" in source
+    # The poll loop must drain loadgen events incrementally (LoadgenEventReader),
+    # not re-read + re-parse the whole JSONL file every iteration.
+    assert "loadgen_joined_entity(loadgen_event_reader.drain())" in source
+    assert (
+        "loadgen_event_reader = LoadgenEventReader(loadgen_events_path)" in source
+    )
+    # The final-verdict snapshot stays a single whole-file read.
+    assert "read_loadgen_events(loadgen_events_path)" in source
     assert "teleportplayer {joined_entity}" in source
 
 
@@ -429,7 +540,10 @@ def test_suite_wants_host_fixtures_selection_table() -> None:
     wants = playtest_run.suite_wants_host_fixtures
     for suite in (
         "combat", "economy", "vehicle", "finale", "bot",
-        "demo", "full", "all", "live", "benchmark", "bench", "mp", "residual",
+        # demo_mode / residual_light are ExpandSuites synonyms of demo /
+        # residual: every spelling of one selection must arm identically.
+        "demo", "demo_mode", "full", "all", "live",
+        "benchmark", "bench", "mp", "residual", "residual_light",
     ):
         assert wants(suite), f"{suite} carries live cases needing host fixtures"
     for suite in (
@@ -505,7 +619,58 @@ def test_fixture_gate_covers_every_barrier_emitting_suite() -> None:
     )
 
 
-def _spawn_detached(body: str) -> subprocess.Popen:
+def _expand_suites_alias_map(text: str) -> dict[str, tuple[str, ...]]:
+    """Parse Catalog.ExpandSuites switch arms into {alias: expansion ids}.
+
+    Only alias arms (explicit ``case`` labels with an AddUnique) are
+    returned; the pass-through default arm and the early-return list/catalog
+    arm yield no ids and are skipped by callers.
+    """
+    start = text.index("public static string[] ExpandSuites")
+    end = text.index("static void AddUnique", start)
+    body = re.sub(r"//[^\n]*", "", text[start:end])
+    aliases: dict[str, tuple[str, ...]] = {}
+    arm_re = re.compile(
+        r'((?:case\s+"[^"]+":\s*)+)'
+        r"(?:return new\[\]\s*\{[^}]*\}\s*;|AddUnique\(list,(?P<ids>[^)]*)\))"
+    )
+    for m in arm_re.finditer(body):
+        names = re.findall(r'case\s+"([^"]+)"', m.group(1))
+        ids = tuple(re.findall(r'"([^"]+)"', m.group("ids") or ""))
+        for name in names:
+            aliases[name] = ids
+    return aliases
+
+
+def test_fixture_gate_covers_every_expand_suites_alias() -> None:
+    """Alias parity: if Catalog.ExpandSuites maps an alias onto an expansion
+    containing any suite id that arms fixtures, every spelling of that
+    selection must arm fixtures too. Catches adding a client synonym (the
+    residual_light class) without teaching FIXTURE_SUITE_IDS, where one
+    spelling of the same run opens the telnet path and the other leaves its
+    barriers unserviced."""
+    text = CATALOG_CS.read_text(encoding="utf-8")
+    aliases = _expand_suites_alias_map(text)
+    assert "residual" in aliases and "residual_light" in aliases, (
+        "catalog parse failed: residual synonyms not recognized"
+    )
+    wants = playtest_run.suite_wants_host_fixtures
+    for alias, ids in sorted(aliases.items()):
+        if not ids:
+            continue
+        if set(ids) & set(playtest_run.FIXTURE_SUITE_IDS):
+            assert wants(alias), (
+                f"alias '{alias}' expands into fixture-armed suites "
+                f"{sorted(set(ids) & set(playtest_run.FIXTURE_SUITE_IDS))} but "
+                "does not arm fixtures (missing from FIXTURE_SUITE_IDS?)"
+            )
+    print(
+        f"PASS fixture_gate_alias_surface {len(aliases)} ExpandSuites aliases"
+        " agree with FIXTURE_SUITE_IDS"
+    )
+
+
+def _spawn_detached(body: str) -> subprocess.Popen[bytes]:
     """Real child in its own session (same shape as orchestrator launches)."""
     return subprocess.Popen(
         ["bash", "-c", body],
@@ -576,6 +741,21 @@ def test_reap_finished_helpers_drops_only_exited() -> None:
     print("PASS reap_finished_helpers exited helpers reaped, live ones kept")
 
 
+def test_loadgen_peer_rebind_reaps_exited_instance() -> None:
+    """The spawn_loadgen_peer rebind must route the prior (exited) instance
+    through stop_proc: dropping the Popen after only closing its log handle
+    leaves the child unreaped, so every peer barrier fire adds one zombie that
+    lives until orchestrator exit (long soak / mp runs)."""
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    start = source.index("# Prior instance already exited")
+    end = source.index("loadgen_proc = start_loadgen(", start)
+    block = source[start:end]
+    assert "stop_proc(loadgen_proc)" in block, (
+        "peer rebind must reap the exited instance via stop_proc"
+    )
+    print("PASS loadgen_peer_rebind_reap exited instance routed through stop_proc")
+
+
 def test_positive_seconds_type_and_env_reader() -> None:
     """--timeout and PLAYTEST_TIMEOUT_SEC accept only finite seconds > 0; a
     bad env value exits 2 naming the variable instead of a raw traceback or
@@ -633,6 +813,23 @@ def test_tcp_port_type_range() -> None:
         else:
             raise AssertionError(f"tcp_port accepted {bad!r}")
     print("PASS tcp_port_range ports outside 1..65535 rejected at startup")
+
+
+def test_litenet_port_room_guard() -> None:
+    """--port feeds the derived loadgen join port ServerPort+2, so a value
+    above 65533 must be rejected at startup (tcp_port alone accepts it)."""
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert "require_litenet_room(args.port)" in source
+    for ok in (26900, 27025, 65533):
+        playtest_run.require_litenet_room(ok)
+    for bad in (65534, 65535):
+        try:
+            playtest_run.require_litenet_room(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"require_litenet_room accepted {bad}")
+    print("PASS litenet_port_room ports without room for port+2 rejected")
 
 
 def test_config_summary_redacts_telnet_password() -> None:
@@ -820,6 +1017,86 @@ def test_telnet_broken_session_degrades_to_empty_reply() -> None:
     print("PASS telnet_broken_session dead session degrades to empty reply")
 
 
+def test_spawn_near_players_trusts_only_live_sessions() -> None:
+    """spawn_near_players books a fixture fire only when the telnet session
+    survived the exchange: exec() closes the socket on transport failure and
+    returns "", indistinguishable from silence, so a dead session must book
+    zero (the barrier retries next poll) instead of counting a spawn that
+    never reached the server (docstring contract on connected())."""
+    class _LiveSock:
+        """Non-None stand-in for an open session socket."""
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+    class SpawnTelnet(playtest_run.TelnetAdmin):
+        """Replays canned replies and can kill the session mid-exchange."""
+
+        def __init__(self, replies: list[str], die_on: str | None = None) -> None:
+            self._replies = list(replies)
+            self.die_on = die_on
+            self.sent: list[str] = []
+            self.host = ""
+            self.port = 0
+            self.password = ""
+            self._sock = None
+
+        def open(self) -> None:
+            self._sock = _LiveSock()  # type: ignore[assignment]
+
+        def exec(self, cmd: str) -> str:
+            self.sent.append(cmd)
+            if self._sock is None:
+                return ""  # real exec sends nothing without a live session
+            if self.die_on is not None and cmd == self.die_on:
+                # Mirror exec(): a broken transport closes the session and
+                # the caller cannot tell silence from failure.
+                self._sock = None
+                return ""
+            return self._replies.pop(0)
+
+    players = "Total of 1 in the game\n'maci' (id=171, pos=(520.0, 62.0, 950.0))"
+
+    # Session survived the exchange and the reply is not a miss: book one.
+    ok = SpawnTelnet([players, "zombieBoe spawned id=3877"])
+    ok.open()
+    assert ok.spawn_near_players("zombieBoe") == 1, f"sent={ok.sent}"
+    assert ok.sent == ["listplayers", "spawnentity 171 zombieBoe"], ok.sent
+
+    # Session died on the spawn command itself: "" is indistinguishable from
+    # silence, so nothing may be booked (the barrier retries next poll). The
+    # fallback attempts run on the dead session and must stay unbooked too.
+    died = SpawnTelnet([players], die_on="spawnentity 171 zombieBoe")
+    died.open()
+    assert died.spawn_near_players("zombieBoe") == 0, (
+        f"a dead session was booked as a spawn: sent={died.sent}"
+    )
+    assert died.sent[:2] == ["listplayers", "spawnentity 171 zombieBoe"]
+    assert all(cmd.startswith("spawnentityat ") for cmd in died.sent[2:]), died.sent
+
+    # Alive session but every shape misses ("No spawn point" primary, ERR /
+    # Unknown fallback replies): zero bookings, all three pad offsets tried.
+    misses = SpawnTelnet(
+        [
+            players,
+            "No spawn point found",
+            "ERR: invalid position",
+            "Unknown entity name",
+            "ERR: invalid position",
+        ]
+    )
+    misses.open()
+    assert misses.spawn_near_players("zombieBoe") == 0, f"sent={misses.sent}"
+    assert len(misses.sent) == 2 + 3, f"fallback stopped early: {misses.sent}"
+
+    # Fallback success books exactly one, then stops issuing commands.
+    rescued = SpawnTelnet([players, "No spawn point found", "spawned at pad"])
+    rescued.open()
+    assert rescued.spawn_near_players("zombieBoe") == 1, f"sent={rescued.sent}"
+    assert rescued.sent[-1].startswith("spawnentityat zombieBoe "), rescued.sent
+    print("PASS spawn_trust_only_live_sessions dead sessions never book spawns")
+
+
 def test_safe_barrier_param_rejects_command_shapes() -> None:
     """Barrier parameters are lifted from client-log lines (attacker-reachable
     via remote chat) and interpolated into telnet console commands. Only
@@ -889,6 +1166,51 @@ def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
     print("PASS log_scrub control chars stripped from terminal echoes")
 
 
+def test_telnet_recv_scrubs_control_chars() -> None:
+    """Telnet replies echo remote-peer-chosen names (listplayers player
+    names, listents entity names) and every caller logs slices of them to
+    the operator terminal. _recv is the single control-char boundary: ESC,
+    NUL, BEL, and CR must be stripped there so no exec/get_cvar/list echo
+    can emit terminal escapes, while printable text survives for the id
+    regexes, keyword checks, and cvar number extraction."""
+    class EscapedSocket:
+        """Replays one payload then acts closed."""
+
+        def __init__(self, payload: bytes) -> None:
+            self._payload = payload
+            self.sent: list[bytes] = []
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+        def sendall(self, data: bytes) -> None:
+            self.sent.append(data)
+
+        def recv(self, _n: int) -> bytes:
+            chunk, self._payload = self._payload, b""
+            return chunk
+
+        def close(self) -> None:
+            return None
+
+    tn = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
+    tn._sock = EscapedSocket(
+        b"\x1b[2J\x00'p\x07layer' (id=171)\r\nTotal of 1 in the game\n"
+    )  # type: ignore[assignment]
+    out = tn._recv(0.0)
+    for bad in ("\x1b", "\x00", "\x07", "\r"):
+        assert bad not in out, f"{bad!r} survived the telnet boundary: {out!r}"
+    assert "'player' (id=171)" in out, f"visible reply text lost: {out!r}"
+    assert "Total of 1" in out, f"reply lines lost: {out!r}"
+    # Verdict parsing still works on the scrubbed form (the escape debris
+    # stays clear of the token so the id regexes see the same boundaries).
+    scrubbed_cvar = EscapedSocket(b"\x1b[0m\nHoldingController = 3\r\n")
+    tn._sock = scrubbed_cvar  # type: ignore[assignment]
+    assert tn.get_cvar("HoldingController", 171) == 3.0
+    assert scrubbed_cvar.sent == [b"cvar get HoldingController -p 171\n"]
+    print("PASS telnet_recv_scrub replies scrubbed once at the socket boundary")
+
+
 def test_result_echo_line_scrubs_parsed_rows() -> None:
     """Result rows echo parsed client-log fields (case ids, details carrying
     remote chat text) to the operator terminal: the same control-char scrub
@@ -947,7 +1269,6 @@ def test_resolve_telnet_password_paths() -> None:
     )
     assert len(set(generated)) == 2, "generated secrets must differ per call"
     for pw in generated:
-        assert playtest_run.safe_barrier_param(pw.replace("-", "_")) or True
         # Command-safe alphabet (token_urlsafe): survives the generated XML
         # attribute and the telnet wire unescaped.
         assert re.fullmatch(r"[A-Za-z0-9_-]{10,40}", pw), f"bad shape: {pw!r}"
@@ -1279,6 +1600,182 @@ def test_acquire_exclusive_lock_refusal_leaves_foreign_record() -> None:
     print("PASS acquire_exclusive_lock_refusal foreign record untouched")
 
 
+def test_acquire_exclusive_lock_marks_held_inside_guarded_region() -> None:
+    """mark_held must run inside the undo-release guard, before the wrapper
+    returns: main's lock_held flag has to flip in the same region that
+    releases on interrupt, or a signal landing between publication and the
+    flag write would exit through a finally that still sees lock_held=False
+    and strand the fresh claim unheartbeated."""
+    with tempfile.TemporaryDirectory(prefix="playtest-acqm-") as td:
+        lock = Path(td) / "playtest_running"
+        sid = "grok-20260810-231500-a1b2c3d4e5f6"
+        marks: list[int] = []
+        playtest_run.acquire_exclusive_lock(
+            sid, lock, mark_held=lambda: marks.append(1)
+        )
+        assert marks == [1], f"successful publish must mark held once: {marks}"
+        state = pl.read_lock(lock)
+        assert state.running and state.session == sid, (
+            f"successful acquire must leave the claim standing: {state}"
+        )
+
+    # Refusal: the flag must stay down so main's finally keeps skipping
+    # process teardown for a lock we never held.
+    with tempfile.TemporaryDirectory(prefix="playtest-acqn-") as td:
+        lock = Path(td) / "playtest_running"
+        owner = "owner-20260810-000000-aaaaaaaaaaaa"
+        other = "other-20260810-000001-bbbbbbbbbbbb"
+        pl.acquire(owner, path=lock, live_probe=lambda: False)
+        marks = []
+        try:
+            playtest_run.acquire_exclusive_lock(
+                other, lock, mark_held=lambda: marks.append(1)
+            )
+            raise AssertionError("foreign acquire must refuse")
+        except pl.PlaytestLockError:
+            pass
+        assert marks == [], f"refused acquire must not mark held: {marks}"
+    print("PASS acquire_exclusive_lock_mark_held flag flips inside the guard")
+
+
+def test_block_termination_signals_blocks_then_restores() -> None:
+    """The finally's first action must mask TERM/HUP on this thread so a
+    first-ever signal landing between cleanup entry and the SIG_IGN disarm
+    is pended instead of raising SystemExit mid-teardown; the helper must be
+    transparent about the prior mask so tests (and any future caller) can
+    restore it."""
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    playtest_run._block_termination_signals()
+    try:
+        after = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        for name in ("SIGTERM", "SIGHUP"):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            assert sig in after, f"{name} not blocked by the teardown mask"
+            assert sig not in before, f"{name} unexpectedly blocked beforehand"
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, before)
+    print("PASS block_termination_signals masks TERM/HUP until restored")
+
+
+def test_rewrite_platform_cfg_backs_up_once_and_forces_surface() -> None:
+    """start_stock_dedicated rewrites the user's platform.cfg in place: the
+    backup must carry the original bytes and be written exactly once (it is
+    the only copy of the user's config), the live file must end at the forced
+    local-auth surface, and the atomic publish must leave no temp droppings."""
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        pcfg = tdp / "platform.cfg"
+        original = b"platform=EAC\ncrossplatform=EOS\n"
+        pcfg.write_bytes(original)
+
+        playtest_run._rewrite_platform_cfg(pcfg)
+
+        bak = pcfg.with_name(pcfg.name + ".playtest-bak")
+        assert bak.is_file(), "first rewrite must create the backup"
+        assert bak.read_bytes() == original, "backup must hold the untouched original"
+        forced = b"platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n"
+        assert pcfg.read_bytes() == forced, f"forced surface drifted: {pcfg.read_bytes()!r}"
+
+        # Backup-once: a second run (already-forced live content) must never
+        # overwrite the only copy of the user's original.
+        playtest_run._rewrite_platform_cfg(pcfg)
+        assert bak.read_bytes() == original, "backup was overwritten on the second run"
+        assert pcfg.read_bytes() == forced
+
+        leftovers = sorted(
+            p.name for p in tdp.iterdir()
+            if p.name not in {pcfg.name, bak.name}
+        )
+        assert not leftovers, f"temp files leaked by the atomic write: {leftovers}"
+    print("PASS platform_cfg_rewrite backup once, forced surface, no temp files")
+
+
+def test_client_mute_env_contract() -> None:
+    """CLIENT_MUTE defaults on and only the documented off-spellings disable
+    it; PLAYTEST_MUTE / SEVEN_DAYS_TO_DIE_CLIENT_MUTE are fallbacks in order.
+    The mute helper silences a real player's audio session when this
+    misreads, so pin the behavior, not just the source text."""
+    names = ("CLIENT_MUTE", "PLAYTEST_MUTE", "SEVEN_DAYS_TO_DIE_CLIENT_MUTE")
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        for n in names:
+            os.environ.pop(n, None)
+        assert playtest_run.client_mute_enabled() is True, "default must be muted"
+        for off in ("0", "false", "No", "OFF", " off "):
+            os.environ["CLIENT_MUTE"] = off
+            assert playtest_run.client_mute_enabled() is False, f"CLIENT_MUTE={off!r}"
+            os.environ["CLIENT_MUTE"] = "1"
+        for on in ("1", "true", ""):
+            os.environ["CLIENT_MUTE"] = on
+            assert playtest_run.client_mute_enabled() is True, f"CLIENT_MUTE={on!r}"
+
+        # First set name wins: an opt-out beats a later alias's default-on,
+        # and each alias disables on its own when the earlier ones are unset.
+        os.environ["CLIENT_MUTE"] = "0"
+        os.environ["PLAYTEST_MUTE"] = "1"
+        assert playtest_run.client_mute_enabled() is False, "CLIENT_MUTE lost to alias"
+        os.environ.pop("CLIENT_MUTE")
+        assert playtest_run.client_mute_enabled() is True, "PLAYTEST_MUTE=1 must keep mute"
+        os.environ["PLAYTEST_MUTE"] = "0"
+        assert playtest_run.client_mute_enabled() is False, "alias opt-out ignored"
+        os.environ.pop("PLAYTEST_MUTE")
+        os.environ["SEVEN_DAYS_TO_DIE_CLIENT_MUTE"] = "off"
+        assert playtest_run.client_mute_enabled() is False, "legacy alias opt-out ignored"
+    finally:
+        for n, old in saved.items():
+            if old is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = old
+    print("PASS client_mute_env_contract default on, documented opt-outs, alias order")
+
+
+def test_write_zdtd_apm_dump_fails_closed_without_markers() -> None:
+    """The APM evidence writer must never invent a live snapshot: only output
+    carrying real zdtd markers becomes a dump (prefixed with run_id for
+    correlation); marker-less or empty output writes the failure sentinel so
+    the client cannot soft-pass synthetic data, and a missing binary writes
+    nothing at all."""
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        dump_path = tdp / "apm" / "dump.txt"
+
+        def fake_zdtd(body: str) -> Path:
+            exe = tdp / "zdtd"
+            exe.write_text(f"#!/bin/sh\ncat <<'EOF'\n{body}EOF\n", encoding="utf-8")
+            exe.chmod(0o755)
+            return exe
+
+        # Live markers: dump written, run_id prefixed, verdict True.
+        exe = fake_zdtd("zdtd-apm tick_total=3 wall_ns=100\n")
+        assert playtest_run.write_zdtd_apm_dump(
+            exe, tdp / "world", tdp / "srv", dump_path, run_id="run-42"
+        )
+        assert dump_path.read_text(encoding="utf-8") == (
+            "run_id=run-42\nzdtd-apm tick_total=3 wall_ns=100\n"
+        ), dump_path.read_text(encoding="utf-8")
+
+        # No markers: fail closed with the sentinel, not synthetic evidence.
+        dump_path.unlink()
+        exe = fake_zdtd("boot noise only\n")
+        assert not playtest_run.write_zdtd_apm_dump(
+            exe, tdp / "world", tdp / "srv", dump_path
+        ), "marker-less output must not read as an APM snapshot"
+        assert dump_path.read_text(encoding="utf-8") == (
+            "APM_DUMP_FAILED no markers from zdtd --ticks\n"
+        )
+
+        # Missing binary: warn + False, nothing is written anywhere.
+        dump_path.unlink()
+        assert not playtest_run.write_zdtd_apm_dump(
+            tdp / "absent-zdtd", tdp / "world", tdp / "srv", dump_path
+        )
+        assert not dump_path.exists(), "a failed run must leave no dump behind"
+    print("PASS apm_dump_fail_closed markers required, sentinel on miss")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -1302,9 +1799,14 @@ def main() -> int:
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
+        ("fixture_gate_alias_surface", test_fixture_gate_covers_every_expand_suites_alias),
         ("barrier_tables_pair", test_new_barrier_tables_fresh_pair_per_generation),
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
+        (
+            "loadgen_peer_rebind_reap",
+            test_loadgen_peer_rebind_reaps_exited_instance,
+        ),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
         ("main_finally_reap_helpers", test_main_finally_reaps_mute_helpers),
         ("wait_file_contains", test_wait_file_contains_incremental),
@@ -1319,6 +1821,14 @@ def main() -> int:
         (
             "telnet_broken_session",
             test_telnet_broken_session_degrades_to_empty_reply,
+        ),
+        (
+            "telnet_recv_scrub",
+            test_telnet_recv_scrubs_control_chars,
+        ),
+        (
+            "spawn_trust_only_live_sessions",
+            test_spawn_near_players_trusts_only_live_sessions,
         ),
         (
             "stock_ready_unreadable_log",
@@ -1359,6 +1869,23 @@ def main() -> int:
         (
             "acquire_exclusive_lock_refusal",
             test_acquire_exclusive_lock_refusal_leaves_foreign_record,
+        ),
+        (
+            "acquire_exclusive_lock_mark_held",
+            test_acquire_exclusive_lock_marks_held_inside_guarded_region,
+        ),
+        (
+            "block_termination_signals",
+            test_block_termination_signals_blocks_then_restores,
+        ),
+        (
+            "platform_cfg_rewrite",
+            test_rewrite_platform_cfg_backs_up_once_and_forces_surface,
+        ),
+        ("client_mute_env_contract", test_client_mute_env_contract),
+        (
+            "apm_dump_fail_closed",
+            test_write_zdtd_apm_dump_fails_closed_without_markers,
         ),
     ):
         try:

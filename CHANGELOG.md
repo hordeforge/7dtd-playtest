@@ -20,6 +20,20 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Changed
+
+- The provider-facing case contract (`PlayerGate`, `CaseDef`, `CaseCtx`)
+  moved verbatim from `Runner.cs` into its own `Source/PlayTestMod/CaseDef.cs`,
+  matching the other public provider surfaces (`Report.cs`, `MiningProbe.cs`,
+  the `Helpers.*.cs` partials). No type, member, or namespace changed; the
+  scenario-provider surface gate now reads the new file.
+- Static-analysis gates tightened where the tree already passes: ruff now
+  enforces PGH (no blanket `# noqa` / bare `type: ignore`) and T10 (no
+  debugger imports or breakpoints) over `scripts/`; mypy gains
+  `disallow_any_unimported`. Three `type: ignore[attr-defined]` suppressions
+  in `dst_sim.py` were removed by returning the invariant session set from
+  `install_invariants` instead of monkey-patching it onto `Simulation`.
+
 ### Fixed
 
 - Orchestrator fails fast when the client exits before the suite's `DONE`
@@ -27,6 +41,20 @@ Release model (inferred practice, now pinned by `make test`):
   crash used to wait out the full `--timeout`, hiding the failure behind a
   15-minute stall. The 2s post-exit drain still gives a client that wrote
   `DONE` in its final moments its success break.
+- The orchestrator now announces a dedicated/zdtd backend that exits after
+  readiness (`<backend> backend exited mid-run code=…`, once per server
+  process, echoed as `server_exited_mid_run` in the report JSON, including
+  the rejoin setup-incomplete report). Previously nothing polled the backend
+  after its ready wait, so a mid-run crash surfaced only as scattered case
+  failures, telnet connect misses, or the full timeout without naming a cause.
+- The loadgen observer verdict is computed from one snapshot of
+  `loadgen_events.jsonl`. Two separate reads could straddle an append and
+  make the expectation failures disagree with the CVar-oracle state they are
+  judged against.
+- The `spawn_loadgen_peer` rebind routes the prior (exited) loadgen instance
+  through `stop_proc`, which reaps it. Dropping the `Popen` after only closing
+  its log handle left one zombie per peer barrier fire until orchestrator exit
+  on long soak / mp runs.
 - `test_mining_probe_surface.py` now matches the full `PressPrimary` /
   `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped
   at `(` and never found the method body), and ruff F401/RET504 on that
