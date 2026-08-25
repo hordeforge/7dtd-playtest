@@ -2960,6 +2960,7 @@ def main(argv: list[str] | None = None) -> int:
         def peer_suite_done() -> bool:
             return not peer_client_suite or peer_parsed.get("done") is not None
 
+        run_end_reason = "timeout"
         while time.monotonic() < deadline:
             reap_finished_helpers()
             note_backend_exit()
@@ -3269,6 +3270,7 @@ def main(argv: list[str] | None = None) -> int:
                     peer_parsed = read_peer_results()
                     if peer_suite_done():
                         log("saw DONE in every scenario client log")
+                        run_end_reason = "done"
                         break
 
             if not peer_ready_seen and peer_chunk and "ready player=" in peer_chunk:
@@ -3304,16 +3306,27 @@ def main(argv: list[str] | None = None) -> int:
                 parsed = client_scan.result()
                 peer_parsed = read_peer_results()
                 if parsed.get("done") is not None and peer_suite_done():
+                    run_end_reason = "done"
                     break
                 # The client exited without the suite's DONE. Waiting out the
                 # timeout hides a mid-suite crash behind a 15-minute stall;
                 # the 2s drain above already gave the client its last chance
                 # to write DONE before the process vanished.
                 log("client exited before DONE; failing instead of waiting out the timeout")
+                run_end_reason = "client_exit"
                 break
             time.sleep(0.5)
         else:
             log(f"timeout after {time.monotonic() - t0:.0f}s waiting for DONE")
+
+        # The run is decided: DONE parsed, the client exited, or the budget
+        # ran out. Record it for any consumer watching this run (the capture
+        # loop ends when this file appears) instead of leaving them to wait
+        # out their own timeout.
+        try:
+            (args.logdir / "run-ended").write_text(run_end_reason + "\n", encoding="utf-8")
+        except OSError as ex:
+            warn(f"could not write run-ended marker in {args.logdir}: {ex}")
 
         # Final parse from everything drained so far, plus any bytes appended
         # between the last poll and here.
