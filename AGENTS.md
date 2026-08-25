@@ -223,7 +223,7 @@ different sentence.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the eleven offline suites on every push
+`make test` runs lint + typecheck plus the thirteen offline suites on every push
 (CI: `.github/workflows/ci.yml`). The analysis gates come first and are
 blocking:
 
@@ -232,7 +232,7 @@ blocking:
    typecheck`, `[tool.mypy]`); ruff and mypy are pinned in the dev
    dependency-group so local and CI versions match uv.lock.
 
-Then the eleven suites:
+Then the thirteen suites:
 
 1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
    + counts total must equal Catalog.cs. A catalog addition that skips
@@ -256,6 +256,11 @@ Then the eleven suites:
    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
    hard-deleted).
 11. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
+12. capture-clip marker surface (`scripts/test_capture_video_surface.py`):
+    the `scene staged` line `capture_frames.sh` keys on parses the clip id
+    from the trailing directory, CRLF-safe.
+13. video-review surface (`scripts/test_video_review.py`): intent parsing and
+    the deadeye review runner fail closed on malformed input.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

@@ -36,7 +36,8 @@ jobs:
       # mining-probe provider surface, the stock-peer orchestration surface,
       # the host lock, the deterministic simulation, the orchestrator
       # local-init order gate, the orchestrator report/log surface, the
-      # orchestrator pure-logic units, and the compare diff (pytest via uv).
+      # orchestrator pure-logic units, the compare diff (pytest via uv),
+      # the capture-clip marker surface, and the video-review surface.
       # The mod build itself is not CI-able (references game DLLs), but these
       # gates catch the doc/catalog drift that used to ship silently.
       - run: make test

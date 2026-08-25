@@ -801,9 +801,10 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 
 `.github/workflows/ci.yml` runs `make test` (the offline gates: catalog<->SCENARIOS
 surface incl. live rows + counts total, mod version/changelog sync, scenario-provider
-env surface, stock-peer orchestration surface, host lock, deterministic simulation,
-orchestrator local-init order, report/log surface, orchestrator pure-logic units,
-compare diff)
+env surface, mining-probe provider surface, stock-peer orchestration surface, host
+lock, deterministic simulation, orchestrator local-init order, report/log surface,
+orchestrator pure-logic units, compare diff, capture-clip marker surface,
+video-review surface)
 plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
 runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are
