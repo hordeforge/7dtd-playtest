@@ -135,9 +135,15 @@ done
 echo "$CLIP_LINE"
 
 # clip complete <id> frames=N -> playtest-shots/clips/<id>
-CLIP_ID="$(echo "$CLIP_LINE" | awk '{print $3}')"
-FRAME_COUNT="$(echo "$CLIP_LINE" | awk -F'frames=' '{print $2}' | awk '{print $1}')"
+# The marker rides the client log's own line, which carries Unity's prefix
+# (timestamp, level, the harness's "[7dtd-playtest]"), so the id is not a
+# fixed whitespace field. The trailing "-> <dir>" is stable, and the id is
+# that directory's basename; the line's CRLF newline is stripped first or it
+# would ride into every parsed field.
+CLIP_LINE="$(printf '%s' "$CLIP_LINE" | tr -d '\r')"
 CLIP_DIR="$(echo "$CLIP_LINE" | awk -F'-> ' '{print $2}')"
+CLIP_ID="$(basename "$CLIP_DIR")"
+FRAME_COUNT="$(echo "$CLIP_LINE" | awk -F'frames=' '{print $2}' | awk '{print $1}')"
 [[ -n "$CLIP_ID" && -n "$FRAME_COUNT" && -n "$CLIP_DIR" ]] || {
 	echo "ERROR: could not parse the clip completion line: $CLIP_LINE" >&2
 	exit 2

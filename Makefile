@@ -122,6 +122,7 @@ test: lint typecheck
 	$(UV) "$(ROOT)/scripts/test_report_surface.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_run_units.py"
 	$(UV) "$(ROOT)/scripts/test_playtest_compare.py"
+	$(UV) "$(ROOT)/scripts/test_capture_video_surface.py"
 	$(UV) "$(ROOT)/scripts/test_video_review.py"
 
 # Line coverage of the orchestrator modules under the same offline suites
@@ -144,6 +145,7 @@ coverage:
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_report_surface.py"
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_run_units.py"
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_compare.py"
+	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_capture_video_surface.py"
 	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_video_review.py"
 	$(COV) -m coverage report -m
 
