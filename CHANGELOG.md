@@ -48,6 +48,9 @@ Release model (inferred practice, now pinned by `make test`):
   suite end (`clip abandoned`), never completed.
 - `Helpers.TryEquipItem(player, name)`: the public give+equip-by-name route
   generated walk-cycle cases use.
+- `Helpers.StartWalk` / `Helpers.StopWalk`: the public locomotion surface
+  (stock autorun via LocomotionDrive, not teleport) generated walk-cycle
+  recording cases use.
 
 ### Changed
 

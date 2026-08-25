@@ -652,6 +652,10 @@ Same `--runner` contract and the same refuse-to-overlap guard as
 frame directory as the evidence that does exist. If `ffmpeg` is missing, the
 frames are still the evidence.
 
+`Helpers.StartWalk` / `Helpers.StopWalk` expose the same real motor walk
+(`LocomotionDrive`, stock autorun — not teleport) to external providers, so a
+generated case can equip a worn asset and record the player actually walking.
+
 A staged hold is not the only thing worth recording. `Helpers.BeginClip(id, superSize, fps)`
 and `Helpers.EndClip(id)` start and stop an **on-demand** in-game recording
 from any case — a `Live` case included — so the client can capture what the
