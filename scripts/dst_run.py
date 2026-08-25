@@ -104,10 +104,7 @@ def replay_flags(cfg: SimConfig) -> str:
         f"--heartbeat-sec {cfg.heartbeat_sec:g}",
     ]
     faults = cfg.faults
-    if faults == Faults():
-        # Parser defaults rebuild this shape; no fault flag needed.
-        pass
-    else:
+    if faults != Faults():
         happy_with_skew = Faults.none()
         happy_with_skew.clock_skew_sec = faults.clock_skew_sec
         if faults == happy_with_skew:

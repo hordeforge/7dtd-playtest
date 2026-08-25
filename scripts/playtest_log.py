@@ -239,21 +239,12 @@ class ClientLogScan:
             if len(self.nre_hits) < NRE_SAMPLE_CAP:
                 self.nre_hits.append(line)
 
-    def feed_chunk(self, chunk: str) -> None:
-        """Feed text made of complete newline-terminated lines (see LogTail).
-
-        NRE scan only; callers that also need result parsing should use
-        :meth:`feed_lines`, which runs both passes over a single split.
-        """
-        for line in chunk.splitlines():
-            self._count_nre(line)
-
     def feed_lines(self, lines: Iterable[str]) -> None:
-        """Parse already-split complete lines in one pass.
+        """Parse already-split complete lines (see LogTail) in one pass.
 
-        Per line this is :meth:`feed_line` plus the NRE scan that
-        :meth:`feed_chunk` performs, without splitting (and re-iterating)
-        the same bytes twice on the orchestrator's ~2 Hz poll path.
+        Per line this is :meth:`feed_line` plus the NRE scan, without
+        splitting (and re-iterating) the same bytes twice on the
+        orchestrator's ~2 Hz poll path.
         """
         for line in lines:
             self.feed_line(line)
