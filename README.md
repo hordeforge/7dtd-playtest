@@ -359,13 +359,15 @@ variable reaches the game process (`steam -applaunch` often drops it).
 Wipe the orchestrator save before launch so dig pads and fixtures start clean:
 
 ```bash
-make playtest SUITE=your_suite FRESH=1          # default FRESH=1
+make playtest SUITE=your_suite
 # or
-uv run --locked --project . python scripts/playtest_run.py --suite your_suite --fresh-save ...
+uv run --locked --project . python scripts/playtest_run.py --suite your_suite
 ```
 
-`FRESH=0` keeps the existing save when you deliberately inspect one. Providers
-do not need Atomic’s OCR `create-smoke-world.py` when using this host path.
+Every run starts from a fresh save — a hard rule, no opt-out. The orchestrator
+wipes the state before each run, so `--fresh-save` is accepted only as a no-op
+and there is no `--reuse-save`/`FRESH=0` path. Providers do not need Atomic’s
+OCR `create-smoke-world.py` when using this host path.
 
 ### State, backups, and recovery
 

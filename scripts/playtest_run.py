@@ -257,7 +257,7 @@ def config_summary(args: argparse.Namespace) -> str:
         f"world={args.world_name if args.server == 'stock' else args.world}",
         f"game_name={args.game_name}",
         f"logdir={args.logdir}",
-        f"fresh_save={bool(args.fresh_save)}",
+        f"fresh_save=True",
         f"no_server={bool(args.no_server)}",
         f"fixtures={not args.no_fixtures}",
         f"telnet_password={pw_state}",
@@ -2294,7 +2294,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--fresh-save",
         action="store_true",
-        help="wipe stock save GameName before start (reproducible dig pad)",
+        help=(
+            "accepted for back-compat; a no-op. Fresh save is the hard-rule default and "
+            "cannot be turned off: every suite starts on a clean world so it measures fresh "
+            "terrain and no leftover blocks, not the previous run's state."
+        ),
     )
     ap.add_argument(
         "--junit",
@@ -2520,12 +2524,14 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
 
         qroot = args.logdir / QUARANTINE_DIRNAME
-        if args.fresh_save:
-            if args.server == "stock":
-                fresh_save(args.userdata, args.game_name, qroot)
-            else:
-                # args.world always carries a Path default; only zdtd reads it.
-                fresh_zdtd_world(args.world, qroot)
+        # Fresh save is a hard-rule default and cannot be turned off: every suite
+        # starts on a clean world, so a place/dig suite measures fresh terrain and
+        # no leftover blocks rather than the previous run's state.
+        if args.server == "stock":
+            fresh_save(args.userdata, args.game_name, qroot)
+        else:
+            # args.world always carries a Path default; only zdtd reads it.
+            fresh_zdtd_world(args.world, qroot)
 
         preserved_client = snapshot_previous_log(
             args.client_log, qroot, "client-log"
@@ -3441,7 +3447,8 @@ def main(argv: list[str] | None = None) -> int:
                 "zombie_spawn_attempted": barrier_counts.get("spawn_zombie", 0) > 0,
                 "kill_fixture_attempted": barrier_counts.get("kill_fixture_zombie", 0) > 0,
                 "barrier_counts": dict(barrier_counts),
-                "fresh_save": bool(args.fresh_save),
+                # Fresh save is a hard-rule default and cannot be turned off.
+                "fresh_save": True,
             },
             # Additive, optional, paths only: a review's verdict never reaches
             # the report, so a review can never change a case's result.

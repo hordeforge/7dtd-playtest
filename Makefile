@@ -16,10 +16,11 @@ WORLD ?= $(ROOT)/../zdtd-server/worlds/playtest_auto
 # stock ServerPort default 26900; zdtd often 27025
 PORT ?=
 ADMIN_PORT ?= 8081
-# Start every run from a clean world. The suites dig and place blocks, so a
-# reused save accumulates holes under the test area until dig/place fail on the
-# previous run's terrain rather than on anything the server did. FRESH=0 keeps
-# the existing save when you deliberately want to inspect one.
+# Every run starts from a clean world — a hard rule enforced by the
+# orchestrator, which wipes the save unconditionally (there is no --reuse-save
+# and FRESH=0 cannot opt out). The suites dig and place blocks, so a reused save
+# accumulates holes and stale blocks under the test area until dig/place fail on
+# the previous run's terrain rather than on anything the server did.
 FRESH ?= 1
 LAPS ?= 1
 
