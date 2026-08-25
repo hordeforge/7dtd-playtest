@@ -122,6 +122,7 @@ namespace ZdtdPlaytest
         /// Its optional string return is passed to <see cref="Report.Staged"/> as
         /// detail for the human reading the frame.
         /// </param>
+        /// <param name="tags">Informational only (catalog listing); may be omitted.</param>
         /// <param name="holdSeconds">How long to hold the scene still.</param>
         /// <param name="onHold">
         /// Optional, called every tick of the hold with the fraction elapsed,
@@ -139,7 +140,7 @@ namespace ZdtdPlaytest
         public static CaseDef Staged(
             string suite,
             string id,
-            string[] tags,
+            string[] tags = null,
             Func<CaseCtx, bool> stage,
             float holdSeconds = 10f,
             string fail = null,
@@ -220,6 +221,7 @@ namespace ZdtdPlaytest
         /// encodes and flushes at the end of each requested frame, so a cadence
         /// the game cannot keep simply lands fewer frames in the same hold time;
         /// the completion line reports the real count, never a padded one.</param>
+        /// <param name="tags">Informational only (catalog listing); may be omitted.</param>
         /// <param name="captureSuperSize">Resolution multiplier, as in
         /// <see cref="Helpers.CaptureFrame"/>.</param>
         /// </summary>
@@ -236,7 +238,7 @@ namespace ZdtdPlaytest
         public static CaseDef StagedClip(
             string suite,
             string id,
-            string[] tags,
+            string[] tags = null,
             Func<CaseCtx, bool> stage,
             float holdSeconds = 10f,
             float clipFps = 4f,
@@ -320,7 +322,8 @@ namespace ZdtdPlaytest
                 pause: pause);
         }
 
-        /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).</summary>
+        /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
+        /// <paramref name="tags"/> is informational only (catalog listing).</summary>
         public static CaseDef Defer(string suite, string id, string[] tags, string reason)        {
             return new CaseDef
             {

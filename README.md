@@ -239,7 +239,8 @@ Do **not** assign `CaseDef` fields by hand. Use:
 
 ```csharp
 // Live case with long wait (e.g. propagation / fallout wave).
-// tags (3rd arg) is informational only and may be omitted.
+// tags is informational only and may be omitted on every factory
+// (Live, Defer, Staged, StagedClip).
 queue.Add(CaseDef.Live(suite, "my_wave", new[] { "bench" },
     act: ctx => { /* setup */ },
     wait: ctx => /* server-visible predicate */,
@@ -279,6 +280,10 @@ queue.Add(CaseDef.Live(suite, "my_mine", new[] { "harvest" },
     assert: ctx => probe.Assert(ctx),
     timeout: 25f,
     fail: "mining harvest did not raise block damage and award count"));
+// After the case: branch on the observed outcome programmatically.
+bool harvested = probe.Result.Harvested;   // block damaged AND award rose
+bool gotDamage = probe.Result.Damaged;     // block evidence alone
+bool gotAward  = probe.Result.Awarded;     // inventory evidence alone
 ```
 
 ### Provider error behavior

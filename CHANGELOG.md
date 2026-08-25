@@ -147,9 +147,18 @@ Release model (inferred practice, now pinned by `make test`):
   terminal escape sequences into the run log.
 - `PLAYTEST_TELNET_PASSWORD` env and `--telnet-password`: one value feeds
   both the generated server config and the orchestrator telnet client.
+- `MiningResult.Damaged` / `.Awarded` / `.Harvested`: the probe's outcome
+  predicates as public read-only properties on the result object, so a
+  provider reading `probe.Result` after a case can branch programmatically
+  instead of re-deriving the comparison from raw block-type and count ints.
+  Same predicate `MiningProbe.Assert` uses.
 
 ### Changed
 
+- `CaseDef.Staged` / `CaseDef.StagedClip`: the `tags` parameter is now
+  optional (default null), matching `CaseDef.Live`, so a quick staged case
+  no longer has to invent a tag array. Additive; existing call sites are
+  unaffected.
 - Fresh save per run is now a hard rule with no opt-out (#66): the
   orchestrator always wipes the named stock save / zdtd world before a run,
   because a reused world measures the previous run's terrain and stale

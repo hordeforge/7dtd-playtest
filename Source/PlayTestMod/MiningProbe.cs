@@ -72,6 +72,36 @@ namespace ZdtdPlaytest
         public int CompletedAttempts;
         public MiningPhase Phase;
         public string Detail;
+
+        /// <summary>
+        /// Block evidence changed since the seeded baseline: type flipped,
+        /// block removed, or damage rose. Providers branch on this instead of
+        /// re-deriving the comparison from raw ints.
+        /// </summary>
+        public bool Damaged
+        {
+            get
+            {
+                return CurrentBlockType != InitialBlockType
+                    || CurrentBlockType == 0
+                    || CurrentDamage > InitialDamage;
+            }
+        }
+
+        /// <summary>The named award count rose above the seeded baseline.</summary>
+        public bool Awarded
+        {
+            get { return CurrentAwardCount > InitialAwardCount; }
+        }
+
+        /// <summary>
+        /// Both observations at once: the canonical harvest verdict the probe's
+        /// assert uses. False until the seed baseline is observed.
+        /// </summary>
+        public bool Harvested
+        {
+            get { return Damaged && Awarded; }
+        }
     }
 
     /// <summary>
@@ -125,11 +155,7 @@ namespace ZdtdPlaytest
                 ctx.Detail = _result.Detail;
             if (_result.Phase == MiningPhase.Passed)
                 return true;
-            bool damaged = _result.CurrentBlockType != _result.InitialBlockType
-                || _result.CurrentBlockType == 0
-                || _result.CurrentDamage > _result.InitialDamage;
-            bool awarded = _result.CurrentAwardCount > _result.InitialAwardCount;
-            if (damaged && awarded)
+            if (_result.Harvested)
             {
                 _result.Phase = MiningPhase.Passed;
                 _result.Detail = Describe("pass");
@@ -259,7 +285,7 @@ namespace ZdtdPlaytest
             }
 
             Observe(ctx);
-            if (Harvested())
+            if (_result.Harvested)
             {
                 _result.Phase = MiningPhase.Passed;
                 _result.Detail = Describe("pass");
@@ -381,13 +407,6 @@ namespace ZdtdPlaytest
             }
             catch { /* */ }
             _result.CurrentAwardCount = Helpers.CountItemType(ctx.Player, _result.AwardType);
-        }
-
-        bool Harvested()
-        {
-            bool damaged = BlockChanged() || _result.CurrentDamage > _result.InitialDamage;
-            bool awarded = _result.CurrentAwardCount > _result.InitialAwardCount;
-            return damaged && awarded;
         }
 
         bool BlockChanged()
