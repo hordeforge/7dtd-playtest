@@ -2,11 +2,19 @@
 
 ## Status
 
-Proposal. Depends on both
-[INGAME_VIDEO_CAPTURE.md](INGAME_VIDEO_CAPTURE.md) (`CaseDef.StagedClip`) and
-[VIDEO_MODEL_FEEDBACK.md](VIDEO_MODEL_FEEDBACK.md) (`review_video.py`) being
-built first; this document does not duplicate their design. The
-`7dtd-asset-pipeline` half of this plan (a `shamway review-video` operation)
+Implemented (2026-08-25). Both dependencies shipped
+([INGAME_VIDEO_CAPTURE.md](INGAME_VIDEO_CAPTURE.md)'s `CaseDef.StagedClip`
+and capture script, [VIDEO_MODEL_FEEDBACK.md](VIDEO_MODEL_FEEDBACK.md)'s
+`review_video.py`), and the `7dtd-asset-pipeline` half is implemented too:
+`shamway review-video` ([PRD 0002](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md))
+reviews an adopted clip through the shared **deadeye** vision-model gateway,
+`shamway client capture --clip` adopts the clip directory, and
+`[acceptance] motion_kinds` in the mod's `.shamway.toml` generates the
+`StagedClip` cases. What has not happened yet is the plan's acceptance
+evidence: no end-to-end run on a real, intentionally flawed asset has
+compared a model critique against a human watch, and no recurring critique
+pattern has been written down in `7dtd-asset-pipeline`'s research notes or
+digests. The shamway half of this plan (a `shamway review-video` operation)
 is specified as its own PRD in that repository,
 [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
 following that repo's own PRD template and numbering, kept a separate
