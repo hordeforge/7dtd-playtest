@@ -236,34 +236,24 @@ def validate_result(
                 problems.append(f"issue #{index + 1} needs a non-empty description")
                 continue
             issue: dict[str, object] = {"description": description.strip()}
-            seconds = entry.get("at_seconds")
+            seconds = _moment(entry.get("at_seconds"), non_negative=False)
+            if "at_seconds" in entry and entry["at_seconds"] is not None and seconds is None:
+                problems.append(
+                    f"issue #{index + 1} at_seconds must be [start, end] numbers "
+                    "with start <= end, or a single second"
+                )
+                continue
             if seconds is not None:
-                if not (
-                    isinstance(seconds, list)
-                    and len(seconds) == 2
-                    and all(isinstance(bound, (int, float)) for bound in seconds)
-                    and seconds[0] <= seconds[1]
-                ):
-                    problems.append(
-                        f"issue #{index + 1} at_seconds must be [start, end] numbers "
-                        "with start <= end"
-                    )
-                    continue
-                issue["at_seconds"] = [float(seconds[0]), float(seconds[1])]
-            frame = entry.get("at_frame")
+                issue["at_seconds"] = seconds
+            frame = _moment(entry.get("at_frame"), non_negative=True)
+            if "at_frame" in entry and entry["at_frame"] is not None and frame is None:
+                problems.append(
+                    f"issue #{index + 1} at_frame must be [start, end] non-negative "
+                    "numbers with start <= end, or a single frame index"
+                )
+                continue
             if frame is not None:
-                if not (
-                    isinstance(frame, list)
-                    and len(frame) == 2
-                    and all(isinstance(bound, (int, float)) and bound >= 0 for bound in frame)
-                    and frame[0] <= frame[1]
-                ):
-                    problems.append(
-                        f"issue #{index + 1} at_frame must be [start, end] non-negative "
-                        "numbers with start <= end"
-                    )
-                    continue
-                issue["at_frame"] = [float(frame[0]), float(frame[1])]
+                issue["at_frame"] = frame
             issues.append(issue)
 
     scores: dict[str, float | None] = {}

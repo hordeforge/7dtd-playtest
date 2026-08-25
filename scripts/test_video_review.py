@@ -231,9 +231,28 @@ def _gateway_available(present: bool = True) -> Iterator[None]:
         yield
 
 
+def test_scalar_and_null_moments_normalize() -> None:
+    from typing import cast
+
+    from video_review import validate_result
+
+    result_data = cast("dict[str, object]", _envelope()["result"])
+    result_data["issues"] = [
+        {"description": "pops at frame 9", "at_frame": 9},
+        {"description": "whole-clip read", "at_frame": None, "at_seconds": None},
+    ]
+    result = validate_result(result_data)
+    issues = result["issues"]
+    assert isinstance(issues, list)
+    first = issues[0]
+    assert isinstance(first, dict)
+    assert first.get("at_frame") == [9.0, 9.0]
+    assert issues[1] == {"description": "whole-clip read"}
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
+        test_scalar_and_null_moments_normalize()
         test_intent_requires_purpose()
         test_intent_text_round_trips()
         test_consent_is_demanded_before_the_gateway_is_consulted(root)
