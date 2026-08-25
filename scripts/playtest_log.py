@@ -10,39 +10,49 @@ pull in process management or any other orchestrator machinery.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from collections.abc import Iterable
-from functools import lru_cache
 from pathlib import Path
 from typing import Protocol, TypedDict
 
-# Every contract line is matched only at the start of a log line. The mod
-# emits each contract line through Log.Out as its own line, while game/chat
-# lines carry their own prefix first; without the ^ anchor, one chat message
-# containing "[7dtd-playtest] PASS fake/case" mid-line would forge results,
-# SUMMARY/DONE verdicts, JSON events, and barrier fires (client-log bytes are
-# attacker-reachable through remote LAN chat). Horizontal whitespace only:
-# \s would span newlines and let a trailing prefix line pair with the next
-# line's payload.
-RESULT_RE = re.compile(
-    r"^[ \t]*\[7dtd-playtest\][ \t]+(PASS|FAIL|SKIP)[ \t]+(\S+)[ \t]*(.*)$",
-    re.MULTILINE,
-)
-SUMMARY_RE = re.compile(
-    r"^[ \t]*\[7dtd-playtest\][ \t]+SUMMARY[ \t]+pass=(\d+)[ \t]+fail=(\d+)"
-    r"(?:[ \t]+skip=(\d+))?",
-    re.MULTILINE,
-)
-# Whole-token match like barrier_line_hits: a foreign "[7dtd-playtest]
-# DONExxx" line must not parse as the run-completion marker.
-DONE_RE = re.compile(
-    r"^[ \t]*\[7dtd-playtest\][ \t]+DONE(?![\w:])(?:[ \t]+exit_hint=(\d+))?",
-    re.MULTILINE,
-)
-JSON_RE = re.compile(
-    r"^[ \t]*\[7dtd-playtest\][ \t]+(\{.*\})[ \t]*$", re.MULTILINE
-)
+# Contract lines are located structurally, not by matching their payload with
+# regexes: a line is a contract line only when `[7dtd-playtest]` is its first
+# bracketed token. The mod emits each contract line through the game's own
+# logger, which prefixes every line with a timestamp, game-time and level
+# before the tag ("2026-08-25T11:44:24 56.401 INF [7dtd-playtest] ..."), and
+# chat/game lines carry their own tag first. Requiring the marker to be the
+# first bracket accepts the game's prefix while keeping a chat message that
+# merely contains the marker from forging results, SUMMARY/DONE verdicts, JSON
+# events or barrier fires (client-log bytes are attacker-reachable through
+# remote LAN chat). The payload after the marker is parsed structurally: JSON
+# via json.loads, human lines by whitespace tokens.
+MARKER = "[7dtd-playtest]"
+
+
+def _contract_tail(line: str) -> str | None:
+    """Text after the marker when it is the line's first bracketed token.
+
+    ``None`` for every other line: game/chat lines with their own tag, and
+    lines with no tag at all, cannot forge a contract line.
+    """
+    start = line.find("[")
+    if start < 0 or not line.startswith(MARKER, start):
+        return None
+    return line[start + len(MARKER):].strip()
+
+
+def _key_values(tokens: list[str]) -> dict[str, str]:
+    """``key=value`` tokens of a human contract line, as a dict."""
+    out: dict[str, str] = {}
+    for tok in tokens:
+        if "=" in tok:
+            key, value = tok.split("=", 1)
+            out[key] = value
+    return out
+
+
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
 NRE_SAMPLE_CAP = 50
@@ -79,16 +89,6 @@ def empty_client_log() -> ParsedClientLog:
     }
 
 
-@lru_cache(maxsize=64)
-def _barrier_prefix_re(prefix: str) -> re.Pattern[str]:
-    """Compiled line-initial ``barrier <prefix>...`` grep; names repeat every
-    poll chunk."""
-    return re.compile(
-        rf"^[ \t]*\[7dtd-playtest\][ \t]+barrier[ \t]+({re.escape(prefix)}[^\s\"]*)",
-        re.MULTILINE,
-    )
-
-
 def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     """Return every full barrier name that starts with ``prefix``.
 
@@ -96,34 +96,38 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     the same class during one composed run. Consumers keep their own fired
     counts or token sets, so collapsing identical names here loses events.
     """
-    return [match.group(1) for match in _barrier_prefix_re(prefix).finditer(blob)]
-
-
-@lru_cache(maxsize=64)
-def _barrier_line_re(name: str) -> re.Pattern[str]:
-    """Compiled line-initial whole-name ``barrier <name>`` counter; see
-    barrier_line_hits."""
-    return re.compile(
-        rf"^[ \t]*\[7dtd-playtest\][ \t]+barrier {re.escape(name)}(?![\w:])",
-        re.MULTILINE,
-    )
+    hits: list[str] = []
+    for line in blob.splitlines():
+        tail = _contract_tail(line)
+        if tail is None or not tail.startswith("barrier "):
+            continue
+        name = tail[len("barrier "):].split()[0] if tail[len("barrier "):] else ""
+        if name.startswith(prefix):
+            hits.append(name)
+    return hits
 
 
 def barrier_line_hits(blob: str, name: str) -> int:
     """Count human `barrier <name>` lines in ``blob`` (whole-name match).
 
-    Anchored to the stable ``[7dtd-playtest]`` prefix at the start of a line
-    like every other contract regex (RESULT_RE, SUMMARY_RE, DONE_RE,
-    barrier_hits_prefix): only Report.Barrier emissions may count toward
-    servicing an admin action, never a game/chat/mod line that merely
-    contains the words.
+    Only Report.Barrier emissions may count toward servicing an admin action,
+    never a game/chat/mod line that merely contains the words: the marker must
+    be the line's first bracketed token (see :func:`_contract_tail`).
 
     Report.Barrier also emits JSON with the same name; summing both
     double-fires handlers (e.g. kills bots). The whole-name match keeps
     "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
     lines, which are collected separately via barrier_hits_prefix.
     """
-    return len(_barrier_line_re(name).findall(blob))
+    count = 0
+    for line in blob.splitlines():
+        tail = _contract_tail(line)
+        if tail is None or not tail.startswith("barrier "):
+            continue
+        tokens = tail.split()
+        if len(tokens) >= 2 and tokens[1] == name:
+            count += 1
+    return count
 
 
 def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
@@ -166,10 +170,12 @@ class ClientLogScan:
         self.malformed_events = 0
 
     def feed_line(self, line: str) -> None:
-        m = JSON_RE.search(line)
-        if m:
+        tail = _contract_tail(line)
+        if tail is None:
+            return
+        if tail.startswith("{"):
             try:
-                ev = json.loads(m.group(1))
+                ev = json.loads(tail)
                 # The client log carries arbitrary game/chat lines; a line that
                 # merely looks like an event must not crash the parser.
                 if not isinstance(ev, dict):
@@ -210,27 +216,39 @@ class ClientLogScan:
                 self.malformed_events += 1
             return
 
-        m = RESULT_RE.search(line)
-        if m:
+        tokens = tail.split()
+        if not tokens:
+            return
+        head = tokens[0]
+        if head in ("PASS", "FAIL", "SKIP"):
             self.human_results.append(
                 {
-                    "status": m.group(1),
-                    "case": m.group(2),
-                    "detail": (m.group(3) or "").strip(),
+                    "status": head,
+                    "case": tokens[1] if len(tokens) > 1 else "",
+                    "detail": " ".join(tokens[2:]),
                 }
             )
             return
-        m = SUMMARY_RE.search(line)
-        if m:
-            self.human_summary = {
-                "pass": int(m.group(1)),
-                "fail": int(m.group(2)),
-                "skip": int(m.group(3) or 0),
-            }
+        if head == "SUMMARY":
+            counts = _key_values(tokens[1:])
+            if "pass" in counts and "fail" in counts:
+                # Non-numeric counts are not a summary; keep the rest of the log.
+                with contextlib.suppress(ValueError):
+                    self.human_summary = {
+                        "pass": int(counts["pass"]),
+                        "fail": int(counts["fail"]),
+                        "skip": int(counts.get("skip", 0)),
+                    }
             return
-        m = DONE_RE.search(line)
-        if m:
-            hint = int(m.group(1)) if m.group(1) is not None else None
+        if head == "DONE":
+            hint: int | None = None
+            for tok in tokens[1:]:
+                if tok.startswith("exit_hint="):
+                    try:
+                        hint = int(tok.split("=", 1)[1])
+                    except ValueError:
+                        hint = None
+                    break
             self.human_done = {"exit_hint": hint}
 
     def _count_nre(self, line: str) -> None:

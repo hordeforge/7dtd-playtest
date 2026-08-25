@@ -36,6 +36,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- The client-log parser locates the `[7dtd-playtest]` marker as the line's
+  first bracketed token and parses the payload structurally (JSON via
+  `json.loads`, human lines by whitespace tokens) instead of matching
+  anchored regexes. The game's logger prefixes every line with a timestamp,
+  game-time and level before the tag, so the old line-anchored patterns
+  matched nothing and every run waited out its full `--timeout` even after
+  the suite wrote `DONE`; the marker-as-first-bracket rule still keeps a
+  chat message that merely contains the marker from forging results,
+  SUMMARY/DONE verdicts, JSON events or barrier fires.
 - Orchestrator fails fast when the client exits before the suite's `DONE`
   (both the main poll loop and the rejoin setup loop): a mid-suite client
   crash used to wait out the full `--timeout`, hiding the failure behind a
