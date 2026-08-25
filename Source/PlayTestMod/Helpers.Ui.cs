@@ -310,6 +310,41 @@ namespace ZdtdPlaytest
         }
 
 
+        /// <summary>
+        /// Empty <c>playtest-shots/clips/&lt;clipId&gt;/</c> so a new take of
+        /// the same clip id starts from zero.
+        /// </summary>
+        /// <remarks>
+        /// <para>Frames are numbered from 0000 and the completion line names the
+        /// same directory every time, so re-running a clip without this reset
+        /// would leave the previous take's frames in place: a shorter new take
+        /// leaves stale frame-XXXX.png behind that inflate the muxer's found
+        /// count and land in the contact sheet as if this take had captured
+        /// them.</para>
+        /// <para>Best effort like every filesystem touch here: a failure is
+        /// warned about and the recording proceeds, overwriting frames in
+        /// place rather than aborting the case.</para>
+        /// </remarks>
+        public static void ResetClipDir(string clipId)
+        {
+            if (string.IsNullOrEmpty(clipId)) clipId = "clip";
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(profile)) return;
+            string dir = System.IO.Path.Combine(
+                profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots",
+                "clips", SafeFileName(clipId));
+            try
+            {
+                if (System.IO.Directory.Exists(dir))
+                    System.IO.Directory.Delete(dir, true);
+                System.IO.Directory.CreateDirectory(dir);
+            }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] cannot reset clip dir " + dir + ": " + e.Message);
+            }
+        }
+
         /// <summary>A file name that cannot escape its directory.</summary>
         static string SafeFileName(string name)
         {

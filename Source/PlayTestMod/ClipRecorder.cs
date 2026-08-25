@@ -56,6 +56,10 @@ namespace ZdtdPlaytest
                 Log.Warning("[7dtd-playtest] clip " + _activeId + " still active; abandoning it before " + id);
                 Abandon();
             }
+            // A reused id must not inherit the previous take's frames: the
+            // completion line names this directory, so anything left in it
+            // would be muxed and counted as part of this recording.
+            Helpers.ResetClipDir(id);
             _activeId = id;
             _superSize = superSize;
             _interval = 1f / fps;

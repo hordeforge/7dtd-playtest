@@ -102,6 +102,12 @@ case $runtime_rc in
 esac
 
 mkdir -p "$OUT"
+# A reused --out must not mix takes: every artifact below has a name only this
+# script writes, and stale raw/cropped frames from a previous run would
+# otherwise be re-cropped, counted, and montaged into this run's evidence.
+rm -f "$OUT"/raw-*.png "$OUT"/contact-sheet.png
+mkdir -p "$OUT/cropped"
+rm -f "$OUT"/cropped/frame-*.png
 START="$(date +%s)"
 RUN_LOG="$OUT/run.log"
 
@@ -145,7 +151,6 @@ done
 RUN_RC=0
 wait "$RUN_PID" || RUN_RC=$?
 
-mkdir -p "$OUT/cropped"
 for f in "$OUT"/raw-*.png; do
 	[[ -e "$f" ]] || continue
 	# Drop a raw only once its crop exists: magick failing here must not delete

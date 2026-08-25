@@ -274,6 +274,12 @@ namespace ZdtdPlaytest
                     }
                     ctx.IntA = ok ? 1 : 0;
                     ctx.FloatA = Time.unscaledTime;
+                    // Frames number from 0000 into a fixed per-id directory,
+                    // so clear any earlier take of this id first: the
+                    // completion line names the same path, and stale frames
+                    // from a previous run would be muxed and counted as this
+                    // take's evidence.
+                    Helpers.ResetClipDir(id);
                     // Immediately, not at result time: a collector keyed on the
                     // result photographs the disconnect dialog.
                     Report.Staged(id, ctx.Detail);
