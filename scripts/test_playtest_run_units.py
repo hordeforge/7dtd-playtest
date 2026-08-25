@@ -20,6 +20,7 @@ import io
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -738,6 +739,21 @@ def test_reap_finished_helpers_drops_only_exited() -> None:
         live.kill()
         live.wait()
     print("PASS reap_finished_helpers exited helpers reaped, live ones kept")
+
+
+def test_loadgen_peer_rebind_reaps_exited_instance() -> None:
+    """The spawn_loadgen_peer rebind must route the prior (exited) instance
+    through stop_proc: dropping the Popen after only closing its log handle
+    leaves the child unreaped, so every peer barrier fire adds one zombie that
+    lives until orchestrator exit (long soak / mp runs)."""
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    start = source.index("# Prior instance already exited")
+    end = source.index("loadgen_proc = start_loadgen(", start)
+    block = source[start:end]
+    assert "stop_proc(loadgen_proc)" in block, (
+        "peer rebind must reap the exited instance via stop_proc"
+    )
+    print("PASS loadgen_peer_rebind_reap exited instance routed through stop_proc")
 
 
 def test_positive_seconds_type_and_env_reader() -> None:
@@ -1584,6 +1600,65 @@ def test_acquire_exclusive_lock_refusal_leaves_foreign_record() -> None:
     print("PASS acquire_exclusive_lock_refusal foreign record untouched")
 
 
+def test_acquire_exclusive_lock_marks_held_inside_guarded_region() -> None:
+    """mark_held must run inside the undo-release guard, before the wrapper
+    returns: main's lock_held flag has to flip in the same region that
+    releases on interrupt, or a signal landing between publication and the
+    flag write would exit through a finally that still sees lock_held=False
+    and strand the fresh claim unheartbeated."""
+    with tempfile.TemporaryDirectory(prefix="playtest-acqm-") as td:
+        lock = Path(td) / "playtest_running"
+        sid = "grok-20260810-231500-a1b2c3d4e5f6"
+        marks: list[int] = []
+        playtest_run.acquire_exclusive_lock(
+            sid, lock, mark_held=lambda: marks.append(1)
+        )
+        assert marks == [1], f"successful publish must mark held once: {marks}"
+        state = pl.read_lock(lock)
+        assert state.running and state.session == sid, (
+            f"successful acquire must leave the claim standing: {state}"
+        )
+
+    # Refusal: the flag must stay down so main's finally keeps skipping
+    # process teardown for a lock we never held.
+    with tempfile.TemporaryDirectory(prefix="playtest-acqn-") as td:
+        lock = Path(td) / "playtest_running"
+        owner = "owner-20260810-000000-aaaaaaaaaaaa"
+        other = "other-20260810-000001-bbbbbbbbbbbb"
+        pl.acquire(owner, path=lock, live_probe=lambda: False)
+        marks = []
+        try:
+            playtest_run.acquire_exclusive_lock(
+                other, lock, mark_held=lambda: marks.append(1)
+            )
+            raise AssertionError("foreign acquire must refuse")
+        except pl.PlaytestLockError:
+            pass
+        assert marks == [], f"refused acquire must not mark held: {marks}"
+    print("PASS acquire_exclusive_lock_mark_held flag flips inside the guard")
+
+
+def test_block_termination_signals_blocks_then_restores() -> None:
+    """The finally's first action must mask TERM/HUP on this thread so a
+    first-ever signal landing between cleanup entry and the SIG_IGN disarm
+    is pended instead of raising SystemExit mid-teardown; the helper must be
+    transparent about the prior mask so tests (and any future caller) can
+    restore it."""
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    playtest_run._block_termination_signals()
+    try:
+        after = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        for name in ("SIGTERM", "SIGHUP"):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            assert sig in after, f"{name} not blocked by the teardown mask"
+            assert sig not in before, f"{name} unexpectedly blocked beforehand"
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, before)
+    print("PASS block_termination_signals masks TERM/HUP until restored")
+
+
 def test_rewrite_platform_cfg_backs_up_once_and_forces_surface() -> None:
     """start_stock_dedicated rewrites the user's platform.cfg in place: the
     backup must carry the original bytes and be written exactly once (it is
@@ -1728,6 +1803,10 @@ def main() -> int:
         ("barrier_tables_pair", test_new_barrier_tables_fresh_pair_per_generation),
         ("stop_proc_sigkill_reap", test_stop_proc_reaps_after_sigkill_escalation),
         ("stop_proc_exited_child", test_stop_proc_exited_child_closes_log_handle),
+        (
+            "loadgen_peer_rebind_reap",
+            test_loadgen_peer_rebind_reaps_exited_instance,
+        ),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
         ("main_finally_reap_helpers", test_main_finally_reaps_mute_helpers),
         ("wait_file_contains", test_wait_file_contains_incremental),
@@ -1790,6 +1869,14 @@ def main() -> int:
         (
             "acquire_exclusive_lock_refusal",
             test_acquire_exclusive_lock_refusal_leaves_foreign_record,
+        ),
+        (
+            "acquire_exclusive_lock_mark_held",
+            test_acquire_exclusive_lock_marks_held_inside_guarded_region,
+        ),
+        (
+            "block_termination_signals",
+            test_block_termination_signals_blocks_then_restores,
         ),
         (
             "platform_cfg_rewrite",

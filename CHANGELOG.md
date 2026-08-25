@@ -46,6 +46,10 @@ Release model (inferred practice, now pinned by `make test`):
   `loadgen_events.jsonl`. Two separate reads could straddle an append and
   make the expectation failures disagree with the CVar-oracle state they are
   judged against.
+- The `spawn_loadgen_peer` rebind routes the prior (exited) loadgen instance
+  through `stop_proc`, which reaps it. Dropping the `Popen` after only closing
+  its log handle left one zombie per peer barrier fire until orchestrator exit
+  on long soak / mp runs.
 
 - `test_mining_probe_surface.py` now matches the full `PressPrimary` /
   `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped

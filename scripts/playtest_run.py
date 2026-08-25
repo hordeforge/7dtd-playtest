@@ -1520,6 +1520,31 @@ def _ignore_termination_signals() -> None:
                 signal.signal(s, signal.SIG_IGN)
 
 
+def _block_termination_signals() -> None:
+    """Block TERM/HUP delivery on this thread; safe to call anywhere.
+
+    Closes the last interrupt window in main()'s finally: disarming through
+    signal.signal only takes effect after those calls complete, so a
+    first-ever TERM/HUP landing between entering the cleanup and finishing
+    the disarm still raises SystemExit from inside it, skipping stop_proc /
+    release and stranding a live runtime under a published claim. Blocking
+    keeps such a delivery pending instead, and the process exits right after
+    teardown, so the pending signal is simply discarded.
+    """
+    sigs = {
+        getattr(signal, name)
+        for name in _TERMINATION_SIGNAL_NAMES
+        if hasattr(signal, name)
+    }
+    if not sigs:
+        return
+    with contextlib.suppress(AttributeError, OSError, ValueError):
+        # POSIX-only; per-thread mask. Other threads are covered by the
+        # process-wide SIG_IGN that _ignore_termination_signals sets right
+        # after this (the heartbeat daemon may still be alive here).
+        signal.pthread_sigmask(signal.SIG_BLOCK, sigs)
+
+
 def install_signal_handlers() -> None:
     """Convert SIGTERM/SIGHUP into SystemExit so the finally-based cleanup runs.
 
@@ -1999,19 +2024,29 @@ def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> s
     return secrets.token_urlsafe(15)
 
 
-def acquire_exclusive_lock(session: str, path: Path) -> None:
+def acquire_exclusive_lock(
+    session: str,
+    path: Path,
+    *,
+    mark_held: Callable[[], None] | None = None,
+) -> None:
     """Acquire the exclusivity lock, undoing a published claim on interrupt.
 
     A signal (SIGTERM/SIGHUP via the SystemExit conversion) or Ctrl+C landing
     after ``playtest_lock.acquire`` has written our claim but before main()
     records ``lock_held`` would otherwise exit without releasing: the orphan
     claim then sits unheartbeated until the stale window passes, blocking
-    every other agent behind a run that is already dead. Release refuses to
-    write unless the file names us, so this undo is a no-op whenever the
-    acquire was refused or never wrote.
+    every other agent behind a run that is already dead. ``mark_held``
+    therefore runs inside this guarded region, so an interrupt landing after
+    publication but before main's bookkeeping unwinds through the release
+    below instead of skipping it. Release refuses to write unless the file
+    names us, so this undo is a no-op whenever the acquire was refused or
+    never wrote.
     """
     try:
         playtest_lock.acquire(session, path=path)
+        if mark_held is not None:
+            mark_held()
     except BaseException:
         with contextlib.suppress(playtest_lock.PlaytestLockError, OSError):
             playtest_lock.release(session, path=path)
@@ -2394,7 +2429,16 @@ def main(argv: list[str] | None = None) -> int:
         # Exclusive live-client lock BEFORE clean_processes / launch so a second
         # orchestrator cannot wipe another agent's client. See AGENTS.md.
         try:
-            acquire_exclusive_lock(lock_session, lock_path)
+            def _mark_held() -> None:
+                nonlocal lock_held
+                lock_held = True
+
+            # The flag flip runs inside the wrapper's guarded region: a signal
+            # landing between the claim write and this assignment would
+            # otherwise escape both except arms below (SystemExit is neither)
+            # and leave finally with lock_held=False, stranding the fresh
+            # claim unheartbeated.
+            acquire_exclusive_lock(lock_session, lock_path, mark_held=_mark_held)
         except playtest_lock.PlaytestLockError as ex:
             holder = ex.held_by or "unknown"
             err(
@@ -2411,7 +2455,6 @@ def main(argv: list[str] | None = None) -> int:
             # holder: name it like a refusal instead of a traceback.
             err(f"refusing start: lock storage unavailable at {lock_path}: {ex}")
             return 2
-        lock_held = True
         log(
             f"playtest lock acquired session={lock_session} file={lock_path} "
             f"(exclusive client+server runtime)"
@@ -3045,14 +3088,11 @@ def main(argv: list[str] | None = None) -> int:
                         barrier_counts["spawn_loadgen_peer"] += 1
                         continue
                     if loadgen_proc is not None:
-                        # Prior instance already exited: release its log handle
-                        # before rebinding instead of waiting on GC.
-                        fh = getattr(loadgen_proc, "_log_fh", None)
-                        try:
-                            if fh is not None:
-                                fh.close()
-                        except OSError:
-                            pass
+                        # Prior instance already exited (poll above): stop_proc
+                        # reaps it here so it cannot linger as a zombie for the
+                        # rest of the run (one per spawn_loadgen_peer fire), and
+                        # closes its log handle before the rebind.
+                        stop_proc(loadgen_proc)
                         loadgen_proc = None
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
@@ -3483,7 +3523,10 @@ def main(argv: list[str] | None = None) -> int:
         # must be ignored, not converted into a SystemExit that aborts the
         # remaining steps: skipping stop_proc/release strands a live runtime
         # under a published claim (the stale_but_live wedge this handler set
-        # exists to prevent).
+        # exists to prevent). The mask goes up before the disarm so a signal
+        # landing in the gap between finally entry and the disarm completing
+        # is pended, not raised mid-cleanup.
+        _block_termination_signals()
         _ignore_termination_signals()
         # Only stop/kill processes when we held the exclusivity lock. A refused
         # acquire must not pkill another agent's client or dedicated server.
