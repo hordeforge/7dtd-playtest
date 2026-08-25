@@ -74,6 +74,12 @@ Release model (inferred practice, now pinned by `make test`):
   `disallow_any_unimported`. Three `type: ignore[attr-defined]` suppressions
   in `dst_sim.py` were removed by returning the invariant session set from
   `install_invariants` instead of monkey-patching it onto `Simulation`.
+- Contributor path: `make lint` / `make typecheck` preflight `uv` and
+  `shellcheck` and name the missing tool with an install hint instead of a
+  bare `command not found`; `shellcheck` is now listed under README
+  Requirements; README gains an offline dev loop section; new
+  CONTRIBUTING.md documents setup, the edit-test loop, and the PR rules the
+  gates enforce; `make coverage` appears in `make help`.
 
 ### Fixed
 

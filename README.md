@@ -32,6 +32,8 @@ as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/
   (provides the `bot` telnet commands the orchestrator drives)
 - Host Python via **`uv`**, pinned to CPython 3.13 by `.python-version`
   (uv fetches it automatically; gates must not rely on a newer interpreter)
+- `shellcheck` for the lint gate (`make lint`; preinstalled on GitHub
+  runners, install locally with your package manager)
 - dotnet SDK 8.0.x for the mod build (pinned by `global.json`; found on
   `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`)
 
@@ -40,6 +42,20 @@ as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/
 ```bash
 make install-pair    # playtest + connect into $GAME/Mods/
 ```
+
+## Offline dev loop (no game install)
+
+Everything CI checks runs offline in seconds; `make` alone prints the full
+target list.
+
+```bash
+make test                        # lint + typecheck + all offline gates
+make test-one GATE=test_dst.py   # one gate while iterating
+make check                       # exactly what CI runs (test + DST sweep)
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR expectations these gates
+enforce (changelog entry, catalog/doc sync).
 
 ## One-command suites
 

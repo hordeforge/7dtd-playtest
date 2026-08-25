@@ -51,6 +51,7 @@ help:
 	@echo "  make typecheck                   mypy over scripts/ ([tool.mypy] in pyproject.toml)"
 	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
 	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
+	@echo "  make coverage                    line coverage of scripts/ under the offline gates (.coverage)"
 	@echo "  make check                       everything CI runs: test + dst DST_SEEDS=200"
 	@echo
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
@@ -102,12 +103,28 @@ UV := uv run --locked --project "$(ROOT)" python
 # Lint gate: ruff with the defect-oriented rule set from pyproject.toml
 # ([tool.ruff]) plus shellcheck over the bash helpers under scripts/. Both are
 # preinstalled on GitHub runners, so local and CI run one identical gate.
+# uv and shellcheck are host tools no lockfile can provide: name a missing
+# one instead of letting make print a bare "not found" inside a new
+# contributor's first gate.
 lint:
+	@command -v uv >/dev/null 2>&1 || { \
+		echo "make lint: 'uv' is not on PATH; every host Python command goes through it."; \
+		echo "  install: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+		echo "  see README: Requirements"; \
+		exit 2; }
+	@command -v shellcheck >/dev/null 2>&1 || { \
+		echo "make lint: 'shellcheck' is not on PATH; it lints scripts/*.sh."; \
+		echo "  install it with your package manager, e.g.: sudo apt install shellcheck"; \
+		exit 2; }
 	@cd "$(ROOT)" && uv run --locked ruff check scripts
 	@cd "$(ROOT)" && shellcheck scripts/*.sh
 
 # Type gate: mypy baseline strictness from pyproject.toml ([tool.mypy]).
 typecheck:
+	@command -v uv >/dev/null 2>&1 || { \
+		echo "make typecheck: 'uv' is not on PATH; every host Python command goes through it."; \
+		echo "  install: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+		exit 2; }
 	@cd "$(ROOT)" && uv run --locked python -m mypy scripts
 
 test: lint typecheck
