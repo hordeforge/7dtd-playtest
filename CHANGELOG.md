@@ -71,6 +71,10 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- The orchestrator writes `<logdir>/run-ended` when its poll loop ends -
+  `done`, `timeout`, or `client_exit` on one line. This is the deterministic
+  end of the run for consumers keyed on the staged marker (a screenshot loop
+  exits on it instead of waiting out its own timeout).
 - `playtest_lock.wait_until_can_start` and CLI `playtest_lock.py wait`:
   poll `can_start` (missing heartbeat is stale) so consumers do not parse
   `running=` / `heartbeat=` themselves. Matrix runners call this instead
