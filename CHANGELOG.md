@@ -22,6 +22,11 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- Orchestrator fails fast when the client exits before the suite's `DONE`
+  (both the main poll loop and the rejoin setup loop): a mid-suite client
+  crash used to wait out the full `--timeout`, hiding the failure behind a
+  15-minute stall. The 2s post-exit drain still gives a client that wrote
+  `DONE` in its final moments its success break.
 - `test_mining_probe_surface.py` now matches the full `PressPrimary` /
   `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped
   at `(` and never found the method body), and ruff F401/RET504 on that
