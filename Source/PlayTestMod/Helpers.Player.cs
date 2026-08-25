@@ -194,5 +194,22 @@ namespace ZdtdPlaytest
             }
             catch { /* */ }
         }
+
+        /// <summary>
+        /// Start real motor walk: stock autorun with forward input injected
+        /// through <see cref="LocomotionDrive"/>, not a teleport. Used by
+        /// generated walk-cycle recording cases, which equip a worn asset and
+        /// record the player actually walking.
+        /// </summary>
+        public static void StartWalk(float forward = 1f, bool running = false)
+        {
+            LocomotionDrive.Start(forward, 0f, running);
+        }
+
+        /// <summary>Stop the walk started with <see cref="StartWalk"/>.</summary>
+        public static void StopWalk()
+        {
+            LocomotionDrive.Stop();
+        }
     }
 }

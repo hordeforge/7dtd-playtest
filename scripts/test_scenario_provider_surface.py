@@ -112,6 +112,12 @@ def main() -> int:
     assert "public static int TryEquipItem" in helpers, (
         "Helpers.TryEquipItem must be public for generated walk-cycle cases"
     )
+    assert "public static void StartWalk" in helpers, (
+        "Helpers.StartWalk must be public for generated walk-cycle cases"
+    )
+    assert "public static void StopWalk" in helpers, (
+        "Helpers.StopWalk must be public for generated walk-cycle cases"
+    )
     assert "ClipRecorder.Tick(Runner.Finished)" in runner, (
         "the gmUpdate hook must tick the on-demand clip recorder"
     )
