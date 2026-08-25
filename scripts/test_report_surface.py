@@ -667,6 +667,32 @@ def test_contract_lines_must_start_the_log_line() -> None:
     print("PASS log_contract_anchor mid-line markers cannot forge verdicts")
 
 
+def test_contract_lines_parse_under_the_games_log_prefix() -> None:
+    """The game's logger prefixes every line with timestamp, game-time and
+    level before the tag ("2026-08-25T11:44:24 56.401 INF [7dtd-playtest]
+    ..."). The parser locates the marker as the line's first bracketed token,
+    so these lines parse exactly like the bare form - and a chat line that
+    carries its own tag first still cannot forge anything."""
+    text = (
+        "2026-08-25T11:44:23 55.894 INF [7dtd-playtest] PASS smoke/dig detail=ok\n"
+        "2026-08-25T11:44:24 56.401 INF [7dtd-playtest] SUMMARY pass=6 fail=0 skip=0 total=6\n"
+        "2026-08-25T11:44:24 56.401 INF [7dtd-playtest] DONE exit_hint=0 wall_ms=54891\n"
+        '2026-08-25T11:44:24 56.401 INF [7dtd-playtest] {"v":1,"t":"result",'
+        '"suite":"s","case":"c","status":"pass","ms":5,"detail":""}\n'
+        "2026-08-25T11:44:24 56.401 INF [7dtd-playtest] barrier spawn_vehicle:bicycle\n"
+        "2026-08-25T11:44:24 56.401 INF [CHAT] peer: [7dtd-playtest] PASS fake/case\n"
+    )
+    parsed = playtest_log.parse_client_log(text)
+    assert parsed["summary"] == {"pass": 6, "fail": 0, "skip": 0}, parsed["summary"]
+    assert parsed["done"] == {"exit_hint": 0}, parsed["done"]
+    assert [r["case"] for r in parsed["results"]] == ["s/c"], parsed["results"]
+    assert playtest_log.barrier_hits_prefix(text, "spawn_vehicle:") == [
+        "spawn_vehicle:bicycle"
+    ]
+    assert playtest_log.barrier_line_hits(text, "spawn_vehicle:bicycle") == 1
+    print("PASS log_contract_prefix timestamped lines parse, chat cannot forge")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -682,6 +708,7 @@ def main() -> int:
     test_log_tail_from_end_starts_at_current_size()
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
     test_contract_lines_must_start_the_log_line()
+    test_contract_lines_parse_under_the_games_log_prefix()
     print("RESULT PASS")
     return 0
 
