@@ -238,8 +238,10 @@ Then the thirteen suites:
    + counts total must equal Catalog.cs. A catalog addition that skips
    SCENARIOS.md fails CI.
 2. mod version surface (`scripts/test_version_surface.py`): ModInfo.xml ==
-   ModApi.Version == dist manifest, and CHANGELOG.md must carry an
-   [Unreleased] section plus the current release entry.
+   ModIdentity.Version == dist manifest, every visible `vX.Y.Z` tag has a
+   CHANGELOG entry (units in `scripts/test_version_surface_units.py`), and
+   CHANGELOG.md must carry an [Unreleased] section plus the current release
+   entry.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
 4. mining-probe provider surface (`scripts/test_mining_probe_surface.py`)
 5. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)

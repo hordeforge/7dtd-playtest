@@ -130,6 +130,7 @@ typecheck:
 test: lint typecheck
 	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"
 	$(UV) "$(ROOT)/scripts/test_version_surface.py"
+	$(UV) "$(ROOT)/scripts/test_version_surface_units.py"
 	$(UV) "$(ROOT)/scripts/test_scenario_provider_surface.py"
 	$(UV) "$(ROOT)/scripts/test_mining_probe_surface.py"
 	$(UV) "$(ROOT)/scripts/test_stock_peer_client.py"

@@ -6,9 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Release model (inferred practice, now pinned by `make test`):
 
 - One version per artifact. The client mod version lives in `ModInfo.xml`
-  and `ModApi.Version`; git tags are annotated `vX.Y.Z` refs pointing at the
-  released commit. `scripts/test_version_surface.py` fails the offline gates
-  if these disagree or if a tagged version has no entry below.
+  and `ModIdentity.Version`; git tags are annotated `vX.Y.Z` refs pointing
+  at the released commit (the stray lightweight `v0.7.2` predates this; see
+  its entry below). `scripts/test_version_surface.py` fails the offline
+  gates if these disagree, if the shipped manifest went stale, or if the
+  manifest version or any visible `vX.Y.Z` tag has no entry below.
 - The host orchestrator package (`pyproject.toml`) is an unpublished,
   independently versioned helper; consumers interact with it through the
   stable log contract and exit codes documented in the README, not through
@@ -51,8 +53,8 @@ Release model (inferred practice, now pinned by `make test`):
   against one output directory.
 - `Helpers.BeginClip` / `Helpers.EndClip` and `ClipRecorder`: on-demand
   in-game recording decoupled from staging, so any case (Live included) can
-  record what the player actually does — walk a worn garment, fire a VFX,
-  use an item. Same super-resolution in-game frames and `clip complete`
+  record what the player actually does (walk a worn garment, fire a VFX,
+  use an item). Same super-resolution in-game frames and `clip complete`
   marker as staged clips; a clip a failed case left active is abandoned at
   suite end (`clip abandoned`), never completed.
 - `Helpers.TryEquipItem(player, name)`: the public give+equip-by-name route
@@ -60,9 +62,102 @@ Release model (inferred practice, now pinned by `make test`):
 - `Helpers.StartWalk` / `Helpers.StopWalk`: the public locomotion surface
   (stock autorun via LocomotionDrive, not teleport) generated walk-cycle
   recording cases use.
+- The orchestrator writes `<logdir>/run-ended` when its poll loop ends -
+  `done`, `timeout`, or `client_exit` on one line. This is the deterministic
+  end of the run for consumers keyed on the staged marker (a screenshot loop
+  exits on it instead of waiting out its own timeout).
+- A new `lock_lost` run-ended reason: when the exclusivity heartbeat reports
+  the lock file stopped naming our session (foreign takeover after a stale
+  window, or the shared file was reset), the orchestrator aborts with exit 2
+  instead of finishing the suite against a runtime it may no longer own.
+  Previously the detection existed in `HeartbeatLoop.lost_claim` but no
+  consumer read it, so two agents could drive one machine concurrently.
+- `playtest_lock.wait_until_can_start` and CLI `playtest_lock.py wait`:
+  poll `can_start` (missing heartbeat is stale) so consumers do not parse
+  `running=` / `heartbeat=` themselves. Matrix runners call this instead
+  of a local lock clone.
+- `MiningSpec` / `MiningProbe` / `MiningResult`: public real-mining driver for
+  external providers. Seeds a named block, equips a named tool, presses
+  exactly one `UseHoldingItem(0, false)` per attempt, and requires both
+  authoritative block damage and a named bag+toolbelt award. Stock case
+  `mining_harvest` (iron ore / iron pickaxe / scrap iron).
+  `PulsePrimaryAttack` + `SetBlockRpc` damage remains the weaker combat
+  fixture and is not a harvest proof. Guarded by
+  `scripts/test_mining_probe_surface.py`.
+- `Report.Staged(name, detail)` and the stable `scene staged <name>` log line
+  (JSON `"t":"staged"`), announcing that a scene is on screen *now* so an
+  external screenshot loop can photograph it. A case's `Detail` is flushed with
+  its result, after the hold, so a loop keyed on the result photographs
+  whatever came next; providers had each worked around that with their own
+  `Report.Info` wording, so every screenshot loop grepped a different sentence.
+- `Helpers.RigPoseReport(entity)`: the wearer's rig as authoring reference, one
+  line per bone with its parent, local position and **bind pose** (from
+  `sharedMesh.bindposes`, not the live transform). Names alone cannot author a
+  garment: a skinned mesh carries a bind pose, so an armature whose joints sit
+  elsewhere deforms wrongly even when every name matches.
+- `Helpers.RigBoneNames(entity)`: every bone name the wearer's skinned
+  renderers are bound to, distinct and sorted. SDCS rebinds a gear prefab's
+  bones to the wearer by name and a mismatch becomes a null bone with no error,
+  so the exact spelling is a hard prerequisite for authoring a skinned garment,
+  and it lives in the game's asset bundles, readable only off a real wearer
+  in a running client.
+- `Helpers.OpenWindowGroup` / `CloseWindowGroup` / `OpenWindowNames`: open a
+  game UI window group and find out whether it really ended up open, and list
+  what the window manager believes is on screen. `GUIWindowManager.Open`
+  resolves an unknown name with only a log warning and does not open within
+  the same call, so a hand-rolled open reports a closed window that is about
+  to appear and a misspelled group looks identical to one that declined to
+  draw. `OpenWindowGroup` therefore returns whether the *name is known*, and
+  `OpenWindowNames` (sorted, so two identical runs read identically) is what
+  answers "is it on screen", from a later tick.
+- `CaseDef.Staged` takes an optional `onHold(ctx, fraction)`, called every tick
+  of the hold. A fixed camera photographs one face of a subject and says
+  nothing about the others; turning the subject here makes the frames a
+  turntable. A throw is logged and the hold continues, because the scene is
+  already staged and the frames already exist.
+- `CaseDef.Staged(suite, id, tags, stage, holdSeconds)`: builds a staging case
+  (put the scene up, announce it immediately, hold it still, fail if it did
+  not stage). Providers had hand-rolled that triple, which is where the
+  per-project marker wording came from. Its assert deliberately establishes
+  only that there was something to photograph.
+- `scripts/capture_frames.sh`: runs a suite, waits for the first staged scene,
+  photographs the client window, crops the frames and builds a contact sheet.
+  Every project using this harness needed that loop and only had it by writing
+  its own; `--runner` lets a project keep its own entry point.
+- README "Visual confirmation: what a suite cannot tell you" - a suite proves
+  data and never appearance, the client is only up for as long as the cases
+  take, and the supported staged-frame path for anything a person must judge by
+  eye.
+- `--loadgen-server-cvar-tolerance` for bounded comparison of time-varying
+  server and peer CVar samples; the exact default remains `0.0001`.
+- Generic loadgen replicated-state orchestration: exact CVar/buff filters and
+  expectations consume structured joined/state events, teleport the exact
+  joined entity, and fail the harness on missing or contradictory peer state.
+- Relational loadgen assertions for positive and equal CVar values, plus an
+  opt-in server-authority oracle that compares `cvar get` with the exact
+  joined peer's decoded CVar state.
+- Barrier-parameter sanitization: `chat_echo:<token>` and
+  `spawn_vehicle:<class>` parameters lifted from client-log lines are
+  validated as plain identifiers (`[A-Za-z0-9_]{1,64}`) before they reach a
+  telnet console command, closing the log-to-console injection path where
+  remote chat text could seed extra admin commands. Unsafe parameters are
+  dropped with a warning.
+- Control-character scrubbing on log-derived text echoed to orchestrator
+  stdout (progress crumbs, failure dumps): remote chat can no longer inject
+  terminal escape sequences into the run log.
+- `PLAYTEST_TELNET_PASSWORD` env and `--telnet-password`: one value feeds
+  both the generated server config and the orchestrator telnet client.
 
 ### Changed
 
+- Fresh save per run is now a hard rule with no opt-out (#66): the
+  orchestrator always wipes the named stock save / zdtd world before a run,
+  because a reused world measures the previous run's terrain and stale
+  blocks instead of this run. `--reuse-save` is removed; `--fresh-save`
+  remains accepted as a no-op back-compat flag. Operators who relied on
+  world reuse keep their own copies before upgrading; the pre-run
+  quarantine (`<logdir>/quarantine`, newest 5 kept) is the only recovery
+  path.
 - The provider-facing case contract (`PlayerGate`, `CaseDef`, `CaseCtx`)
   moved verbatim from `Runner.cs` into its own `Source/PlayTestMod/CaseDef.cs`,
   matching the other public provider surfaces (`Report.cs`, `MiningProbe.cs`,
@@ -80,6 +175,98 @@ Release model (inferred practice, now pinned by `make test`):
   Requirements; README gains an offline dev loop section; new
   CONTRIBUTING.md documents setup, the edit-test loop, and the PR rules the
   gates enforce; `make coverage` appears in `make help`.
+- Loadgen launch now rebuilds when its C# project or source is newer than the
+  existing Release executable, preventing a freshly updated checkout from
+  silently running an incompatible stale observer binary.
+- `Helpers.LookAt` now follows the stock player rotation convention for
+  vertical aim. Targets below the player produce negative X pitch, so overhead
+  ground and block scenes no longer turn the camera into the sky.
+- `PLAYTEST_TELNET_PASSWORD` / `--telnet-password` unset no longer defaults
+  to the static `retest`. Servers the orchestrator starts get an ephemeral
+  per-run secret (written to the generated server config, chmod 0600, never
+  logged); `--no-server` attach falls back to `retest`. Operator-supplied
+  values win verbatim.
+- Deterministic simulation of the exclusivity lock: `make dst`
+  (`scripts/test_dst.py`, `DST.md`). Crash, torn-write, corruption, and
+  clock-skew faults replay from recorded seeds.
+- Offline local-init order gate for the orchestrator
+  (`scripts/test_no_unbound_locals.py`).
+- Stock-peer orchestration surface gate (`scripts/test_stock_peer_client.py`)
+  now runs as part of `make test`; it existed but nothing invoked it, so the
+  peer-rename commit silently broke it.
+- Seeded grammar fuzzers for the log-derived report surface in
+  `scripts/test_report_surface.py`: hostile client-log blobs against
+  `parse_client_log` (shape, determinism, doubling invariants) and hostile
+  strings through `write_junit` (well-formedness, round-trip), both offline
+  and deterministic under `make test`.
+- README provider section now ships a complete minimal `IScenarioProvider`
+  example, a `CaseCtx` member reference, and the full list of barrier names
+  the stock orchestrator answers.
+- The orchestrator logs one effective `config:` line at startup (options
+  only; the telnet password appears as set/unset, never its value), so a
+  misread environment is visible without rerunning with `--help`.
+- README now documents every host orchestrator environment variable
+  (`PLAYTEST_SERVER`, `ZDTD`, `RE_DEDICATED_USERDATA`, `LOGDIR`,
+  `PLAYTEST_TIMEOUT_SEC`, peer-client defaults) with defaults and the
+  flag-overrides-env precedence.
+- Quarantine-before-delete for the orchestrator's destructive pre-run paths:
+  stock saves, zdtd world state (`players.zsv`,
+  `containers.zct`, `blockmeta.zbm`, chunk overlays), and previous client
+  logs move under `<logdir>/quarantine/` (newest 5 entries kept) instead of
+  being hard-deleted or truncated. A mispointed `--userdata`/`--game-name`/
+  `--world` now costs a copy-back; an unwritable quarantine keeps data in
+  place and warns about stale reuse. README gains a "State, backups, and
+  recovery" section (state inventory, RPO/RTO stance, restore steps).
+- README provider docs now cover `CaseCtx.CaseStartUnscaled` and `IntC`
+  (previously public but undocumented), a "Provider error behavior"
+  section (callback exceptions fail only their case; provider/suite
+  exceptions surface as log lines and FAIL rows), and `Report.Info` for
+  diagnostics under the stable prefix.
+- `CaseDef.Live` now fails fast at queue build: a case with no `act`,
+  `wait`, or `assert` callback (it would record a green pass while
+  running nothing) throws `ArgumentException`, and `timeout <= 0` throws
+  `ArgumentOutOfRangeException`, both naming the case. Provider
+  `AppendSuite` calls are wrapped by discovery, so a rejected case
+  surfaces as a `[7dtd-playtest] scenario provider …` log line plus the
+  existing zero-cases FAIL row instead of a lying pass; built-in catalog
+  cases all supply callbacks and positive timeouts, so no call site
+  changes.
+- Requesting a suite that produces zero cases (typo'd id, uninstalled
+  provider) is now a recorded failure instead of a silent green run: the
+  runner logs `unknown or empty suite: <id>` once, records a
+  `FAIL <id>/(unknown)` row, and an entirely empty queue finishes at arm
+  time with `DONE exit_hint=1`. Hosts exit 1 and see the offending suite by
+  name; previously such runs waited out the join and exited 0.
+- `CaseDef.Live` tags parameter is optional (informational only); act is
+  optional too, so pure-wait observation cases no longer pass `null`
+  positionally. Existing call sites are unaffected.
+- Removed the dead internal `Suites` shim (no callers, invisible outside
+  the assembly).
+- Host Python runs through `uv` only (requires Python >= 3.11).
+- Host Python invocations now pass `--locked` to uv (`make test`, repeat
+  wrapper, README): a pyproject/uv.lock mismatch fails the run instead of
+  silently re-resolving away from the committed lock.
+- Mod builds are byte-reproducible across checkouts: the csproj pins
+  `Deterministic`, maps the checkout path out of the dll/pdb (`PathMap`),
+  disables the SDK's implicit git query that baked the absolute source
+  path and remote URL into the pdb, and pins the net48 reference
+  assemblies package explicitly. Verified: two builds from different
+  checkout directories hash identically.
+- `global.json` pins the dotnet SDK to the 8.0 feature band
+  (`rollForward: latestFeature`), so compiler version no longer depends on
+  whatever the host has installed.
+- Mod build strictness raised to what the tree already passes: nullable
+  annotation checking (`Nullable=annotations`), warning level 5, Roslyn
+  NET analyzers enabled (they defaulted off for net48), and
+  `TreatWarningsAsErrors`, so a new compiler or analyzer diagnostic fails
+  `make build` instead of scrolling by. Full `Nullable=enable` stays off
+  until the remaining CS86xx findings are worked off.
+- CI runner image pinned (`ubuntu-24.04`) instead of the floating
+  `ubuntu-latest`.
+- Entity probes, fixture equips, and barrier bookkeeping share one
+  implementation; repeated parameterized barriers
+  (`barrier spawn_vehicle:<class>`) each reach the host as separate fixture
+  requests.
 
 ### Fixed
 
@@ -121,205 +308,6 @@ Release model (inferred practice, now pinned by `make test`):
   `ReleasePrimary` / `TickAttack` signatures (the first landed regex stopped
   at `(` and never found the method body), and ruff F401/RET504 on that
   gate. `MiningProbe.TryResolveBlock` initializes `error` to `""`.
-
-### Added
-
-- The orchestrator writes `<logdir>/run-ended` when its poll loop ends -
-  `done`, `timeout`, or `client_exit` on one line. This is the deterministic
-  end of the run for consumers keyed on the staged marker (a screenshot loop
-  exits on it instead of waiting out its own timeout).
-- A new `lock_lost` run-ended reason: when the exclusivity heartbeat reports
-  the lock file stopped naming our session (foreign takeover after a stale
-  window, or the shared file was reset), the orchestrator aborts with exit 2
-  instead of finishing the suite against a runtime it may no longer own.
-  Previously the detection existed in `HeartbeatLoop.lost_claim` but no
-  consumer read it, so two agents could drive one machine concurrently.
-- `playtest_lock.wait_until_can_start` and CLI `playtest_lock.py wait`:
-  poll `can_start` (missing heartbeat is stale) so consumers do not parse
-  `running=` / `heartbeat=` themselves. Matrix runners call this instead
-  of a local lock clone.
-- `MiningSpec` / `MiningProbe` / `MiningResult`: public real-mining driver for
-  external providers. Seeds a named block, equips a named tool, presses
-  exactly one `UseHoldingItem(0, false)` per attempt, and requires both
-  authoritative block damage and a named bag+toolbelt award. Stock case
-  `mining_harvest` (iron ore / iron pickaxe / scrap iron).
-  `PulsePrimaryAttack` + `SetBlockRpc` damage remains the weaker combat
-  fixture and is not a harvest proof. Guarded by
-  `scripts/test_mining_probe_surface.py`.
-- `Report.Staged(name, detail)` and the stable `scene staged <name>` log line
-  (JSON `"t":"staged"`), announcing that a scene is on screen *now* so an
-  external screenshot loop can photograph it. A case's `Detail` is flushed with
-  its result, after the hold, so a loop keyed on the result photographs
-  whatever came next; providers had each worked around that with their own
-  `Report.Info` wording, so every screenshot loop grepped a different sentence.
-- `Helpers.RigPoseReport(entity)`: the wearer's rig as authoring reference, one
-  line per bone with its parent, local position and **bind pose** (from
-  `sharedMesh.bindposes`, not the live transform). Names alone cannot author a
-  garment: a skinned mesh carries a bind pose, so an armature whose joints sit
-  elsewhere deforms wrongly even when every name matches.
-- `Helpers.RigBoneNames(entity)`: every bone name the wearer's skinned
-  renderers are bound to, distinct and sorted. SDCS rebinds a gear prefab's
-  bones to the wearer by name and a mismatch becomes a null bone with no error,
-  so the exact spelling is a hard prerequisite for authoring a skinned garment
-  — and it lives in the game's asset bundles, readable only off a real wearer
-  in a running client.
-- `Helpers.OpenWindowGroup` / `CloseWindowGroup` / `OpenWindowNames`: open a
-  game UI window group and find out whether it really ended up open, and list
-  what the window manager believes is on screen. `GUIWindowManager.Open`
-  resolves an unknown name with only a log warning and does not open within
-  the same call, so a hand-rolled open reports a closed window that is about
-  to appear and a misspelled group looks identical to one that declined to
-  draw. `OpenWindowGroup` therefore returns whether the *name is known*, and
-  `OpenWindowNames` — sorted, so two identical runs read identically — is what
-  answers "is it on screen", from a later tick.
-- `CaseDef.Staged` takes an optional `onHold(ctx, fraction)`, called every tick
-  of the hold. A fixed camera photographs one face of a subject and says
-  nothing about the others; turning the subject here makes the frames a
-  turntable. A throw is logged and the hold continues, because the scene is
-  already staged and the frames already exist.
-- `CaseDef.Staged(suite, id, tags, stage, holdSeconds)`: builds a staging case
-  — put the scene up, announce it immediately, hold it still, fail if it did
-  not stage. Providers had hand-rolled that triple, which is where the
-  per-project marker wording came from. Its assert deliberately establishes
-  only that there was something to photograph.
-- `scripts/capture_frames.sh`: runs a suite, waits for the first staged scene,
-  photographs the client window, crops the frames and builds a contact sheet.
-  Every project using this harness needed that loop and only had it by writing
-  its own; `--runner` lets a project keep its own entry point.
-- README "Visual confirmation: what a suite cannot tell you" — a suite proves
-  data and never appearance, the client is only up for as long as the cases
-  take, and the supported staged-frame path for anything a person must judge by
-  eye.
-
-No breaking changes: verified against the `v0.7.1` tag, the public C#
-provider surface, log contract tokens, lock payload keys
-(`running`/`session`/`acquired`/`heartbeat`), and suite env names are
-unchanged.
-
-### Added
-
-- `--loadgen-server-cvar-tolerance` for bounded comparison of time-varying
-  server and peer CVar samples; the exact default remains `0.0001`.
-- Generic loadgen replicated-state orchestration: exact CVar/buff filters and
-  expectations consume structured joined/state events, teleport the exact
-  joined entity, and fail the harness on missing or contradictory peer state.
-- Relational loadgen assertions for positive and equal CVar values, plus an
-  opt-in server-authority oracle that compares `cvar get` with the exact
-  joined peer's decoded CVar state.
-- Barrier-parameter sanitization: `chat_echo:<token>` and
-  `spawn_vehicle:<class>` parameters lifted from client-log lines are
-  validated as plain identifiers (`[A-Za-z0-9_]{1,64}`) before they reach a
-  telnet console command, closing the log-to-console injection path where
-  remote chat text could seed extra admin commands. Unsafe parameters are
-  dropped with a warning.
-- Control-character scrubbing on log-derived text echoed to orchestrator
-  stdout (progress crumbs, failure dumps): remote chat can no longer inject
-  terminal escape sequences into the run log.
-- `PLAYTEST_TELNET_PASSWORD` env and `--telnet-password`: one value feeds
-  both the generated server config and the orchestrator telnet client.
-
-### Changed
-
-- Loadgen launch now rebuilds when its C# project or source is newer than the
-  existing Release executable, preventing a freshly updated checkout from
-  silently running an incompatible stale observer binary.
-
-- `Helpers.LookAt` now follows the stock player rotation convention for
-  vertical aim. Targets below the player produce negative X pitch, so overhead
-  ground and block scenes no longer turn the camera into the sky.
-- `PLAYTEST_TELNET_PASSWORD` / `--telnet-password` unset no longer defaults
-  to the static `retest`. Servers the orchestrator starts get an ephemeral
-  per-run secret (written to the generated server config, chmod 0600, never
-  logged); `--no-server` attach falls back to `retest`. Operator-supplied
-  values win verbatim.
-- Deterministic simulation of the exclusivity lock: `make dst`
-  (`scripts/test_dst.py`, `DST.md`). Crash, torn-write, corruption, and
-  clock-skew faults replay from recorded seeds.
-- Offline local-init order gate for the orchestrator
-  (`scripts/test_no_unbound_locals.py`).
-- Stock-peer orchestration surface gate (`scripts/test_stock_peer_client.py`)
-  now runs as part of `make test`; it existed but nothing invoked it, so the
-  peer-rename commit silently broke it.
-- Seeded grammar fuzzers for the log-derived report surface in
-  `scripts/test_report_surface.py`: hostile client-log blobs against
-  `parse_client_log` (shape, determinism, doubling invariants) and hostile
-  strings through `write_junit` (well-formedness, round-trip), both offline
-  and deterministic under `make test`.
-- README provider section now ships a complete minimal `IScenarioProvider`
-  example, a `CaseCtx` member reference, and the full list of barrier names
-  the stock orchestrator answers.
-- The orchestrator logs one effective `config:` line at startup (options
-  only; the telnet password appears as set/unset, never its value), so a
-  misread environment is visible without rerunning with `--help`.
-- README now documents every host orchestrator environment variable
-  (`PLAYTEST_SERVER`, `ZDTD`, `RE_DEDICATED_USERDATA`, `LOGDIR`,
-  `PLAYTEST_TIMEOUT_SEC`, peer-client defaults) with defaults and the
-  flag-overrides-env precedence.
-- Quarantine-before-delete for the orchestrator's destructive pre-run paths:
-  `--fresh-save` stock saves, zdtd world state (`players.zsv`,
-  `containers.zct`, `blockmeta.zbm`, chunk overlays), and previous client
-  logs move under `<logdir>/quarantine/` (newest 5 entries kept) instead of
-  being hard-deleted or truncated. A mispointed `--userdata`/`--game-name`/
-  `--world` now costs a copy-back; an unwritable quarantine keeps data in
-  place and warns about stale reuse. README gains a "State, backups, and
-  recovery" section (state inventory, RPO/RTO stance, restore steps).
-- README provider docs now cover `CaseCtx.CaseStartUnscaled` and `IntC`
-  (previously public but undocumented), a "Provider error behavior"
-  section (callback exceptions fail only their case; provider/suite
-  exceptions surface as log lines and FAIL rows), and `Report.Info` for
-  diagnostics under the stable prefix.
-
-### Changed
-
-- `CaseDef.Live` now fails fast at queue build: a case with no `act`,
-  `wait`, or `assert` callback (it would record a green pass while
-  running nothing) throws `ArgumentException`, and `timeout <= 0` throws
-  `ArgumentOutOfRangeException`, both naming the case. Provider
-  `AppendSuite` calls are wrapped by discovery, so a rejected case
-  surfaces as a `[7dtd-playtest] scenario provider …` log line plus the
-  existing zero-cases FAIL row instead of a lying pass; built-in catalog
-  cases all supply callbacks and positive timeouts, so no call site
-  changes.
-
-- Requesting a suite that produces zero cases (typo'd id, uninstalled
-  provider) is now a recorded failure instead of a silent green run: the
-  runner logs `unknown or empty suite: <id>` once, records a
-  `FAIL <id>/(unknown)` row, and an entirely empty queue finishes at arm
-  time with `DONE exit_hint=1`. Hosts exit 1 and see the offending suite by
-  name; previously such runs waited out the join and exited 0.
-- `CaseDef.Live` tags parameter is optional (informational only); act is
-  optional too, so pure-wait observation cases no longer pass `null`
-  positionally. Existing call sites are unaffected.
-- Removed the dead internal `Suites` shim (no callers, invisible outside
-  the assembly).
-- Host Python runs through `uv` only (requires Python >= 3.11).
-- Host Python invocations now pass `--locked` to uv (`make test`, repeat
-  wrapper, README): a pyproject/uv.lock mismatch fails the run instead of
-  silently re-resolving away from the committed lock.
-- Mod builds are byte-reproducible across checkouts: the csproj pins
-  `Deterministic`, maps the checkout path out of the dll/pdb (`PathMap`),
-  disables the SDK's implicit git query that baked the absolute source
-  path and remote URL into the pdb, and pins the net48 reference
-  assemblies package explicitly. Verified: two builds from different
-  checkout directories hash identically.
-- `global.json` pins the dotnet SDK to the 8.0 feature band
-  (`rollForward: latestFeature`), so compiler version no longer depends on
-  whatever the host has installed.
-- Mod build strictness raised to what the tree already passes: nullable
-  annotation checking (`Nullable=annotations`), warning level 5, Roslyn
-  NET analyzers enabled (they defaulted off for net48), and
-  `TreatWarningsAsErrors`, so a new compiler or analyzer diagnostic fails
-  `make build` instead of scrolling by. Full `Nullable=enable` stays off
-  until the remaining CS86xx findings are worked off.
-- CI runner image pinned (`ubuntu-24.04`) instead of the floating
-  `ubuntu-latest`.
-- Entity probes, fixture equips, and barrier bookkeeping share one
-  implementation; repeated parameterized barriers
-  (`barrier spawn_vehicle:<class>`) each reach the host as separate fixture
-  requests.
-
-### Fixed
-
 - Server CVar oracle parsing accepts stock's live
   `name: True. Value: <number>` result format.
 - The server CVar oracle now keeps its telnet session open until the stock
@@ -328,14 +316,12 @@ unchanged.
 - Server CVar oracle parsing now requires the value delimiter immediately
   after the requested name, so a telnet command echo cannot be mistaken for
   the player entity ID supplied through `-p`.
-
 - `loot_bag_pickup` no longer parks the dropped item's entity id in the
   float context slot: entity ids above 2^24 lost precision through the
   `float`/`(int)` round-trip and corrupted the gone-check verdict. The id
   now lives in a new int slot (`CaseCtx.IntC`; additive, provider-visible).
 - The `world_time` case dropped its dead `worldTime → float` parking; the
   full ulong value was already reported via Detail.
-
 - `SUITE=economy`, `vehicle`, `finale`, and `bot` standalone runs now arm
   host telnet fixtures. The fixture gate (`suite_wants_zombie_fixture`) was a
   substring heuristic whose key list predated the current barrier set, so
@@ -385,6 +371,36 @@ unchanged.
   and `inf` made a lock never stale (or froze the heartbeat wait).
 - The generated stock serverconfig (`TelnetPassword` inside) is written with
   user-only permissions (0600) instead of inheriting a world-readable umask.
+- Omitting `--port` no longer crashes `main()` with a `None > int` TypeError
+  inside the LiteNet port-room validation before any preflight refusal:
+  the backend default (26900 stock / 27025 zdtd) now resolves before that
+  comparison. Every `make playtest` invocation without an explicit `PORT=`
+  took the crashing path.
+
+No breaking changes to the consumer contracts: verified against the
+`v0.7.1` tag, the public C# provider surface, log contract tokens, lock
+payload keys (`running`/`session`/`acquired`/`heartbeat`), and suite env
+names are unchanged. One operator-facing default changed on purpose: every
+run now wipes its save/world first (see Changed, #66), and `--reuse-save`
+is gone.
+
+## [0.7.2] - 2026-08-23
+
+A tag without a version bump. The annotated-version convention and the
+tag-vs-manifest gate below did not exist yet, and `v0.7.2` was placed on a
+commit whose tree still ships **0.7.1**: `ModInfo.xml` says 0.7.1 and
+`ModIdentity.Version` prints 0.7.1, so the game mod list and the runner
+banner identify anything built from this ref as 0.7.1. Treat `v0.7.2` as
+a re-issue of 0.7.1, not a distinct mod version. Tagging is now gated by
+CI (`.github/workflows/release.yml`): a `vX.Y.Z` push whose tree does not
+declare that exact version is rejected.
+
+What the ref actually changed (repo/tooling only, no consumer-visible
+delta):
+
+- HordeForge branding across docs and configs: `ModInfo.xml` Author and
+  Website fields, Makefile and orchestrator workspace paths, and the
+  `7dtd-fastconnect` naming in comments and docs.
 
 ## [0.7.1] - 2026-08-22
 
@@ -400,5 +416,6 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.7.1
