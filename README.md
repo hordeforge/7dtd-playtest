@@ -1,6 +1,6 @@
-# 7dtd-playtest
+# 🛡️ Vanguard (7DTD Playtest)
 
-> **Part of [HordeForge](https://github.com/hordeforge)** — High-Performance Systems Engineering for 7 Days to Die.
+> **Part of [HordeForge](https://github.com/hordeforge)**: High-Performance Systems Engineering for 7 Days to Die.
 
 ![CI](https://github.com/hordeforge/7dtd-playtest/actions/workflows/ci.yml/badge.svg)
 ![coverage](https://raw.githubusercontent.com/hordeforge/7dtd-playtest/badges/coverage.svg)

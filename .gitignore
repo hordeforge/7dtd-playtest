@@ -14,3 +14,8 @@ workspace/comparison-playtest/*/zdtd/
 .coverage
 .coverage.*
 htmlcov/
+
+# Scratch: every temporary, experimental, or bisect file lives here and is
+# never committed. See the org REPOSITORY_STANDARDS.md.
+.scratch/
+.scratch_*
