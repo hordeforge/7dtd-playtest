@@ -306,6 +306,28 @@ def validate_result(
     }
 
 
+def _moment(value: object, *, non_negative: bool) -> list[float] | None:
+    """Normalize an issue moment: `[start, end]` or a single value -> `[n, n]`.
+
+    Mirrors the deadeye gateway's canonical validator: models point at a
+    moment with either shape, and a single frame index or second is the
+    natural way to name one frame.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if non_negative and value < 0:
+            return None
+        return [float(value), float(value)]
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(bound, (int, float)) and not isinstance(bound, bool) for bound in value)
+        and (not non_negative or value[0] >= 0)
+        and value[0] <= value[1]
+    ):
+        return [float(value[0]), float(value[1])]
+    return None
+
+
 def redact(value: object, parts: tuple[str, ...] = SENSITIVE_KEY_PARTS) -> object:
     """Deep-copy a JSON-shaped value, dropping credential-bearing mapping keys."""
     if isinstance(value, dict):
