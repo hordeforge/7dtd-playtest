@@ -37,6 +37,13 @@ Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
 8. Name for what it does (suite ids, case ids, env vars).
 9. **Exclusive live client** (see below). Only one orchestrated playtest (or
    other exclusive client drive) at a time on this machine.
+10. **Every run starts on a fresh save — a hard rule, no opt-out.** The
+    orchestrator wipes the named stock save (or the zdtd world) before each
+    run. A reused world is a reused set of registered blocks, item ids and
+    chunk state, so a dig/place suite then measures the previous run's
+    terrain or stale blocks rather than this run. Do not add a
+    `--reuse-save`/`FRESH=0` path; `--fresh-save` exists only as a no-op
+    back-compat flag.
 
 ## Playtest / live-client exclusivity
 
