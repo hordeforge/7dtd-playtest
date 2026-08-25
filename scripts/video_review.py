@@ -225,6 +225,13 @@ def validate_result(
             if not isinstance(entry, dict) or "description" not in entry:
                 problems.append(f"issue #{index + 1} must be an object with 'description'")
                 continue
+            # Live models name a moment with the singular aliases `frame` /
+            # `seconds` as often as `at_frame` / `at_seconds`; normalize them
+            # before the shape check (canonical wins when both are present).
+            if "frame" in entry:
+                entry.setdefault("at_frame", entry.pop("frame"))
+            if "seconds" in entry:
+                entry.setdefault("at_seconds", entry.pop("seconds"))
             unexpected = sorted(set(entry) - {"description", "at_seconds", "at_frame"})
             if unexpected:
                 problems.append(

@@ -257,7 +257,7 @@ def config_summary(args: argparse.Namespace) -> str:
         f"world={args.world_name if args.server == 'stock' else args.world}",
         f"game_name={args.game_name}",
         f"logdir={args.logdir}",
-        f"fresh_save=True",
+        "fresh_save=True",
         f"no_server={bool(args.no_server)}",
         f"fixtures={not args.no_fixtures}",
         f"telnet_password={pw_state}",
