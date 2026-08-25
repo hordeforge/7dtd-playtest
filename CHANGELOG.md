@@ -22,6 +22,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- `Helpers.Blocks`: block-entity model access and placement support for
+  suites that place a block and check its model - `BlockEntityDataAt`,
+  `ActivateBlockEntityModel` (the chunk display pass can leave renderers
+  disabled), `FindGroundedAir` (a support-checked spot ahead of the camera,
+  so the server's stability pass does not drop the placement),
+  `AimBlockPlacement` (fills the player HitInfo for the PlaceAsBlock action)
+  and `CloseDebugConsole` (the console swallows input-driven actions while
+  open). Generalized from the 7dtd-asset-pipeline SelfTestMod block
+  acceptance suites.
 - `CaseDef.StagedClip` and `Helpers.CaptureClipFrame`: a staged case that
   captures a sampled frame sequence of its hold from inside the game
   (`playtest-shots/clips/<id>/frame-XXXX.png`), with a single
