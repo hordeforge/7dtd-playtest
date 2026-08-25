@@ -219,6 +219,54 @@ def test_loadgen_expectations_reject_non_finite_values() -> None:
     )
 
 
+def test_loadgen_oracle_survives_extreme_and_boolean_values() -> None:
+    """Regression pins for the OverflowError the loadgen fuzzer found: JSON
+    integers are unbounded, so a hostile events file with a 400-digit value
+    made float() raise past the old isinstance guard and crashed the verdict
+    path. Booleans are int subclasses, so "value": true compared as 1.0 and
+    "entityId": true became the bot id; both must read as malformed instead."""
+    huge = 10 ** 400
+    events = [
+        {"type": "joined", "botId": 1, "entityId": 171},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "huge", "value": huge},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "truthy", "value": True},
+        {"type": "joined", "botId": 2, "entityId": True},
+    ]
+    # The newest joined event wins, but a boolean id is not an entity id.
+    assert playtest_run.loadgen_joined_entity(events) == 171, (
+        playtest_run.loadgen_joined_entity(events)
+    )
+    assert playtest_run.loadgen_joined_entity(
+        [{"type": "joined", "entityId": True}]
+    ) is None, "boolean entityId accepted as the bot"
+
+    failures = playtest_run.loadgen_expectation_failures(
+        events,
+        ["huge=0", "truthy=1"],
+        [],
+        ["huge", "truthy"],
+        ["huge=truthy"],
+    )
+    assert len(failures) == 5, f"hostile values must fail, never crash: {failures}"
+    assert all(isinstance(f, str) for f in failures), failures
+
+    class FixedOracle(playtest_run.TelnetAdmin):
+        def get_cvar(
+            self, name: str, entity_id: int, timeout: float = 8.0
+        ) -> float | None:
+            return 4.0
+
+    _, latest = playtest_run.loadgen_latest_state(events)
+    oracle_failures = playtest_run.server_cvar_oracle_failures(
+        FixedOracle("127.0.0.1", 1, ""), 171, ["huge", "truthy"], latest
+    )
+    assert len(oracle_failures) == 2, f"oracle must flag both: {oracle_failures}"
+    assert all("expected peer value" in f for f in oracle_failures), oracle_failures
+    print(
+        "PASS loadgen_oracle_extremes huge-int OverflowError and bool values contained"
+    )
+
+
 def test_loadgen_observer_wiring_is_generic() -> None:
     source = PLAYTEST_RUN.read_text(encoding="utf-8")
     for flag in (
@@ -1891,6 +1939,10 @@ def main() -> int:
         (
             "loadgen_expectations_non_finite",
             test_loadgen_expectations_reject_non_finite_values,
+        ),
+        (
+            "loadgen_oracle_extremes",
+            test_loadgen_oracle_survives_extreme_and_boolean_values,
         ),
         ("loadgen_observer_wiring", test_loadgen_observer_wiring_is_generic),
         ("loadgen_stale_rebuild", test_loadgen_rebuilds_when_source_is_newer),

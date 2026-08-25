@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import random
 import sys
 import tempfile
@@ -622,6 +623,133 @@ def test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate() -> Non
     print("PASS loadgen_event_reader incremental equals whole read, truncate resets")
 
 
+# Fuzz grammar for the loadgen events surface. The JSONL file is produced by
+# another process and consumed by the verdict oracles, so hostile bytes here
+# decide mp-suite results: the pool carries every crash class found so far
+# (unbounded JSON ints that overflow float(), bare Infinity/NaN tokens,
+# boolean values where numbers belong) plus wrong schemas, truncated lines
+# and junk. Deterministic seeds; a failure prints its seed and blob so the
+# exact input can be pasted as the next fixed regression case.
+_LOADGEN_LINE_FRAGMENTS = [
+    '{"schema":"7dtd.loadgen.event.v1","type":"joined","botId":1,"entityId":171}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"cvar","name":"protection","value":1}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"buff","name":"protected","active":true}',
+    # Values the oracles must reject, never crash on: exponent overflow to
+    # inf, unbounded integers, non-finite tokens, booleans, wrong types.
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"cvar","name":"x","value":1e999}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"cvar","name":"huge","value":1' + "0" * 400 + "}",
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"cvar","name":"neg_huge","value":-1' + "0" * 400 + "}",
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"cvar","name":"inf","value":Infinity}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":"cvar","name":"nan","value":NaN}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":true,'
+    '"kind":"cvar","name":"x","value":4}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":true}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":-5}',
+    '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":171,'
+    '"kind":["cvar"],"name":{"a":1},"value":[null]}',
+    # Not events at all: wrong schema, other JSON shapes, truncated lines.
+    '{"schema":"other.v9","type":"joined","entityId":172}',
+    '{"type":"joined","entityId":173}',
+    "[1,2,3]",
+    '"just a string"',
+    "42",
+    "null",
+    '{"schema":"7dtd.loadgen.event.v1","type":"state",',
+    "{",
+    "",
+]
+
+_LOADGEN_JUNK_LINES = [
+    "\x00\x00binary-ish\x00",
+    "not json at all",
+    "﻿leading BOM {\"schema\":\"7dtd.loadgen.event.v1\"}",
+    "ünïcödé　全角 combining é́ emoji 🧟",
+    "{" + "}" * 300,
+]
+
+
+def _loadgen_fuzz_blob(rng: random.Random) -> str:
+    lines = [
+        rng.choice(_LOADGEN_LINE_FRAGMENTS + _LOADGEN_JUNK_LINES)
+        for _ in range(rng.randrange(0, 14))
+    ]
+    return "".join(line + "\n" for line in lines)
+
+
+def test_fuzz_loadgen_events_survive_hostile_jsonl() -> None:
+    """Seeded grammar fuzzer over loadgen event files and their oracles.
+
+    Invariants per generated file: reading never raises, kept events are
+    exactly the dict-with-matching-schema lines (doubling doubles them),
+    parsing is deterministic, incremental draining through
+    LoadgenEventReader equals the whole-file read with truncation resetting
+    it, and every oracle answers without raising: a joined id is a positive
+    non-boolean int, expectation failures are plain strings."""
+    for seed in range(40):
+        rng = random.Random(2000 + seed)
+        blob = _loadgen_fuzz_blob(rng)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "events.jsonl"
+            path.write_text(blob, encoding="utf-8")
+
+            events = playtest_run.read_loadgen_events(path)
+            assert all(
+                isinstance(e, dict) and e.get("schema") == "7dtd.loadgen.event.v1"
+                for e in events
+            ), f"seed {seed}: filter leaked a non-event"
+            assert playtest_run.read_loadgen_events(path) == events, (
+                f"seed {seed}: whole-file parse is nondeterministic"
+            )
+            doubled_path = path.with_suffix(".doubled.jsonl")
+            doubled_path.write_text(blob * 2, encoding="utf-8")
+            assert playtest_run.read_loadgen_events(doubled_path) == events * 2, (
+                f"seed {seed}: doubling changed the filter"
+            )
+
+            reader = playtest_run.LoadgenEventReader(path)
+            lines = blob.splitlines(keepends=True)
+            cut = rng.randrange(len(lines) + 1)
+            path.write_text("".join(lines[:cut]), encoding="utf-8")
+            assert reader.drain() == events[:_kept_count(lines[:cut])], f"seed {seed}"
+            path.write_text(blob, encoding="utf-8")
+            got = reader.drain()
+            want = playtest_run.read_loadgen_events(path)
+            assert got == want, f"seed {seed}: incremental drifted from whole read"
+
+            joined = playtest_run.loadgen_joined_entity(want)
+            assert joined is None or (
+                isinstance(joined, int)
+                and not isinstance(joined, bool)
+                and joined > 0
+            ), f"seed {seed}: joined id {joined!r}"
+            _, _latest = playtest_run.loadgen_latest_state(want)
+            failures = playtest_run.loadgen_expectation_failures(
+                want, ["protection=1"], ["protected=true"], ["x"], ["protection=x"]
+            )
+            assert isinstance(failures, list) and all(
+                isinstance(f, str) for f in failures
+            ), f"seed {seed}: oracle failures {failures!r}"
+    print("PASS loadgen_fuzz 40 hostile event files parsed and judged without crash")
+
+
+def _kept_count(lines: list[str]) -> int:
+    """Mirror of the reader's keep rule, asserted against drain() above."""
+    count = 0
+    for line in lines:
+        with contextlib.suppress(ValueError):
+            event = json.loads(line)
+            if isinstance(event, dict) and event.get("schema") == "7dtd.loadgen.event.v1":
+                count += 1
+    return count
+
+
 def test_contract_lines_must_start_the_log_line() -> None:
     """Client-log bytes are attacker-reachable through remote LAN chat (the
     threat model's B3): a peer crafts one chat message carrying
@@ -707,6 +835,7 @@ def main() -> int:
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
+    test_fuzz_loadgen_events_survive_hostile_jsonl()
     test_contract_lines_must_start_the_log_line()
     test_contract_lines_parse_under_the_games_log_prefix()
     test_collect_visual_reviews_maps_paths_and_never_verdicts()

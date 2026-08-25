@@ -16,6 +16,7 @@ requires is untouched, and nothing in this module can mark a clip accepted.
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -311,26 +312,42 @@ def validate_result(
     }
 
 
+def _moment_number(value: object) -> float | None:
+    """Finite non-boolean number, else ``None``.
+
+    JSON integers are unbounded (``float()`` overflows past an isinstance
+    check) and Python's parser accepts Infinity/NaN tokens; neither names a
+    frame or a second, so both fail closed here.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _moment(value: object, *, non_negative: bool) -> list[float] | None:
     """Normalize an issue moment: `[start, end]` or a single value -> `[n, n]`.
 
     Mirrors the deadeye gateway's canonical validator: models point at a
     moment with either shape, and a single frame index or second is the
-    natural way to name one frame.
+    natural way to name one frame. Values that are not finite numbers are
+    refused, never stored into evidence.
     """
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if non_negative and value < 0:
+    if isinstance(value, list):
+        if len(value) != 2:
             return None
-        return [float(value), float(value)]
-    if (
-        isinstance(value, list)
-        and len(value) == 2
-        and all(isinstance(bound, (int, float)) and not isinstance(bound, bool) for bound in value)
-        and (not non_negative or value[0] >= 0)
-        and value[0] <= value[1]
-    ):
-        return [float(value[0]), float(value[1])]
-    return None
+        start = _moment_number(value[0])
+        end = _moment_number(value[1])
+        if start is None or end is None or start > end or (non_negative and start < 0):
+            return None
+        return [start, end]
+    number = _moment_number(value)
+    if number is None or (non_negative and number < 0):
+        return None
+    return [number, number]
 
 
 def redact(value: object, parts: tuple[str, ...] = SENSITIVE_KEY_PARTS) -> object:

@@ -950,13 +950,32 @@ class LoadgenEventReader:
         return self.events
 
 
+def _finite_number(value: object) -> float | None:
+    """The numeric reading of a loadgen event field, or ``None``.
+
+    JSON integers are unbounded, so ``float()`` on a hostile ``"value"``
+    raises OverflowError past an isinstance check; booleans pass
+    isinstance(int); and parsed NaN/Infinity tokens are not observations.
+    Everything that is not a finite non-boolean number is rejected here so
+    every oracle below compares floats only.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def loadgen_joined_entity(events: list[dict]) -> int | None:
     """Return the newest positive entity id from a structured joined event."""
     for event in reversed(events):
         if event.get("type") != "joined":
             continue
         entity_id = event.get("entityId")
-        if isinstance(entity_id, int) and entity_id > 0:
+        # bool is an int subclass; "entityId": true must never become the bot.
+        if isinstance(entity_id, int) and not isinstance(entity_id, bool) and entity_id > 0:
             return entity_id
     return None
 
@@ -997,13 +1016,10 @@ def loadgen_expectation_failures(
             failures.append(f"invalid CVar expectation {raw!r}")
             continue
         state_event = latest.get(("cvar", name))
-        value = state_event.get("value") if state_event else None
-        if (
-            not isinstance(value, (int, float))
-            or not math.isfinite(float(value))
-            or abs(float(value) - expected) > 0.0001
-        ):
-            failures.append(f"CVar {name} expected {expected:g}, observed {value!r}")
+        observed_raw = state_event.get("value") if state_event else None
+        value = _finite_number(observed_raw)
+        if value is None or abs(value - expected) > 0.0001:
+            failures.append(f"CVar {name} expected {expected:g}, observed {observed_raw!r}")
     for raw in buffs:
         try:
             name, expected_text = raw.rsplit("=", 1)
@@ -1023,14 +1039,11 @@ def loadgen_expectation_failures(
             failures.append(f"buff {name} expected active={expected}, observed {active!r}")
     for name in positive_cvars or []:
         state_event = latest.get(("cvar", name))
-        value = state_event.get("value") if state_event else None
+        observed_raw = state_event.get("value") if state_event else None
         # NaN is not positive (<= 0 is False for it) and must not pass here.
-        if (
-            not isinstance(value, (int, float))
-            or not math.isfinite(float(value))
-            or float(value) <= 0
-        ):
-            failures.append(f"CVar {name} expected positive, observed {value!r}")
+        value = _finite_number(observed_raw)
+        if value is None or value <= 0:
+            failures.append(f"CVar {name} expected positive, observed {observed_raw!r}")
     for raw in equal_cvars or []:
         try:
             left, right = raw.split("=", 1)
@@ -1040,13 +1053,9 @@ def loadgen_expectation_failures(
         left_event, right_event = latest.get(("cvar", left)), latest.get(("cvar", right))
         left_value = left_event.get("value") if left_event else None
         right_value = right_event.get("value") if right_event else None
-        if (
-            not isinstance(left_value, (int, float))
-            or not isinstance(right_value, (int, float))
-            or not math.isfinite(float(left_value))
-            or not math.isfinite(float(right_value))
-            or abs(float(left_value) - float(right_value)) > 0.0001
-        ):
+        left_num = _finite_number(left_value)
+        right_num = _finite_number(right_value)
+        if left_num is None or right_num is None or abs(left_num - right_num) > 0.0001:
             failures.append(
                 f"CVars {left} and {right} expected equal, observed "
                 f"{left_value!r} and {right_value!r}"
@@ -1072,13 +1081,13 @@ def server_cvar_oracle_failures(
     failures: list[str] = []
     for name in names:
         event = latest.get(("cvar", name))
-        peer_value = event.get("value") if event else None
+        peer_raw = event.get("value") if event else None
         server_value = tn.get_cvar(name, entity_id)
+        peer_value = _finite_number(peer_raw)
         if (
-            not isinstance(peer_value, (int, float))
-            or not math.isfinite(float(peer_value))
+            peer_value is None
             or server_value is None
-            or abs(float(peer_value) - server_value) > tolerance
+            or abs(peer_value - server_value) > tolerance
         ):
             failures.append(
                 f"server CVar {name} expected peer value {peer_value!r}, "

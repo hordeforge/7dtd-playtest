@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import contextlib
 import json
+import random
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -249,6 +250,145 @@ def test_scalar_and_null_moments_normalize() -> None:
     assert first.get("at_frame") == [9.0, 9.0]
     assert issues[1] == {"description": "whole-clip read"}
 
+
+# Seeded grammar for the gateway-result boundary: validate_result is the
+# offline backstop run on whatever the deadeye gateway printed, so hostile
+# shapes must fail closed (ReviewError) or normalize, never crash. The pool
+# carries the crash classes found by review: unbounded JSON ints that
+# overflow float(), Infinity/NaN tokens where numbers belong, booleans,
+# wrong containers, unknown/missing keys. A failure prints its seed and doc
+# so the exact input can be pasted as the next fixed regression case.
+_RESULT_VALUE_FRAGMENTS: list[object] = [
+    "ok",
+    "",
+    0,
+    1,
+    -3,
+    True,
+    False,
+    None,
+    [],
+    {},
+    [1, 2],
+    4.2,
+    1e999,
+    -(10 ** 400),
+    10 ** 400,
+    float("nan"),
+    float("inf"),
+    {"at_frame": 9},
+]
+_ISSUE_SHAPES: list[Callable[[object], object]] = [
+    lambda v: {"description": v},
+    lambda v: {"description": v, "at_frame": v},
+    lambda v: {"description": v, "at_seconds": v},
+    lambda v: {"description": v, "at_frame": [v, v]},
+    lambda v: {"description": v, "seconds": v},
+    lambda v: {"description": v, "start_frame": v, "end_frame": v},
+    lambda v: {"description": v, "unexpected": v},
+    lambda v: v,
+]
+_TOP_KEYS = (
+    "summary",
+    "strengths",
+    "issues",
+    "recommended_changes",
+    "rubric_scores",
+    "confidence",
+    "limitations",
+)
+
+
+def _hostile_result(rng: random.Random) -> dict[str, object]:
+    def value() -> object:
+        return rng.choice(_RESULT_VALUE_FRAGMENTS)
+
+    issues = []
+    if rng.random() < 0.8:
+        issues = [
+            rng.choice(_ISSUE_SHAPES)(value()) for _ in range(rng.randrange(0, 3))
+        ]
+    scores: dict[object, object] = {}
+    if rng.random() < 0.8:
+        scores = {rng.choice(["motion", "lighting", 7]): value() for _ in range(2)}
+    doc: dict[str, object] = {
+        key: rng.choice([value(), value()])
+        if key in ("summary", "confidence")
+        else ([value()] if key == "strengths" else
+              (issues if key == "issues" else
+               (scores if key == "rubric_scores" else [value()])))
+        for key in _TOP_KEYS
+        if rng.random() < 0.95 or rng.random() < 0.5
+    }
+    if rng.random() < 0.2:
+        doc["surprise"] = value()
+    return doc
+
+
+def test_fuzz_validate_result_never_crashes_on_hostile_gateway_output() -> None:
+    """Seeded fuzzer over the deadeye result validator.
+
+    Invariants per generated document: validate_result either raises
+    ReviewError (fail closed) or returns the exact normalized shape; a
+    returned confidence is a float in 0..1, every rubric score a float in
+    0..5 or None, and every issue moment a finite number pair. An
+    OverflowError, KeyError or TypeError on hostile bytes is a bug."""
+    import math
+
+    from video_review import validate_result
+
+    normalized_keys = set(video_review.RESULT_KEYS)
+    for seed in range(60):
+        rng = random.Random(3000 + seed)
+        doc = _hostile_result(rng)
+        try:
+            result = validate_result(doc)
+        except ReviewError:
+            continue
+        assert set(result) == normalized_keys, f"seed {seed}: keys {sorted(result)}"
+        summary = result["summary"]
+        assert isinstance(summary, str) and summary.strip(), f"seed {seed}: {summary!r}"
+        confidence = result["confidence"]
+        assert isinstance(confidence, float) and 0.0 <= confidence <= 1.0, (
+            f"seed {seed}: confidence {confidence!r}"
+        )
+        for key in ("strengths", "recommended_changes", "limitations"):
+            strings = result[key]
+            assert isinstance(strings, list), f"seed {seed}: {key} {strings!r}"
+            assert all(
+                isinstance(item, str) and item.strip() for item in strings
+            ), f"seed {seed}: {key} {strings!r}"
+        scores = result["rubric_scores"]
+        assert isinstance(scores, dict), f"seed {seed}: scores {scores!r}"
+        for name, score in scores.items():
+            assert isinstance(name, str), f"seed {seed}: score key {name!r}"
+            assert score is None or (
+                isinstance(score, float) and 0.0 <= score <= 5.0
+            ), f"seed {seed}: score {name}={score!r}"
+        issues = result["issues"]
+        assert isinstance(issues, list), f"seed {seed}: issues {issues!r}"
+        for issue in issues:
+            assert isinstance(issue, dict), f"seed {seed}: issue {issue!r}"
+            assert set(issue) <= {"description", "at_seconds", "at_frame"}, (
+                f"seed {seed}: issue keys {sorted(issue)}"
+            )
+            description = issue.get("description")
+            assert isinstance(description, str) and description.strip(), issue
+            for moment_key in ("at_seconds", "at_frame"):
+                moment = issue.get(moment_key)
+                if moment is None:
+                    continue
+                assert (
+                    isinstance(moment, list)
+                    and len(moment) == 2
+                    and all(isinstance(bound, float) and math.isfinite(bound) for bound in moment)
+                    and moment[0] <= moment[1]
+                ), f"seed {seed}: {moment_key} {moment!r}"
+                if moment_key == "at_frame":
+                    assert moment[0] >= 0.0, f"seed {seed}: negative frame {moment!r}"
+    print("PASS result_fuzz 60 hostile gateway results fail closed or normalize")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -261,6 +401,7 @@ def main() -> int:
         test_the_envelope_result_is_validated_and_keeps_frame_moments(root)
         test_an_invalid_result_from_the_gateway_fails_validation(root)
         test_credentials_never_reach_stdout_or_evidence(root)
+        test_fuzz_validate_result_never_crashes_on_hostile_gateway_output()
     print("RESULT PASS")
     return 0
 
