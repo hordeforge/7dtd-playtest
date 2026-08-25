@@ -10,12 +10,6 @@ namespace ZdtdPlaytest
     /// <summary>Game UI surfaces: window groups, HUD toggle, framebuffer capture.</summary>
     public static partial class Helpers
     {
-
-    /// <summary>
-    /// Shared client-side helpers for scenarios (no invented S2C).
-    /// Public so external <see cref="IScenarioProvider"/> mods can reuse
-    /// give/equip/vehicle helpers without reimplementing stock API glue.
-    /// </summary>
         public static bool TryOpenWindow(string name, out string detail, bool requireOpen = false)
         {
             detail = "";

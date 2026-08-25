@@ -33,12 +33,12 @@ jobs:
       # dependency-group, configured in pyproject.toml) plus the offline
       # suites: catalog<->SCENARIOS surface (live rows + counts total), mod
       # version/changelog sync, the scenario-provider env surface, the
-      # stock-peer orchestration surface, the host lock, the deterministic
-      # simulation, the orchestrator local-init order gate, the orchestrator
-      # report/log surface, the orchestrator pure-logic units, and the
-      # compare diff (pytest via uv). The mod build itself is not
-      # CI-able (references game DLLs), but these gates catch the doc/catalog
-      # drift that used to ship silently.
+      # mining-probe provider surface, the stock-peer orchestration surface,
+      # the host lock, the deterministic simulation, the orchestrator
+      # local-init order gate, the orchestrator report/log surface, the
+      # orchestrator pure-logic units, and the compare diff (pytest via uv).
+      # The mod build itself is not CI-able (references game DLLs), but these
+      # gates catch the doc/catalog drift that used to ship silently.
       - run: make test
       # Wider seed sweep than the gate inside `make test`. Cheap: the whole
       # thing is virtual time, so 200 seeds is ~200 simulated hours in

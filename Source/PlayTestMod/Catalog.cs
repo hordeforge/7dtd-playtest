@@ -4299,7 +4299,9 @@ namespace ZdtdPlaytest
                 {
                     var e = ctx.World.Entities.list[i] as EntityAlive;
                     if (e == null || e is EntityPlayer || e.IsDead()) continue;
-                    // BotMod bots are zombieSoldier with very specific spawnpoints; count any zombie within 200m
+                    // BotMod bots are zombieSoldier with very specific spawnpoints; the
+                    // scan cannot identify them by class, so any non-player living
+                    // entity within 200m counts (a presence proxy, not a bot filter).
                     if ((e.GetPosition() - pos).sqrMagnitude < 200f*200f) bots++;
                     total++;
                 }
