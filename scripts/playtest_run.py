@@ -2312,6 +2312,11 @@ def main(argv: list[str] | None = None) -> int:
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
     args = ap.parse_args(argv)
+    # Backend default resolves before the validation below: require_litenet_room
+    # compares an int, and every default-port invocation (make playtest with
+    # PORT= empty) reaches here without --port.
+    if args.port is None:
+        args.port = 27025 if args.server == "zdtd" else 26900
     if (
         not math.isfinite(args.loadgen_server_cvar_tolerance)
         or args.loadgen_server_cvar_tolerance < 0
@@ -2371,8 +2376,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     rejoin_label = "provider rejoin" if provider_rejoin else "persist multi-phase"
 
-    if args.port is None:
-        args.port = 27025 if args.server == "zdtd" else 26900
     if args.timeout is None:
         args.timeout = seconds_from_env("PLAYTEST_TIMEOUT_SEC", 900.0)
 

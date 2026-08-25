@@ -214,6 +214,9 @@ def test_loadgen_expectations_reject_non_finite_values() -> None:
     assert len(oracle_failures) == 1 and "nan_cvar" in oracle_failures[0], (
         oracle_failures
     )
+    print(
+        "PASS loadgen_expectations_non_finite nan/inf expectations and states rejected"
+    )
 
 
 def test_loadgen_observer_wiring_is_generic() -> None:
@@ -830,6 +833,30 @@ def test_litenet_port_room_guard() -> None:
         else:
             raise AssertionError(f"require_litenet_room accepted {bad}")
     print("PASS litenet_port_room ports without room for port+2 rejected")
+
+
+def test_main_default_port_reaches_preflight_refusal() -> None:
+    """Omitting --port must resolve the backend default before the
+    require_litenet_room guard compares it: make playtest leaves PORT= empty,
+    so every default-port invocation reached main() and died on a None > int
+    TypeError instead of running its preflight refusals. The patched install
+    paths make main() return 2 at the missing-dedicated check, before any
+    lock acquisition or process work."""
+    with tempfile.TemporaryDirectory(prefix="playtest-default-port-") as td:
+        root = Path(td)
+        orig_game_srv = playtest_run.DEFAULT_GAME_SRV
+        orig_connect = playtest_run.CONNECT
+        playtest_run.DEFAULT_GAME_SRV = root / "no-dedicated"
+        playtest_run.CONNECT = root / "no-connect"
+        try:
+            rc = playtest_run.main(
+                ["--server", "stock", "--logdir", str(root / "log"), "--timeout", "900"]
+            )
+        finally:
+            playtest_run.DEFAULT_GAME_SRV = orig_game_srv
+            playtest_run.CONNECT = orig_connect
+    assert rc == 2, rc
+    print("PASS default_port_preflight omitted --port reaches preflight refusal")
 
 
 def test_config_summary_redacts_telnet_password() -> None:
@@ -1780,6 +1807,10 @@ def main() -> int:
     failures = 0
     for name, fn in (
         ("loadgen_events", test_loadgen_structured_events_and_expectations),
+        (
+            "loadgen_expectations_non_finite",
+            test_loadgen_expectations_reject_non_finite_values,
+        ),
         ("loadgen_observer_wiring", test_loadgen_observer_wiring_is_generic),
         ("loadgen_stale_rebuild", test_loadgen_rebuilds_when_source_is_newer),
         ("fresh_save_named_only", test_fresh_save_removes_only_named_game_saves),
@@ -1816,6 +1847,8 @@ def main() -> int:
         ("client_compat_follows_library", test_client_compat_follows_the_install_library),
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),
+        ("litenet_port_room", test_litenet_port_room_guard),
+        ("default_port_preflight", test_main_default_port_reaches_preflight_refusal),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
         (
