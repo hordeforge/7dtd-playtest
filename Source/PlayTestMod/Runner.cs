@@ -30,6 +30,9 @@ namespace ZdtdPlaytest
         static float _waitUntil;
         static float _readySince = -1f;
         static bool _readyLogged;
+
+        /// <summary>Whether the suite has run to completion (aborts any clip a case left recording).</summary>
+        public static bool Finished => _phase == Phase.Finished;
         /// <summary>One-shot guard so a throwing LocomotionDrive.Tick warns once, not per frame.</summary>
         static bool _locomotionFaultLogged;
         static int _benchmarkLaps = 1;
@@ -630,6 +633,8 @@ namespace ZdtdPlaytest
     /// <summary>
     /// Scenario runner on GameManager.gmUpdate. Act → Wait → Assert per case.
     /// Suites are named demos (smoke, core, demo, benchmark, …); see SCENARIOS.md.
+    /// The on-demand clip recorder ticks on the same hook, so a clip a case
+    /// started keeps capturing between case callbacks.
     /// </summary>
     [HarmonyPatch(typeof(GameManager), "gmUpdate")]
     static class Patch_GameManager_PlayTest
@@ -637,6 +642,7 @@ namespace ZdtdPlaytest
         static void Postfix()
         {
             Runner.Tick();
+            ClipRecorder.Tick(Runner.Finished);
         }
     }
 }

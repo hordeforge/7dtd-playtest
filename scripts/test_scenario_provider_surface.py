@@ -95,10 +95,28 @@ def main() -> int:
 
     # The clip contract is part of the public surface and the log contract:
     # a StagedClip case writes frames from inside the game and emits the
-    # completion marker capture_video.sh waits for.
+    # completion marker capture_video.sh waits for; the on-demand recorder
+    # (BeginClip/EndClip) exposes the same capability to any case, and
+    # TryEquipItem is the name-based give+equip route generated walk-cycle
+    # cases use.
     helpers = "\n".join(p.read_text(encoding="utf-8") for p in HELPERS_GLOB)
     assert "public static string CaptureClipFrame" in helpers, (
         "Helpers.CaptureClipFrame must be public for staged-clip providers"
+    )
+    assert "public static void BeginClip" in helpers, (
+        "Helpers.BeginClip must be public for on-demand clip providers"
+    )
+    assert "public static void EndClip" in helpers, (
+        "Helpers.EndClip must be public for on-demand clip providers"
+    )
+    assert "public static int TryEquipItem" in helpers, (
+        "Helpers.TryEquipItem must be public for generated walk-cycle cases"
+    )
+    assert "ClipRecorder.Tick(Runner.Finished)" in runner, (
+        "the gmUpdate hook must tick the on-demand clip recorder"
+    )
+    assert "BeginClip" in readme, (
+        "README must document the on-demand clip recorder"
     )
     assert "clip complete " in casedef, (
         "CaseDef.StagedClip must emit the 'clip complete' completion line"

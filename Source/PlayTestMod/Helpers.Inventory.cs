@@ -217,6 +217,20 @@ namespace ZdtdPlaytest
             return -1;
         }
 
+        /// <summary>
+        /// Give and equip one item by name, the three-step route external
+        /// providers need: resolve the name, give one stack, equip it.
+        /// Returns the equipped slot index or -1 when the name does not
+        /// resolve or the item cannot be equipped.
+        /// </summary>
+        public static int TryEquipItem(EntityPlayerLocal p, string name)
+        {
+            if (p == null || string.IsNullOrEmpty(name)) return -1;
+            if (!TryGetItem(name, out var iv)) return -1;
+            if (!TryGiveItem(p, new ItemStack(iv, 1))) return -1;
+            return TryEquipItemType(p, iv.type);
+        }
+
 
         /// <summary>
         /// Force full stack of itemType onto toolbelt slot 0 and hold it.
