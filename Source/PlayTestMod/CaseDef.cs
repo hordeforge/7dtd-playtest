@@ -120,7 +120,10 @@ namespace ZdtdPlaytest
         /// <param name="stage">
         /// Stages the scene and returns true when it is genuinely on screen.
         /// Its optional string return is passed to <see cref="Report.Staged"/> as
-        /// detail for the human reading the frame.
+        /// detail for the human reading the frame. Required: it carries a
+        /// default only so <paramref name="tags"/> ahead of it can be omitted,
+        /// and omitting it throws at construction rather than holding an empty
+        /// scene.
         /// </param>
         /// <param name="tags">Informational only (catalog listing); may be omitted.</param>
         /// <param name="holdSeconds">How long to hold the scene still.</param>
@@ -141,7 +144,7 @@ namespace ZdtdPlaytest
             string suite,
             string id,
             string[] tags = null,
-            Func<CaseCtx, bool> stage,
+            Func<CaseCtx, bool> stage = null,
             float holdSeconds = 10f,
             string fail = null,
             float pause = 0.5f,
@@ -239,7 +242,7 @@ namespace ZdtdPlaytest
             string suite,
             string id,
             string[] tags = null,
-            Func<CaseCtx, bool> stage,
+            Func<CaseCtx, bool> stage = null,
             float holdSeconds = 10f,
             float clipFps = 4f,
             int captureSuperSize = 2,
