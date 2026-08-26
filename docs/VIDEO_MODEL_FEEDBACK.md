@@ -8,7 +8,7 @@ shared vision-model review component created for this loop, rather than a
 provider adapter this repository owns. `scripts/video_review.py` (intent and
 result schemas, consent gate, gateway boundary with a stubbed-runner test)
 and `scripts/review_video.py` (the CLI) ship; `playtest_run.py --attach-reviews`
-attaches evidence paths to the report keyed by suite/case — paths only, so a
+attaches evidence paths to the report keyed by suite/case (paths only), so a
 review can never change a case's result. The offline acceptance boxes below
 are pinned by `scripts/test_video_review.py` and the report-surface test; the
 live-provider run and the human-watch comparison stay unchecked. Modeled on
@@ -97,7 +97,7 @@ review:
 
 The command refuses an empty `purpose`, the same refusal the audio-review PRD
 specifies for its own intent, and for the same reason: a model told nothing
-about what a clip is for cannot tell a reviewer anything actionable about it
+about what a clip is for cannot tell a reviewer anything useful about it
 either.
 
 ### Provider input and frame budget

@@ -22,6 +22,8 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-26
+
 ### Added
 
 - `Helpers.Blocks`: block-entity model access and placement support for
@@ -385,6 +387,27 @@ Release model (inferred practice, now pinned by `make test`):
   the backend default (26900 stock / 27025 zdtd) now resolves before that
   comparison. Every `make playtest` invocation without an explicit `PORT=`
   took the crashing path.
+- The mod did not compile. Making the `tags` parameter of `CaseDef.Staged` and
+  `CaseDef.StagedClip` optional left it ahead of the required `stage`
+  callback, which is C# error CS1737 (`Optional parameters must appear after
+  all required parameters`). `stage` now carries a `= null` default purely to
+  satisfy that ordering rule; it stays required in practice, and the
+  construction-time guard that rejects a null `stage` is unchanged. Parameter
+  order is untouched, so provider call sites still read
+  `Staged(suite, id, tags, stage, ...)`. No offline gate catches this: the
+  build needs the game's assemblies and cannot run in CI.
+- `make coverage` ran 12 of the 14 offline gates. It kept its own copy of the
+  gate list, and the copy had drifted from `make test`, so
+  `test_mining_probe_surface` and `test_version_surface_units` contributed
+  nothing to the measured percentage while the target claimed to run the same
+  suites. Both targets now expand one `GATES` variable in the Makefile.
+- `playtest_repeat.sh` scored a lap from an unreadable report as clean. It
+  parsed the report with an inline `python -c` that coerced whatever it found
+  through `int()`, so a missing or wrong-typed summary became `0 0 0`, which
+  reads as a lap with no failures. Parsing moved to
+  `scripts/report_summary.py`, which exits non-zero and prints nothing when a
+  count is absent, non-integral, negative or infinite; the aggregator already
+  counts an unreadable lap as failed.
 
 No breaking changes to the consumer contracts: verified against the
 `v0.7.1` tag, the public C# provider surface, log contract tokens, lock

@@ -202,7 +202,7 @@ deliberately, not discovered by a disk-full run.
 ### On-demand recording: `ClipRecorder` / `Helpers.BeginClip` / `EndClip`
 
 `StagedClip` ties a clip to a staged hold. Not every moment worth recording
-can be staged — a worn garment needs the player actually walking, a VFX fires
+can be staged: a worn garment needs the player actually walking, a VFX fires
 in the world, an item-use animation is the game's own. `ClipRecorder` is the
 same frame-sequence guarantee decoupled from staging:
 

@@ -37,7 +37,7 @@ Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
 8. Name for what it does (suite ids, case ids, env vars).
 9. **Exclusive live client** (see below). Only one orchestrated playtest (or
    other exclusive client drive) at a time on this machine.
-10. **Every run starts on a fresh save — a hard rule, no opt-out.** The
+10. **Every run starts on a fresh save: a hard rule, no opt-out.** The
     orchestrator wipes the named stock save (or the zdtd world) before each
     run. A reused world is a reused set of registered blocks, item ids and
     chunk state, so a dig/place suite then measures the previous run's
@@ -130,7 +130,7 @@ Wait until a new session could acquire (missing heartbeat is stale):
   fresh foreign claim; a shell read-then-write has no such window closed.
 - **A heartbeat only lives as long as its process.** Backgrounding a refresh
   loop with `nohup ... &` from a tool call that then returns leaves the loop
-  dead and the hold going stale under a still-running client — the
+  dead and the hold going stale under a still-running client, the
   `stale_but_live` mismatch. Either hold the lock from a process that outlives
   the run (`playtest_run.py` does), or refresh `heartbeat` explicitly from each
   step of a manual session.
@@ -197,11 +197,11 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
   (the bare `spawn_vehicle` spawns a bicycle); client-created vehicles are
   unknown to a dedicated server and cannot be driven there.
 - Staged frame: `scene staged <name> <detail>` (`Report.Staged`). Emitted the
-  moment a scene is on screen, for an external screenshot loop to key on — a
-  case's detail is flushed with its *result*, tens of seconds later, so a loop
+  moment a scene is on screen, for an external screenshot loop to key on. A
+  case detail is flushed with its *result*, tens of seconds later, so a loop
   waiting on the result photographs the disconnect dialog instead. A suite
   proves data, never appearance; see "Visual confirmation" in the README.
-  `scripts/capture_frames.sh` is the supported loop that waits for it — do not
+  `scripts/capture_frames.sh` is the supported loop that waits for it. Do not
   write a per-project screenshot loop keyed on bespoke wording.
 - JSON: `{"v":1,"t":"result|summary|done|log|barrier|staged",...}`
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
@@ -217,22 +217,23 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 Public API for external providers: `CaseDef.Live`/`Staged`/`Defer`, `Helpers`,
 `Report`, `MiningSpec`/`MiningProbe`/`MiningResult`. A capability that more
 than one consumer needs (real mining, staged frames, the exclusivity lock)
-belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged` — never hand-roll the
+belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged`. Never hand-roll the
 marker/hold/assert triple, that is what made every screenshot loop grep a
 different sentence.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the thirteen offline suites on every push
-(CI: `.github/workflows/ci.yml`). The analysis gates come first and are
-blocking:
+`make test` runs lint + typecheck plus the fourteen offline gate files on
+every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
+and are blocking:
 
 0. ruff over `scripts/` plus shellcheck over the bash helpers (`make lint`,
    `[tool.ruff]` in pyproject.toml) and mypy over `scripts/` (`make
    typecheck`, `[tool.mypy]`); ruff and mypy are pinned in the dev
    dependency-group so local and CI versions match uv.lock.
 
-Then the thirteen suites:
+Then the gates, grouped by the surface each pins (`GATES` in the Makefile is
+the run order that both `make test` and `make coverage` expand):
 
 1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
    + counts total must equal Catalog.cs. A catalog addition that skips
@@ -252,7 +253,8 @@ Then the thirteen suites:
    `playtest_run.py` main(); only fires with real game binaries present.
 9. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
    and serverconfig XML attribute escaping plus parser survival on malformed
-   JSON events.
+   JSON events, plus `scripts/report_summary.py` failing closed on a hostile
+   or malformed lap summary.
 10. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
    fresh-save removes only every world's copy of the named game save
    (quarantined under `<logdir>/quarantine`, newest 5 kept, never

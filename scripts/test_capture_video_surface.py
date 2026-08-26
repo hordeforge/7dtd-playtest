@@ -5,7 +5,7 @@ The marker the harness writes arrives on the client log's own line, which
 carries Unity's prefix (timestamp, level, the "[7dtd-playtest]" tag), and
 the file is CRLF. The first implementation read the clip id as a fixed
 whitespace field, so on a real prefixed line it parsed the log level ("INF")
-as the id and looked for frames under clips/INF — while the frames sat under
+as the id and looked for frames under clips/INF, while the frames sat under
 clips/<id>. This happened on the first real in-game run of the vendored
 7dtd-vision-review end-to-end test.
 

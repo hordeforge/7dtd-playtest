@@ -2,7 +2,7 @@
 # capture_audio.sh - run a suite and record what it actually sounds like.
 #
 # A suite proves data. Nothing in this harness listens, so anything a person
-# has to judge by ear — a blast, an ambience, a UI cue — needs a recording,
+# has to judge by ear (a blast, an ambience, a UI cue) needs a recording,
 # and the recording has to cover the run that played it. This is the supported
 # way to get one: it records the default sink's monitor for the length of one
 # suite run, so the listening can happen later, by whoever does the sign-off.

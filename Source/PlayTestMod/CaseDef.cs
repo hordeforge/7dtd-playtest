@@ -103,8 +103,8 @@ namespace ZdtdPlaytest
         /// it still long enough to be photographed.
         ///
         /// <para>This is the shape every visual-evidence fixture needs, and until
-        /// now every provider hand-rolled it — emit a bespoke
-        /// <see cref="Report.Info"/> line, run a hold timer, assert a flag —
+        /// now every provider hand-rolled it: emit a bespoke
+        /// <see cref="Report.Info"/> line, run a hold timer, assert a flag,
         /// which is how screenshot loops ended up grepping a different sentence
         /// per project. Here it is once: <paramref name="stage"/> does the work
         /// and returns whether the scene really is up; this emits
@@ -114,13 +114,16 @@ namespace ZdtdPlaytest
         ///
         /// <para>The assert deliberately only establishes that there was
         /// something to photograph. A staging case must never claim the scene
-        /// looked right — no fixture in this harness can see. Pair it with
+        /// looked right, because no fixture in this harness can see. Pair it with
         /// <c>scripts/capture_frames.sh</c>, and leave the verdict to a person.</para>
         /// </summary>
         /// <param name="stage">
         /// Stages the scene and returns true when it is genuinely on screen.
         /// Its optional string return is passed to <see cref="Report.Staged"/> as
-        /// detail for the human reading the frame.
+        /// detail for the human reading the frame. Required: it carries a
+        /// default only so <paramref name="tags"/> ahead of it can be omitted,
+        /// and omitting it throws at construction rather than holding an empty
+        /// scene.
         /// </param>
         /// <param name="tags">Informational only (catalog listing); may be omitted.</param>
         /// <param name="holdSeconds">How long to hold the scene still.</param>
@@ -141,7 +144,7 @@ namespace ZdtdPlaytest
             string suite,
             string id,
             string[] tags = null,
-            Func<CaseCtx, bool> stage,
+            Func<CaseCtx, bool> stage = null,
             float holdSeconds = 10f,
             string fail = null,
             float pause = 0.5f,
@@ -231,7 +234,7 @@ namespace ZdtdPlaytest
         /// establishes that there was something to photograph, and
         /// <paramref name="onHold"/> (called every tick with the hold fraction,
         /// throwing does not fail the case) is how a clip becomes more than a
-        /// static hold with repeated photographs of the same angle — rotate the
+        /// static hold with repeated photographs of the same angle: rotate the
         /// subject here and the frames are a turntable. The verdict belongs to
         /// a person watching the muxed clip, never to the case itself.
         /// </remarks>
@@ -239,7 +242,7 @@ namespace ZdtdPlaytest
             string suite,
             string id,
             string[] tags = null,
-            Func<CaseCtx, bool> stage,
+            Func<CaseCtx, bool> stage = null,
             float holdSeconds = 10f,
             float clipFps = 4f,
             int captureSuperSize = 2,

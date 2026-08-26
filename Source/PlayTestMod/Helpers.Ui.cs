@@ -73,8 +73,8 @@ namespace ZdtdPlaytest
         /// Shows or hides the whole in-game HUD.
         ///
         /// <para>For a fixture whose frames are the deliverable. Anything a
-        /// person is meant to judge — a worn garment, a placed block, a
-        /// detonation — is competing with the toolbelt, the compass, the stat
+        /// person is meant to judge (a worn garment, a placed block, a
+        /// detonation) is competing with the toolbelt, the compass, the stat
         /// bars and the tutorial callout, and none of those are the subject.
         /// The game already has one switch for all of it, and this is the same
         /// call <c>GameManager</c> makes during startup.</para>
@@ -102,7 +102,7 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// Opens a game UI window group and reports whether it really ended up
-        /// open — not whether the call was accepted.
+        /// open, not whether the call was accepted.
         ///
         /// <para>Every provider staging a frame of the game's own interface has
         /// needed this, and hand-rolling it goes wrong quietly. Asking
@@ -124,13 +124,13 @@ namespace ZdtdPlaytest
         /// <param name="modal">Vanilla opens the character sheet non-modal.</param>
         /// <returns>
         /// Whether the name is one the manager knows, i.e. whether the request
-        /// was accepted — <b>not</b> whether the window is on screen.
+        /// was accepted, <b>not</b> whether the window is on screen.
         /// <c>Open</c> queues into <c>windowsToOpen</c> and the manager drains
         /// that on a later <c>Update</c>, so nothing here can answer "is it
         /// drawn" and any method that claims to is lying. A window trace on the
         /// installed build put the game's own <c>toolbelt</c> open 1.7 s after
         /// the call that asked for it. Verify with <see cref="OpenWindowNames"/>
-        /// from a later tick — a wait callback, or the hold of a staged frame.
+        /// from a later tick: a wait callback, or the hold of a staged frame.
         /// </returns>
         public static bool OpenWindowGroup(EntityPlayerLocal player, string group, bool modal = false)
         {
@@ -174,7 +174,7 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// Every window the manager currently has open, by id, comma-joined and
-        /// sorted — the answer to "it says it opened and the frame is empty".
+        /// sorted. The answer to "it says it opened and the frame is empty".
         ///
         /// <para>Deterministic order on purpose: this ends up in a case's
         /// Detail, and a set that reorders between runs makes two identical
@@ -206,7 +206,7 @@ namespace ZdtdPlaytest
         /// <para>An external screen grab of a game window is unreliable and, on a
         /// host running more than one client, unsound: the window may be
         /// unfocused, occluded or not mapped, and a desktop capture photographs
-        /// whatever is in front — which has repeatedly meant *another session's*
+        /// whatever is in front, which has repeatedly meant *another session's*
         /// client. A frame taken here is this process's own rendering, so it
         /// cannot be somebody else's run.</para>
         /// <para><paramref name="superSize"/> multiplies the resolution, which is
