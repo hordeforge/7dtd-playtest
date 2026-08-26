@@ -52,8 +52,8 @@ namespace ZdtdPlaytest
         /// taken while the scene is actually up.</para>
         ///
         /// <para><see cref="Result"/> is no good for that. A case's detail text
-        /// is flushed with its result — after the hold, which is typically tens
-        /// of seconds after the camera moved — so a screenshot loop waiting for
+        /// is flushed with its result, after the hold, which is typically tens
+        /// of seconds after the camera moved, so a screenshot loop waiting for
         /// the result photographs whatever came next, usually the disconnect
         /// dialog. Providers worked around it by emitting a bespoke
         /// <see cref="Info"/> line and grepping their own wording, which every

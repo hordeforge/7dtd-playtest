@@ -16,7 +16,7 @@ WORLD ?= $(ROOT)/../zdtd-server/worlds/playtest_auto
 # stock ServerPort default 26900; zdtd often 27025
 PORT ?=
 ADMIN_PORT ?= 8081
-# Every run starts from a clean world — a hard rule enforced by the
+# Every run starts from a clean world: a hard rule enforced by the
 # orchestrator, which wipes the save unconditionally (there is no --reuse-save
 # and FRESH=0 cannot opt out). The suites dig and place blocks, so a reused save
 # accumulates holes and stale blocks under the test area until dig/place fail on
@@ -127,25 +127,33 @@ typecheck:
 		exit 2; }
 	@cd "$(ROOT)" && uv run --locked python -m mypy scripts
 
-test: lint typecheck
-	$(UV) "$(ROOT)/scripts/test_catalog_surface.py"
-	$(UV) "$(ROOT)/scripts/test_version_surface.py"
-	$(UV) "$(ROOT)/scripts/test_version_surface_units.py"
-	$(UV) "$(ROOT)/scripts/test_scenario_provider_surface.py"
-	$(UV) "$(ROOT)/scripts/test_mining_probe_surface.py"
-	$(UV) "$(ROOT)/scripts/test_stock_peer_client.py"
-	$(UV) "$(ROOT)/scripts/test_playtest_lock.py"
-	$(UV) "$(ROOT)/scripts/test_dst.py"
-	$(UV) "$(ROOT)/scripts/test_no_unbound_locals.py"
-	$(UV) "$(ROOT)/scripts/test_report_surface.py"
-	$(UV) "$(ROOT)/scripts/test_playtest_run_units.py"
-	$(UV) "$(ROOT)/scripts/test_playtest_compare.py"
-	$(UV) "$(ROOT)/scripts/test_capture_video_surface.py"
-	$(UV) "$(ROOT)/scripts/test_video_review.py"
+# Every offline gate, in run order. `test` and `coverage` both expand this one
+# list: a gate added to only one of them is what let two gates run un-measured.
+GATES := \
+	test_catalog_surface.py \
+	test_version_surface.py \
+	test_version_surface_units.py \
+	test_scenario_provider_surface.py \
+	test_mining_probe_surface.py \
+	test_stock_peer_client.py \
+	test_playtest_lock.py \
+	test_dst.py \
+	test_no_unbound_locals.py \
+	test_report_surface.py \
+	test_playtest_run_units.py \
+	test_playtest_compare.py \
+	test_capture_video_surface.py \
+	test_video_review.py
 
-# Line coverage of the orchestrator modules under the same offline suites
-# `make test` runs (same order, same interpreter pin). Writes .coverage in
-# the repo root; CI renders it into the README badge with
+test: lint typecheck
+	@for gate in $(GATES); do \
+		echo "$(UV) scripts/$$gate"; \
+		$(UV) "$(ROOT)/scripts/$$gate" || exit 1; \
+	done
+
+# Line coverage of the orchestrator modules under the same offline gates
+# `make test` runs (same list, same order, same interpreter pin). Writes
+# .coverage in the repo root; CI renders it into the README badge with
 # scripts/coverage_badge.py. Subprocess-based DST simulation is not traced.
 # coverage comes from the locked dev group (pyproject.toml), not a
 # `--with` side-install, so CI measures with hash-pinned bytes.
@@ -153,18 +161,11 @@ COV := $(UV)
 
 coverage:
 	rm -f .coverage .coverage.*
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_catalog_surface.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_version_surface.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_scenario_provider_surface.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_stock_peer_client.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_lock.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_dst.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_no_unbound_locals.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_report_surface.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_run_units.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_playtest_compare.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_capture_video_surface.py"
-	$(COV) -m coverage run --append --source=scripts "$(ROOT)/scripts/test_video_review.py"
+	@for gate in $(GATES); do \
+		echo "coverage run scripts/$$gate"; \
+		$(COV) -m coverage run --append --source=scripts \
+			"$(ROOT)/scripts/$$gate" || exit 1; \
+	done
 	$(COV) -m coverage report -m
 
 # One gate while iterating: make test-one GATE=test_dst.py

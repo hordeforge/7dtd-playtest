@@ -67,7 +67,7 @@ SENSITIVE_KEY_PARTS = (
 
 
 class ReviewError(Exception):
-    """A refusal or fault with one user-actionable message."""
+    """A refusal or fault carrying one message the caller can act on."""
 
 
 # -- intent -------------------------------------------------------------------
@@ -409,7 +409,7 @@ def run_review(
 
     Order matters: consent gate, local intent validation, clip existence,
     gateway availability, disclosure, submission, structural validation. A
-    failure at any step raises one user-actionable message and preserves no
+    failure at any step raises one message the caller can act on and preserves no
     partial verdict as a completed review.
     """
     if not allow_network:

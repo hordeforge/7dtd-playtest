@@ -31,6 +31,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_log  # noqa: E402
 import playtest_run  # noqa: E402
+import report_summary  # noqa: E402
 from playtest_log import ParsedClientLog  # noqa: E402
 
 
@@ -840,6 +841,7 @@ def main() -> int:
     test_contract_lines_parse_under_the_games_log_prefix()
     test_collect_visual_reviews_maps_paths_and_never_verdicts()
     test_collect_visual_reviews_is_empty_without_a_directory()
+    test_report_summary_prints_counts_and_fails_closed()
     print("RESULT PASS")
     return 0
 
@@ -862,7 +864,7 @@ def test_collect_visual_reviews_maps_paths_and_never_verdicts() -> None:
             "result": {"summary": "clips at the shoulder"},
         }
         (evidence / "review-gemini-20260825.json").write_text(
-            __import__("json").dumps(review), encoding="utf-8"
+            json.dumps(review), encoding="utf-8"
         )
         (root / "not-a-review.json").write_text("{}", encoding="utf-8")
 
@@ -876,6 +878,58 @@ def test_collect_visual_reviews_is_empty_without_a_directory() -> None:
     assert playtest_run.collect_visual_reviews(None) == {}
     with tempfile.TemporaryDirectory() as temporary:
         assert playtest_run.collect_visual_reviews(Path(temporary) / "missing") == {}
+
+
+def _run_report_summary(path: Path) -> tuple[int, str]:
+    """Drive report_summary's real entry point, returning (exit code, stdout)."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = report_summary.main(["report_summary.py", str(path)])
+    return code, out.getvalue().strip()
+
+
+def test_report_summary_prints_counts_and_fails_closed() -> None:
+    """playtest_repeat.sh counts a lap from this stdout.
+
+    A malformed or hostile summary must exit non-zero with no counts: the
+    aggregator scores an unreadable lap as failed, so any printed zero would
+    launder a broken report into a clean lap.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "report-1.json"
+
+        path.write_text(
+            json.dumps({"summary": {"pass": 7, "fail": 2, "skip": 1}}), encoding="utf-8"
+        )
+        assert _run_report_summary(path) == (0, "7 2 1")
+
+        # Absent counts default to zero; that is a real empty run, not a fault.
+        path.write_text(json.dumps({"summary": {}}), encoding="utf-8")
+        assert _run_report_summary(path) == (0, "0 0 0")
+
+        hostile = [
+            {},                                        # no summary key
+            {"summary": [1, 2, 3]},                    # summary not an object
+            {"summary": {"pass": "7"}},                # count as string
+            {"summary": {"pass": 1.5}},                # count as float
+            {"summary": {"pass": True}},               # bool is an int subclass
+            {"summary": {"fail": -1}},                 # negative count
+            {"summary": {"pass": float("inf")}},       # inf survives json.loads
+        ]
+        for blob in hostile:
+            path.write_text(json.dumps(blob), encoding="utf-8")
+            code, stdout = _run_report_summary(path)
+            assert code != 0, f"{blob!r} must not report success"
+            assert stdout == "", f"{blob!r} printed counts: {stdout!r}"
+
+        path.write_text("{not json", encoding="utf-8")
+        assert _run_report_summary(path)[0] != 0, "malformed JSON must fail closed"
+
+        missing = Path(temporary) / "absent.json"
+        assert _run_report_summary(missing)[0] != 0, "a missing report must fail closed"
+
+        assert report_summary.main(["report_summary.py"]) == 2, "usage error is exit 2"
+    print("PASS report_summary counts print, hostile summaries fail closed")
 
 if __name__ == "__main__":
     sys.exit(main())

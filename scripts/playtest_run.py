@@ -61,7 +61,7 @@ DEFAULT_COMPAT = (
 CLIENT_EXECUTABLE = "7DaysToDie.exe"
 # Steam's own standard roots, not anyone's particular install: the native data
 # directory, the two symlinks Steam maintains, and the Flatpak sandbox's copy.
-# Libraries outside these — a second disk, a home-relative games folder — are
+# Libraries outside these (a second disk, a home-relative games folder) are
 # not guessed at; they are read out of steamapps/libraryfolders.vdf below,
 # which is where Steam itself records them.
 STEAM_ROOTS = (
@@ -115,8 +115,8 @@ def client_game_dir(env: dict[str, str] | None = None, home: Path | None = None)
     install is *found*: each Steam library is searched for a directory holding
     the client executable. Resolving it here is what lets the orchestrator
     refuse before starting anything, rather than leaving a caller who exported
-    nothing — or exported only SEVEN_DAYS_TO_DIE_DIR, which the launcher does
-    not read — to wait out the whole timeout on a client that exited
+    nothing, or exported only SEVEN_DAYS_TO_DIE_DIR (which the launcher does
+    not read), to wait out the whole timeout on a client that exited
     immediately with "Game not found" into a log nobody was reading yet.
 
     None means no client install was found, which is a refusal, not a guess.

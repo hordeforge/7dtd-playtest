@@ -2,14 +2,14 @@
 # capture_frames.sh - run a suite and photograph the scenes it stages.
 #
 # A suite proves data. Nothing in this harness looks at the screen, so anything
-# a person has to judge by eye — a model, an icon, a UI row, an effect — needs a
+# a person has to judge by eye (a model, an icon, a UI row, an effect) needs a
 # frame, and a frame has to be taken while the scene is actually up. This is the
 # supported way to get one. See "Visual confirmation" in README.md.
 #
 # It waits for the harness's own `scene staged` marker (Report.Staged), which is
 # emitted the moment a scene is on screen. Do NOT key a loop on a case's result
 # or Detail text: those are flushed when the case reports, tens of seconds after
-# the camera moved, so the loop photographs whatever came next — in practice the
+# the camera moved, so the loop photographs whatever came next, in practice the
 # disconnect dialog.
 #
 # Usage:
@@ -175,7 +175,7 @@ fi
 # Keep the client log with the run.
 #
 # The frames are the *subject*; the client log is the only place that says what
-# was actually in them — which prefabs loaded, which meshes grafted, what the
+# was actually in them: which prefabs loaded, which meshes grafted, what the
 # engine warned about. And it is the one file here that does not survive: the
 # client truncates it on its next launch, so the evidence for a run is gone the
 # moment anybody starts the game again, including the person opening the frames
@@ -205,7 +205,7 @@ if [[ -n "$CLIENT_LOG_SAVED" ]]; then
 else
 	# Say so rather than leaving its absence to be discovered later by
 	# somebody trying to explain a frame.
-	echo "  client log    NOT SAVED — $CLIENT_LOG was unreadable; this run cannot" >&2
+	echo "  client log    NOT SAVED: $CLIENT_LOG was unreadable; this run cannot" >&2
 	echo "                be explained after the next client launch overwrites it" >&2
 fi
 echo "  staged scenes"

@@ -385,7 +385,7 @@ make playtest SUITE=your_suite
 uv run --locked --project . python scripts/playtest_run.py --suite your_suite
 ```
 
-Every run starts from a fresh save — a hard rule, no opt-out. The orchestrator
+Every run starts from a fresh save: a hard rule, no opt-out. The orchestrator
 wipes the state before each run, so `--fresh-save` is accepted only as a no-op
 and there is no `--reuse-save`/`FRESH=0` path. Providers do not need Atomic’s
 OCR `create-smoke-world.py` when using this host path.
@@ -548,7 +548,7 @@ Two things follow, and both have been mistaken for faults:
   mostly world load: a five-case suite can finish its cases in under two
   seconds of a seventy-second run, and the client is torn down the moment
   `DONE` is written. Someone watching the screen sees a window appear, sit on a
-  loading screen, and vanish. That is the runner working, not failing — but it
+  loading screen, and vanish. That is the runner working, not failing, but it
   is also not evidence of anything visual.
 - **Do not report a green suite as visual confirmation,** and do not tell
   someone who watched the screen what they saw. The log cannot answer whether a
@@ -569,8 +569,8 @@ this client's own framebuffer through `ScreenCapture`, at `captureSuperSize`
 ```
 
 Take the frame from inside the game, never with a desktop screen grab. A grab
-of a game window is unreliable — the window may be unfocused, occluded, or not
-mapped, so it shows a stale or empty frame — and on a host running more than one
+of a game window is unreliable (the window may be unfocused, occluded, or not
+mapped, so it shows a stale or empty frame), and on a host running more than one
 client it is unsound: it photographs whatever is in front, which has repeatedly
 meant *another session's* client, producing a picture that looks like evidence
 and is somebody else's run.
@@ -586,8 +586,8 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 ```
 
    Staging the game's own interface? Use `Helpers.OpenWindowGroup(player,
-   "<group>")`, which returns whether the **name is known** — the request was
-   accepted — and verify with `Helpers.OpenWindowNames(player)` from a later
+   "<group>")`, which returns whether the **name is known** (the request was
+   accepted), and verify with `Helpers.OpenWindowNames(player)` from a later
    tick, never in the same call. `Open` queues into `windowsToOpen` and the
    manager drains it on a later `Update`: a window trace on the installed
    build put the game's own `toolbelt` on screen 1.7 s after the call that
@@ -597,8 +597,8 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
    the same call, so those two are the difference between "wrong name" and
    "opened, still not drawn".
 
-2. Your callback returns whether the scene is genuinely on screen — the items
-   were given, the window opened, the camera arrived — and sets `ctx.Detail`
+2. Your callback returns whether the scene is genuinely on screen (the items
+   were given, the window opened, the camera arrived), and sets `ctx.Detail`
    to whatever context helps the person reading the frame.
    If the subject has more than one side worth seeing, pass `onHold` and turn
    it: a fixed camera photographs one face and says nothing about the rest,
@@ -624,7 +624,7 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
    dedicated server is already up, because overlapping runs photograph the
    wrong one.
 
-5. Anything a person judges by **ear** — a blast, an ambience, a cue — is
+5. Anything a person judges by **ear** (a blast, an ambience, a cue) is
    recorded the same way with
    [`scripts/capture_audio.sh`](scripts/capture_audio.sh), which records the
    default sink's monitor for the length of one suite run and reports the
@@ -641,7 +641,7 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 
 A single staged frame cannot show a defect that only exists in motion: a
 garment that clips only mid-turn, a prop whose silhouette reads wrong only
-while carried. `CaseDef.StagedClip` is the same guarantee, sampled over time —
+while carried. `CaseDef.StagedClip` is the same guarantee, sampled over time:
 every frame written by this client process's own `ScreenCapture`, into
 `playtest-shots/clips/<id>/`, at a chosen cadence (`clipFps`, default 4):
 
@@ -660,7 +660,7 @@ queue.Add(CaseDef.StagedClip(suite, "motion_myProp", new[] { "capture", "clip" }
 `onHold` is what makes a clip a turntable: pass the same rotate-as-you-hold
 callback `CaseDef.Staged` already documents. The completion line
 `clip complete <id> frames=N` fires once, when the hold ends, with the real
-count — never a padded one — and
+count, never a padded one, and
 [`scripts/capture_video.sh`](scripts/capture_video.sh) waits for it, polls for
 the last frame to land (the write is asynchronous), and muxes the frames into
 an mp4 with `ffmpeg` plus a contact sheet:
@@ -676,12 +676,12 @@ frame directory as the evidence that does exist. If `ffmpeg` is missing, the
 frames are still the evidence.
 
 `Helpers.StartWalk` / `Helpers.StopWalk` expose the same real motor walk
-(`LocomotionDrive`, stock autorun — not teleport) to external providers, so a
+(`LocomotionDrive`, stock autorun, not teleport) to external providers, so a
 generated case can equip a worn asset and record the player actually walking.
 
 A staged hold is not the only thing worth recording. `Helpers.BeginClip(id, superSize, fps)`
 and `Helpers.EndClip(id)` start and stop an **on-demand** in-game recording
-from any case — a `Live` case included — so the client can capture what the
+from any case (a `Live` case included), so the client can capture what the
 player actually does: a worn garment walked, a VFX firing, an item used.
 Same guarantee (this process's own rendering, super-resolution, not the
 desktop's), same frames directory, same `clip complete` marker, so
@@ -689,7 +689,7 @@ desktop's), same frames directory, same `clip complete` marker, so
 recording is abandoned by the runner at suite end (logged `clip abandoned`,
 never the completion marker), so a partial clip can never read as complete.
 
-The clip is material for a human verdict — and, optionally, a prescreen:
+The clip is material for a human verdict and, optionally, a prescreen:
 [`scripts/review_video.py`](scripts/review_video.py) submits the clip plus a
 recorded intent to the **deadeye** vision-model gateway
 (`hordeforge/7dtd-vision-review`) and returns structured, advisory criticism
@@ -703,14 +703,14 @@ uv run scripts/review_video.py .local/capture/<suite>-<stamp> \
 ```
 
 `playtest_run.py --attach-reviews DIR` attaches the review evidence paths to
-the report, keyed by suite/case, so a person auditing a run can find them — a
+the report, keyed by suite/case, so a person auditing a run can find them. A
 review's verdict never reaches the report, so it can never change a case's
 result. `make playtest-review-video SUITE=<id> INTENT=<path>` runs the
 capture and the review against one output directory.
 
 `Report.Staged` exists because `ctx.Detail` does not work for this: a case's
 detail is flushed **with its result**, which is after the hold, so a loop
-waiting on the result photographs whatever came next — usually the disconnect
+waiting on the result photographs whatever came next, usually the disconnect
 dialog. Providers each worked around that with their own bespoke `Report.Info`
 wording, which meant every screenshot loop grepped a different sentence. The
 marker is now spelled once, here, and is part of the log contract above.
@@ -723,7 +723,7 @@ fastconnect's window trace: a case can ask for `character`, `backpack`,
 screen**. The trace shows all five `Open` calls arriving with valid names and
 no `unknown!` warning, and `OpenWindowNames` reports only `toolTip` throughout
 the hold. The game's own `toolbelt` group opened 1.7 s after a call it made
-itself, so the manager is draining its queue — it simply never draws what a
+itself, so the manager is draining its queue, it simply never draws what a
 case asks for.
 
 Plan around it rather than into it:
@@ -734,9 +734,9 @@ Plan around it rather than into it:
   calling, and the third-person model shows the gear.
 - **The toolbelt draws by itself.** It is the one inventory surface that is
   already on screen, so an item icon can be photographed by putting the item
-  in the belt — no window involved.
-- **Anything that only exists inside a window** — equipment slots, the
-  character preview, a crafting queue — is not obtainable this lane today. Say
+  in the belt, no window involved.
+- **Anything that only exists inside a window** (equipment slots, the
+  character preview, a crafting queue) is not obtainable this lane today. Say
   so rather than shipping a green case whose frames show terrain.
 
 A staging suite is a **fixture, not a proof**. Its assertions establish that
@@ -746,7 +746,7 @@ sign-off.
 
 ### Which client install a run uses
 
-`launch_client.sh` reads **`GAME`** — not `SEVEN_DAYS_TO_DIE_DIR`, which it
+`launch_client.sh` reads **`GAME`**, not `SEVEN_DAYS_TO_DIE_DIR`, which it
 ignores. When `GAME` is unset the orchestrator discovers the install by reading
 Steam's own `steamapps/libraryfolders.vdf` under each standard Steam root and
 taking the first library whose `common/` holds a `7DaysToDie.exe`, so a library

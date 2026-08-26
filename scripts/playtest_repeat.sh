@@ -67,11 +67,7 @@ latest_report() {
 # "pass fail skip" from one report, read via argv (no path interpolation into code).
 # Through uv like every host script: one interpreter, honoring uv.lock.
 summary_counts() {
-  uv run --locked --project "$ROOT" python -c '
-import json, sys
-s = json.load(open(sys.argv[1], encoding="utf-8"))["summary"]
-print(int(s.get("pass", 0)), int(s.get("fail", 0)), int(s.get("skip", 0)))
-' "$1" 2>/dev/null
+  uv run --locked --project "$ROOT" python "$HERE/report_summary.py" "$1" 2>/dev/null
 }
 
 for lap in $(seq 1 "$LAPS"); do

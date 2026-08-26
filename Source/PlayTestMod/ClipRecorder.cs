@@ -9,7 +9,7 @@ namespace ZdtdPlaytest
     ///
     /// <para><see cref="CaseDef.StagedClip"/> captures frames while a staged
     /// scene holds still (or turns). This recorder decouples the same
-    /// guarantee from staging: any case — <see cref="CaseDef.Live"/> included —
+    /// guarantee from staging: any case (<see cref="CaseDef.Live"/> included)
     /// starts it with <see cref="Helpers.BeginClip"/>, does whatever needs
     /// recording (walk a worn garment, fire a VFX, use an item), and stops it
     /// with <see cref="Helpers.EndClip"/>. Frames land in

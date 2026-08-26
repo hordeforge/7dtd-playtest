@@ -59,7 +59,7 @@ namespace ZdtdPlaytest
         /// <summary>
         /// A grafted garment's renderer as the engine left it: mesh, vertex
         /// count, bind poses, bone count, null-bone count, root bone and local
-        /// bounds — one line per matching renderer, sorted.
+        /// bounds. One line per matching renderer, sorted.
         ///
         /// <para>This is step three of diagnosing gear that does not appear,
         /// and the step that separates the two failures which look identical
@@ -129,7 +129,7 @@ namespace ZdtdPlaytest
         ///
         /// <para>Read the numbers with care: this is a per-renderer local AABB,
         /// so a whole-body renderer's box is bounded by whatever sticks out
-        /// furthest — in an A-pose that is the toes and the hands, not the
+        /// furthest: in an A-pose that is the toes and the hands, not the
         /// chest. Reading such a box as a chest measurement is a mistake that
         /// has already been made twice, in both directions.</para>
         /// </summary>
@@ -167,7 +167,7 @@ namespace ZdtdPlaytest
         /// not its prefab loaded, and the wearer has a rig whether or not
         /// anything was grafted onto it. So a suite can go green, stage a
         /// scene, and photograph a wearer wearing nothing this mod
-        /// built — and every frame from that run is then evidence about the
+        /// built, and every frame from that run is then evidence about the
         /// wrong thing.</para>
         ///
         /// <para>That is not hypothetical. It cost a full afternoon on
@@ -179,7 +179,7 @@ namespace ZdtdPlaytest
         /// <para><paramref name="prefix"/> is matched against
         /// <c>sharedMesh.name</c>, not against the part transform's name. SDCS
         /// parts are called <c>body</c>, <c>head</c>, <c>hands</c> and
-        /// <c>feet</c> — the same names the base body uses — so matching a
+        /// <c>feet</c> (the same names the base body uses), so matching a
         /// transform proves nothing. A mesh name belongs to whoever authored
         /// the asset, so a mod's own prefix cannot collide with a vanilla
         /// one.</para>
