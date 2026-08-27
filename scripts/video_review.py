@@ -35,8 +35,6 @@ GATEWAY_INSTALL_HINT = (
     "on PATH, e.g. with: uv tool install --from git+https://github.com/hordeforge/7dtd-vision-review"
 )
 
-CAMERA_PATHS = ("fixed", "turntable", "walk-cycle", "first-person")
-
 RESULT_KEYS = (
     "summary",
     "strengths",
@@ -45,24 +43,6 @@ RESULT_KEYS = (
     "rubric_scores",
     "confidence",
     "limitations",
-)
-
-ADVISORY_NOTE = (
-    "Advisory only: a model critique is evidence about the submitted clip "
-    "under the recorded intent. It cannot mark the clip accepted; the "
-    "human-watch gate decides that."
-)
-
-# Keys whose names look credential-bearing are dropped wherever they would
-# otherwise land in stored evidence.
-SENSITIVE_KEY_PARTS = (
-    "api_key",
-    "apikey",
-    "authorization",
-    "credential",
-    "password",
-    "secret",
-    "token",
 )
 
 
@@ -348,24 +328,6 @@ def _moment(value: object, *, non_negative: bool) -> list[float] | None:
     if number is None or (non_negative and number < 0):
         return None
     return [number, number]
-
-
-def redact(value: object, parts: tuple[str, ...] = SENSITIVE_KEY_PARTS) -> object:
-    """Deep-copy a JSON-shaped value, dropping credential-bearing mapping keys."""
-    if isinstance(value, dict):
-        return {
-            key: redact(item, parts)
-            for key, item in value.items()
-            if isinstance(key, str) and not _is_sensitive_key(key, parts)
-        }
-    if isinstance(value, list):
-        return [redact(item, parts) for item in value]
-    return value
-
-
-def _is_sensitive_key(key: str, parts: tuple[str, ...] = SENSITIVE_KEY_PARTS) -> bool:
-    lowered = key.lower()
-    return lowered == "key" or any(part in lowered for part in parts)
 
 
 # -- the deadeye boundary -----------------------------------------------------
