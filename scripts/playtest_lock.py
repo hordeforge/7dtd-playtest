@@ -754,7 +754,11 @@ class HeartbeatLoop:
         # hold it (someone else took over, or the shared file was clobbered).
         # Exclusivity is no longer guaranteed once this is true; the policy
         # decision of what a run does about it belongs to the orchestrator.
-        self.lost_claim = False
+        self._lost_event = threading.Event()
+
+    @property
+    def lost_claim(self) -> bool:
+        return self._lost_event.is_set()
 
     def due(self, now: float | None = None) -> bool:
         t = _env(self.env).now() if now is None else now
@@ -775,7 +779,7 @@ class HeartbeatLoop:
         except BaseException as ex:
             self.errors += 1
             if isinstance(ex, PlaytestLockError) and ex.reason == "foreign_holder":
-                self.lost_claim = True
+                self._lost_event.set()
             if self.on_error is not None:
                 # A misbehaving callback must not break the heartbeat loop.
                 with suppress(Exception):
