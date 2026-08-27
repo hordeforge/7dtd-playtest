@@ -822,30 +822,6 @@ def test_contract_lines_parse_under_the_games_log_prefix() -> None:
     print("PASS log_contract_prefix timestamped lines parse, chat cannot forge")
 
 
-def main() -> int:
-    test_write_junit_escapes_log_derived_attributes()
-    test_parse_client_log_survives_null_numbers()
-    test_parse_client_log_survives_inf_and_type_garbage()
-    test_barrier_hits_prefix_keeps_repeats_and_scope()
-    test_write_stock_config_escapes_values()
-    test_write_junit_drops_xml_illegal_characters()
-    test_fuzz_parse_client_log_survives_hostile_logs()
-    test_fuzz_write_junit_roundtrips_hostile_strings()
-    test_incremental_scan_matches_whole_parse()
-    test_pump_log_tail_survives_truncation_between_phases()
-    test_log_tail_keeps_multibyte_char_split_across_polls()
-    test_log_tail_from_end_starts_at_current_size()
-    test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
-    test_fuzz_loadgen_events_survive_hostile_jsonl()
-    test_contract_lines_must_start_the_log_line()
-    test_contract_lines_parse_under_the_games_log_prefix()
-    test_collect_visual_reviews_maps_paths_and_never_verdicts()
-    test_collect_visual_reviews_is_empty_without_a_directory()
-    test_report_summary_prints_counts_and_fails_closed()
-    print("RESULT PASS")
-    return 0
-
-
 def test_collect_visual_reviews_maps_paths_and_never_verdicts() -> None:
     """--attach-reviews attaches evidence paths only, keyed by suite/case.
 
@@ -930,6 +906,31 @@ def test_report_summary_prints_counts_and_fails_closed() -> None:
 
         assert report_summary.main(["report_summary.py"]) == 2, "usage error is exit 2"
     print("PASS report_summary counts print, hostile summaries fail closed")
+
+
+def main() -> int:
+    test_write_junit_escapes_log_derived_attributes()
+    test_parse_client_log_survives_null_numbers()
+    test_parse_client_log_survives_inf_and_type_garbage()
+    test_barrier_hits_prefix_keeps_repeats_and_scope()
+    test_write_stock_config_escapes_values()
+    test_write_junit_drops_xml_illegal_characters()
+    test_fuzz_parse_client_log_survives_hostile_logs()
+    test_fuzz_write_junit_roundtrips_hostile_strings()
+    test_incremental_scan_matches_whole_parse()
+    test_pump_log_tail_survives_truncation_between_phases()
+    test_log_tail_keeps_multibyte_char_split_across_polls()
+    test_log_tail_from_end_starts_at_current_size()
+    test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
+    test_fuzz_loadgen_events_survive_hostile_jsonl()
+    test_contract_lines_must_start_the_log_line()
+    test_contract_lines_parse_under_the_games_log_prefix()
+    test_collect_visual_reviews_maps_paths_and_never_verdicts()
+    test_collect_visual_reviews_is_empty_without_a_directory()
+    test_report_summary_prints_counts_and_fails_closed()
+    print("RESULT PASS")
+    return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
