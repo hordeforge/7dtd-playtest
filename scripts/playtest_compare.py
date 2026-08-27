@@ -33,7 +33,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from playtest_log import parse_client_log
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from playtest_log import parse_client_log  # noqa: E402
 
 
 def load_results(path: Path) -> dict:

@@ -17,9 +17,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from test_version_surface import discover_tag_versions, uncovered_tag_versions
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from test_version_surface import discover_tag_versions, uncovered_tag_versions  # noqa: E402
 
 GATE = Path(__file__).resolve().parent / "test_version_surface.py"
 
