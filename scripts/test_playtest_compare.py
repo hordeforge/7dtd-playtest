@@ -194,6 +194,28 @@ def test_stale_report_refuses_diff(tmp_path: Path) -> None:
     assert not (out / "playtest-compare.json").exists()
 
 
+def test_future_epoch_refuses_freshness_guard(tmp_path: Path) -> None:
+    """A ran_epoch years ahead of now used to pass --require-fresh-minutes
+    because now-epoch is negative. It must fail like any other unusable age."""
+    future = int(time.time()) + 50 * 365 * 86400
+
+    def report(server: str) -> dict:
+        return {"server": server, "ran_epoch": future,
+                "summary": {"pass": 1, "fail": 0, "skip": 0},
+                "results": [{"case": "smoke/join", "status": "PASS"}]}
+
+    s = tmp_path / "stock.json"
+    z = tmp_path / "zdtd.json"
+    s.write_text(json.dumps(report("stock")), encoding="utf-8")
+    z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
+    out = tmp_path / "out"
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out),
+                 "--require-fresh-minutes", "60")
+    assert r.returncode == 3, r.stderr
+    assert "comparison inputs are stale" in r.stderr
+    assert not (out / "playtest-compare.json").exists()
+
+
 def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
     """An unwritable --out must fail with its own exit code (4) naming the
     destination, never a traceback with Python's default exit 1 (documented

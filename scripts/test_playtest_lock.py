@@ -366,6 +366,38 @@ def test_wait_until_can_start(tmp: Path) -> None:
     )
 
 
+def test_wait_cli_rejects_non_finite() -> None:
+    """``wait --timeout nan`` used to never return: now >= nan is False, so
+    the poll loop had no deadline. inf never expired either; a zero interval
+    busy-looped and a negative interval made time.sleep raise instead of
+    exiting 2.
+    """
+    py = sys.executable
+    script = str(SCRIPTS / "playtest_lock.py")
+
+    def run(*extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [py, script, "wait", *extra],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    for raw in ("nan", "inf", "-inf", "NaN", "1e999"):
+        proc = run("--timeout", raw)
+        _assert(proc.returncode == 2, f"--timeout {raw!r} rc={proc.returncode}")
+        _assert("finite" in proc.stderr, proc.stderr)
+    proc = run("--interval", "nan")
+    _assert(proc.returncode == 2, f"--interval nan rc={proc.returncode}")
+    _assert("finite" in proc.stderr, proc.stderr)
+    proc = run("--timeout", "-1")
+    _assert(proc.returncode == 2, f"--timeout -1 rc={proc.returncode}")
+    proc = run("--interval", "0")
+    _assert(proc.returncode == 2, f"--interval 0 rc={proc.returncode}")
+
+
 def test_playtest_run_wiring() -> None:
     """Structural: orchestrator acquires before clean_processes and releases."""
     src = (SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
@@ -736,6 +768,7 @@ def main() -> int:
                 "wait_until_can_start",
                 lambda: test_wait_until_can_start(tmp / "wait"),
             ),
+            ("wait_cli_rejects_non_finite", test_wait_cli_rejects_non_finite),
             (
                 "heartbeat_thread_stop_before_start",
                 lambda: test_heartbeat_thread_stop_before_start(tmp / "hbstopped"),

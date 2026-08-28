@@ -22,6 +22,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- Catalog melee aim (`block_damage_melee`, `explosion_client`) uses
+  `Helpers.LookAt` so a block below the camera gets negative X pitch. The
+  previous local `-Asin` looked at the sky; cases still passed because of
+  the later SetBlockRpc damage fallback.
+
 ## [0.8.0] - 2026-08-26
 
 ### Added

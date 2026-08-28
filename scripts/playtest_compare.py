@@ -224,9 +224,16 @@ def main() -> int:
         stale = []
         for side, path, res in (("stock", stock_path, stock), ("zdtd", zdtd_path, zdtd)):
             epoch = ran_epoch_of(path, res)
-            if epoch is None or now - epoch > limit:
-                age = "unknown" if epoch is None else f"{int(now - epoch)}s"
-                stale.append(f"{side} ({path.name}, age {age})")
+            # A far-future ran_epoch (year 2099, 1e18) makes now-epoch negative,
+            # so the old `now - epoch > limit` test treated it as fresh.
+            age = None if epoch is None else now - epoch
+            if (
+                age is None
+                or not math.isfinite(age)
+                or abs(age) > limit
+            ):
+                age_s = "unknown" if age is None or not math.isfinite(age) else f"{int(age)}s"
+                stale.append(f"{side} ({path.name}, age {age_s})")
         if stale:
             print(f"ERROR: comparison inputs are stale (--require-fresh-minutes "
                   f"{args.require_fresh_minutes}): " + "; ".join(stale),

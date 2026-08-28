@@ -109,6 +109,11 @@ def test_loadgen_structured_events_and_expectations() -> None:
         assert playtest_run.parse_cvar_value(
             "Executing command 'cvar get protection -p 172'", "protection"
         ) is None
+        # 1e999 overflows to inf; inf-inf is NaN and would pass an equality
+        # oracle against another inf, so a non-finite telnet value is absent.
+        assert playtest_run.parse_cvar_value(
+            "Player 171: protection = 1e999", "protection"
+        ) is None
 
         class Oracle(playtest_run.TelnetAdmin):
             def get_cvar(

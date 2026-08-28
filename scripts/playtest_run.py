@@ -1058,7 +1058,12 @@ def parse_cvar_value(reply: str, name: str) -> float | None:
         r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)",
         reply,
     )
-    return float(match.group(1)) if match else None
+    if not match:
+        return None
+    try:
+        return _finite_number(float(match.group(1)))
+    except OverflowError:
+        return None
 
 
 def server_cvar_oracle_failures(

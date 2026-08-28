@@ -839,6 +839,23 @@ class HeartbeatThread:
             self.loop.tick(force=True)
 
 
+def _cli_seconds(opt: str, raw: str, *, minimum: float) -> float | None:
+    """Parse a CLI duration. nan/inf would make ``wait`` never expire
+    (``now >= nan`` is False) or ``time.sleep`` raise; reject them here.
+    """
+    try:
+        val = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        sys.stderr.write(opt + " requires a number, got " + raw + "\n")
+        return None
+    if not math.isfinite(val) or val < minimum:
+        sys.stderr.write(
+            f"{opt} must be a finite number >= {minimum:g}, got {raw}\n"
+        )
+        return None
+    return val
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI for consumers that cannot import this module from bash.
 
@@ -878,16 +895,16 @@ def main(argv: list[str] | None = None) -> int:
                 sys.stderr.write(opt + " requires a value\n")
                 return 2
             val = rest[i + 1]
-            try:
+            if opt == "--path":
+                path = Path(val)
+            else:
+                parsed = _cli_seconds(opt, val, minimum=0.0 if opt == "--timeout" else 0.05)
+                if parsed is None:
+                    return 2
                 if opt == "--timeout":
-                    timeout_sec = float(val)
-                elif opt == "--interval":
-                    interval_sec = float(val)
+                    timeout_sec = parsed
                 else:
-                    path = Path(val)
-            except ValueError:
-                sys.stderr.write(opt + " requires a number, got " + val + "\n")
-                return 2
+                    interval_sec = parsed
             i += 2
             continue
         sys.stderr.write("unknown option " + opt + "\n")

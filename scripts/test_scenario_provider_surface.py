@@ -256,6 +256,14 @@ def main() -> int:
     assert "float pitch = -Mathf.Asin(" not in look_at, (
         "LookAt inverted vertical pitch and will aim below-horizon targets into the sky"
     )
+    # Catalog used to copy LookAt with the sign flipped; a hay bale one metre
+    # below the camera (dir.y < 0) then received positive X pitch (sky).
+    assert "float pitch = -Mathf.Asin(" not in catalog, (
+        "Catalog melee aim inverted LookAt pitch and aims below-horizon blocks at the sky"
+    )
+    assert "Helpers.LookAt(ctx.Player, tp)" in catalog, (
+        "block_damage_melee / explosion_client must aim through Helpers.LookAt"
+    )
 
     # Dual suite env: PLAYTEST_SUITE and ZDTD_PLAYTEST_SUITE both arm the runner.
     arm = method_body(runner, r"public\s+static\s+void\s+ArmFromEnv\s*\(\s*\)")

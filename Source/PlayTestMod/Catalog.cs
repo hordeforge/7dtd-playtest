@@ -819,17 +819,16 @@ namespace ZdtdPlaytest
                     try
                     {
                         var tp = ctx.TargetBlock.ToVector3Center();
-                        var pp = ctx.Player.getHeadPosition();
-                        var dir = tp - pp;
-                        float len = dir.magnitude;
-                        if (len > 0.01f) dir /= len;
-                        float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
-                        float pitch = -Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
-                        ctx.Player.SetRotation(new Vector3(pitch, yaw, 0f));
-                        // Stand close so raycast reaches.
-                        var near = tp - dir * 1.2f;
-                        near.y = ctx.Player.GetPosition().y;
-                        ctx.Player.SetPosition(near);
+                        var pos = ctx.Player.GetPosition();
+                        var flat = new Vector3(tp.x - pos.x, 0f, tp.z - pos.z);
+                        float dist = flat.magnitude;
+                        if (dist > 0.05f)
+                        {
+                            var dir = flat / dist;
+                            ctx.Player.SetPosition(new Vector3(
+                                tp.x - dir.x * 1.2f, pos.y, tp.z - dir.z * 1.2f));
+                        }
+                        Helpers.LookAt(ctx.Player, tp);
                     }
                     catch { /* */ }
                     Helpers.PulsePrimaryAttack(ctx.Player);
@@ -1699,16 +1698,16 @@ namespace ZdtdPlaytest
                     try
                     {
                         var tp = ctx.TargetBlock.ToVector3Center();
-                        var pp = ctx.Player.getHeadPosition();
-                        var dir = tp - pp;
-                        float len = dir.magnitude;
-                        if (len > 0.01f) dir /= len;
-                        float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
-                        float pitch = -Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
-                        ctx.Player.SetRotation(new Vector3(pitch, yaw, 0f));
-                        var near = tp - dir * 1.2f;
-                        near.y = ctx.Player.GetPosition().y;
-                        ctx.Player.SetPosition(near);
+                        var pos = ctx.Player.GetPosition();
+                        var flat = new Vector3(tp.x - pos.x, 0f, tp.z - pos.z);
+                        float dist = flat.magnitude;
+                        if (dist > 0.05f)
+                        {
+                            var dir = flat / dist;
+                            ctx.Player.SetPosition(new Vector3(
+                                tp.x - dir.x * 1.2f, pos.y, tp.z - dir.z * 1.2f));
+                        }
+                        Helpers.LookAt(ctx.Player, tp);
                     }
                     catch { /* */ }
                     Helpers.PulsePrimaryAttack(ctx.Player);
