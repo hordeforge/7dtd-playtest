@@ -293,9 +293,14 @@ def parse_utc_timestamp(value: str | None) -> float | None:
         return None
     if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", s):
         try:
-            return float(s)
+            epoch = float(s)
         except ValueError:
             return None
+        # A syntactically numeric but out-of-range epoch becomes ``inf``.
+        # Treat it as corrupt just like an unparseable heartbeat: otherwise
+        # ``now - inf`` is forever negative and a dead holder can never be
+        # reclaimed.
+        return epoch if math.isfinite(epoch) else None
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     try:

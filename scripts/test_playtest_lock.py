@@ -581,7 +581,13 @@ def test_parse_utc_timestamp_zones() -> None:
     _assert(naive == z, "naive stamp read as UTC, not host-local")
     epoch = pl.parse_utc_timestamp("1577836800.5")
     _assert(epoch == 1577836800.5, "epoch seconds pass through")
-    for bad in (None, "", "not-a-time", "2020-13-40T99:00:00Z"):
+    for bad in (
+        None,
+        "",
+        "not-a-time",
+        "2020-13-40T99:00:00Z",
+        "9" * 1000,
+    ):
         _assert(pl.parse_utc_timestamp(bad) is None, f"garbage {bad!r} → None")
 
 
