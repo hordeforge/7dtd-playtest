@@ -172,6 +172,29 @@ def test_loadgen_structured_events_and_expectations() -> None:
         assert len(unobserved) == 1 and "never_reported" in unobserved[0], unobserved
 
 
+def test_loadgen_final_snapshot_streams_latest_state() -> None:
+    """Final observer reduction preserves the whole-file oracle semantics."""
+    with tempfile.TemporaryDirectory(prefix="playtest-loadgen-final-") as td:
+        path = Path(td) / "events.jsonl"
+        path.write_text(
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":108,"kind":"cvar","name":"before","value":1}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":107}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":107,"kind":"cvar","name":"old","value":2}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"joined","entityId":108}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":108,"kind":"cvar","name":"before","value":3}\n'
+            '{"schema":"7dtd.loadgen.event.v1","type":"state","entityId":108,"kind":"buff","name":"ready","active":true}\n',
+            encoding="utf-8",
+        )
+        events = playtest_run.read_loadgen_events(path)
+        expected = playtest_run.loadgen_latest_state(events)
+        got = playtest_run.read_loadgen_latest_state(path)
+    assert got == expected, (got, expected)
+    assert playtest_run.loadgen_expectation_failures_from_latest(
+        got[0], got[1], ["before=3"], ["ready=true"]
+    ) == []
+    print("PASS loadgen_final_snapshot streams compact latest observer state")
+
+
 def test_loadgen_expectations_reject_non_finite_values() -> None:
     """NaN/inf must fail expectations, never pass them: every comparison on
     NaN is False, so an '=nan' typo or a non-finite observed value would
@@ -294,8 +317,9 @@ def test_loadgen_observer_wiring_is_generic() -> None:
     assert (
         "loadgen_event_reader = LoadgenEventReader(loadgen_events_path)" in source
     )
-    # The final-verdict snapshot stays a single whole-file read.
-    assert "read_loadgen_events(loadgen_events_path)" in source
+    # The final verdict retains only the selected bot's latest state, rather
+    # than materializing every snapshot emitted during a long loadgen run.
+    assert "read_loadgen_latest_state(" in source
     assert "teleportplayer {joined_entity}" in source
 
 
@@ -1954,6 +1978,7 @@ def main() -> int:
     failures = 0
     for name, fn in (
         ("loadgen_events", test_loadgen_structured_events_and_expectations),
+        ("loadgen_final_snapshot", test_loadgen_final_snapshot_streams_latest_state),
         (
             "loadgen_expectations_non_finite",
             test_loadgen_expectations_reject_non_finite_values,

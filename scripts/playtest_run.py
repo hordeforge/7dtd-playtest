@@ -896,15 +896,66 @@ def read_loadgen_events(path: Path) -> list[dict]:
 def parse_loadgen_event_lines(lines: list[str]) -> list[dict]:
     """Valid loadgen events among ``lines``; shared by the whole-file and
     incremental readers so they cannot drift."""
-    events: list[dict] = []
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(event, dict) and event.get("schema") == "7dtd.loadgen.event.v1":
-            events.append(event)
-    return events
+    return [event for line in lines if (event := parse_loadgen_event_line(line)) is not None]
+
+
+def parse_loadgen_event_line(line: str) -> dict | None:
+    """One valid loadgen JSONL event, or ``None`` for incomplete/noise lines."""
+    try:
+        event = json.loads(line)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(event, dict) and event.get("schema") == "7dtd.loadgen.event.v1":
+        return event
+    return None
+
+
+def read_loadgen_latest_state(path: Path) -> tuple[int | None, dict[tuple[str, str], dict]]:
+    """Stream the final observer snapshot without retaining every event.
+
+    Loadgen emits state snapshots for the complete run. The final observer
+    only needs the newest joined entity and its newest state for each observed
+    key, so loading the full JSONL file made memory scale with run duration.
+    Two sequential disk passes preserve ``loadgen_latest_state`` semantics,
+    including state lines that precede the selected joined record, while
+    retaining O(observed keys) data instead of O(all snapshots).
+    """
+    entity_id: int | None = None
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                event = parse_loadgen_event_line(line)
+                if event is None or event.get("type") != "joined":
+                    continue
+                candidate = event.get("entityId")
+                if (
+                    isinstance(candidate, int)
+                    and not isinstance(candidate, bool)
+                    and candidate > 0
+                ):
+                    entity_id = candidate
+    except OSError:
+        return None, {}
+
+    latest: dict[tuple[str, str], dict] = {}
+    if entity_id is None:
+        return None, latest
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                event = parse_loadgen_event_line(line)
+                if (
+                    event is None
+                    or event.get("type") != "state"
+                    or event.get("entityId") != entity_id
+                ):
+                    continue
+                kind, name = event.get("kind"), event.get("name")
+                if isinstance(kind, str) and isinstance(name, str):
+                    latest[(kind, name)] = event
+    except OSError:
+        return entity_id, {}
+    return entity_id, latest
 
 
 class LoadgenEventReader:
@@ -987,6 +1038,20 @@ def loadgen_expectation_failures(
 ) -> list[str]:
     """Compare exact and relational expectations with the joined bot state."""
     entity_id, latest = loadgen_latest_state(events)
+    return loadgen_expectation_failures_from_latest(
+        entity_id, latest, cvars, buffs, positive_cvars, equal_cvars
+    )
+
+
+def loadgen_expectation_failures_from_latest(
+    entity_id: int | None,
+    latest: dict[tuple[str, str], dict],
+    cvars: list[str],
+    buffs: list[str],
+    positive_cvars: list[str] | None = None,
+    equal_cvars: list[str] | None = None,
+) -> list[str]:
+    """Compare expectations against a compact loadgen observer snapshot."""
     if entity_id is None:
         return ["no structured joined event"]
     failures: list[str] = []
@@ -3628,15 +3693,17 @@ def main(argv: list[str] | None = None) -> int:
                 # still growing while loadgen runs, so two reads can straddle
                 # an append and make the expectation verdict and the oracle
                 # state disagree with each other.
-                observer_events = read_loadgen_events(loadgen_events_path)
-                observer_failures = loadgen_expectation_failures(
-                    observer_events,
+                observer_entity, observer_latest = read_loadgen_latest_state(
+                    loadgen_events_path
+                )
+                observer_failures = loadgen_expectation_failures_from_latest(
+                    observer_entity,
+                    observer_latest,
                     args.loadgen_expect_cvar,
                     args.loadgen_expect_buff,
                     args.loadgen_expect_cvar_positive,
                     args.loadgen_expect_cvar_equal,
                 )
-                observer_entity, observer_latest = loadgen_latest_state(observer_events)
                 if args.loadgen_server_cvar_oracle and observer_entity is not None:
                     tn = TelnetAdmin(telnet_host, telnet_port, telnet_password)
                     if tn.connect():
