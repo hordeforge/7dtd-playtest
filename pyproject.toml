@@ -43,6 +43,7 @@ select = [
     "A",   # builtin shadowing
     "DTZ", # naive datetime
     "FA",  # future annotations
+    "G",   # logging format correctness
     "PIE", # flake8-pie (dead placeholders, duplicate fields, needless spread)
     "PLE", # pylint errors only (used-before-assignment, ...)
     "RSE", # unnecessary paren on raised exception
@@ -53,7 +54,7 @@ select = [
     "T10", # no debugger imports/breakpoints in shipped orchestrator code
 ]
 
-# Type gate (make typecheck). Baseline strictness the tree passes today;
+# Type gate (make typecheck). The tree passes mypy's complete strict preset;
 # ratchet up as annotations spread. The two Any-oriented strict flags are on
 # globally with per-module opt-outs below for modules that still carry gaps:
 # shrink a module's count to zero, then drop it from its override list.
@@ -62,6 +63,7 @@ select = [
 [tool.mypy]
 python_version = "3.11"
 files = ["scripts"]
+strict = true
 disallow_any_generics = true
 disallow_any_explicit = true
 check_untyped_defs = true

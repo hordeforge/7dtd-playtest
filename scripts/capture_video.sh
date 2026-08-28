@@ -105,6 +105,7 @@ echo
 
 # The suite in the background; the loop waits for the marker in a log written
 # after this run started, so one left by a previous run cannot trigger it early.
+# RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
 # shellcheck disable=SC2086
 $RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
 RUN_PID=$!
@@ -184,6 +185,7 @@ if [[ -z "$FOUND" ]]; then
 	exit 1
 fi
 # Counting only the clip's own frame-*.png output (fixed, safe names).
+# ls is intentional here because only the count of the fixed frame glob is needed.
 # shellcheck disable=SC2012
 ACTUAL="$(ls "$SHOTS_DIR/clips/$CLIP_ID"/frame-*.png 2>/dev/null | wc -l)"
 if [[ "$ACTUAL" != "$FRAME_COUNT" ]]; then

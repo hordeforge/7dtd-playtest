@@ -99,6 +99,7 @@ REC_PID=$!
 trap 'kill "$REC_PID" 2>/dev/null || true' EXIT
 
 set +e
+# RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
 # shellcheck disable=SC2086
 $RUNNER "$SUITE" >"$RUN_LOG" 2>&1
 RUN_RC=$?

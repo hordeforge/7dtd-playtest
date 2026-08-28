@@ -121,6 +121,7 @@ echo
 
 # The suite in the background; the loop waits for the marker in a log written
 # after this run started, so one left by a previous run cannot trigger it early.
+# RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
 # shellcheck disable=SC2086
 $RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
 RUN_PID=$!
@@ -163,6 +164,7 @@ montage "$OUT/cropped"/frame-*.png -tile 4x -geometry 420x324+3+3 \
 	-background '#1b1b1b' -label '%f' "$OUT/contact-sheet.png" 2>/dev/null || true
 
 # Counting only this script's own frame-*.png output (fixed, safe names).
+# ls is intentional here because only the count of the fixed frame glob is needed.
 # shellcheck disable=SC2012
 FRAME_COUNT="$(ls "$OUT/cropped"/frame-*.png 2>/dev/null | wc -l)"
 if (( FRAME_COUNT == 0 )); then
