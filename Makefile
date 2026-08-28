@@ -21,7 +21,6 @@ ADMIN_PORT ?= 8081
 # and FRESH=0 cannot opt out). The suites dig and place blocks, so a reused save
 # accumulates holes and stale blocks under the test area until dig/place fail on
 # the previous run's terrain rather than on anything the server did.
-FRESH ?= 1
 LAPS ?= 1
 
 # Bare `make` prints the target list instead of starting a dotnet build that
@@ -39,7 +38,7 @@ endif
 
 .PHONY: help build install uninstall clean test test-one coverage lint typecheck check dst dst-soak playtest playtest-smoke \
 	playtest-core \
-	playtest-demo playtest-demo-fresh playtest-bench playtest-gate playtest-full \
+	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
 	playtest-residual install-pair playtest-compare playtest-repeat
 
@@ -214,7 +213,6 @@ playtest: install-pair
 		--world "$(WORLD)" \
 		$(if $(PORT),--port "$(PORT)",) \
 		--admin-port "$(ADMIN_PORT)" \
-		$(if $(filter-out 0,$(FRESH)),--fresh-save,) \
 		$(EXTRA_ARGS)
 
 playtest-smoke:
@@ -225,9 +223,6 @@ playtest-core:
 
 playtest-demo:
 	$(MAKE) playtest SUITE=demo SERVER="$(SERVER)"
-
-playtest-demo-fresh:
-	$(MAKE) playtest SUITE=demo SERVER="$(SERVER)" EXTRA_ARGS="--fresh-save"
 
 playtest-bench:
 	$(MAKE) playtest SUITE=benchmark SERVER="$(SERVER)" LAPS="$(LAPS)"
@@ -243,15 +238,15 @@ playtest-zdtd:
 
 # Multi-phase rejoin (setup → saveworld → rejoin verify).
 playtest-persist:
-	$(MAKE) playtest SUITE=persist SERVER="$(SERVER)" EXTRA_ARGS="--fresh-save --timeout 600"
+	$(MAKE) playtest SUITE=persist SERVER="$(SERVER)" EXTRA_ARGS="--timeout 600"
 
 # Multi-peer via loadgen bots.
 playtest-mp:
-	$(MAKE) playtest SUITE=mp SERVER="$(SERVER)" EXTRA_ARGS="--fresh-save --timeout 400"
+	$(MAKE) playtest SUITE=mp SERVER="$(SERVER)" EXTRA_ARGS="--timeout 400"
 
 # Real ≥15 min host soak (wall clock).
 playtest-soak-long:
-	$(MAKE) playtest SUITE=soak_long SERVER="$(SERVER)" EXTRA_ARGS="--fresh-save --timeout 1200"
+	$(MAKE) playtest SUITE=soak_long SERVER="$(SERVER)" EXTRA_ARGS="--timeout 1200"
 
 # Capture the suite's staged clips, then (with INTENT=) review them through
 # the deadeye gateway. One self-contained folder under .local/capture/: the

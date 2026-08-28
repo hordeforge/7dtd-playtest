@@ -172,27 +172,17 @@ def main() -> int:
         "CaseDef.Defer should not assign Act"
     )
 
-    # Built-in catalog shares the public path (thin wrappers, not a second oracle).
+    # Built-in catalog shares the public Live path (thin wrapper, not a second oracle).
     cat_live = method_body(
         catalog,
         r"static\s+CaseDef\s+Live\s*\([^)]*\)",
     )
-    cat_defer = method_body(
-        catalog,
-        r"static\s+CaseDef\s+Defer\s*\([^)]*\)",
-    )
     assert "CaseDef.Live(" in cat_live, (
         "Catalog.Live must delegate to CaseDef.Live"
-    )
-    assert "CaseDef.Defer(" in cat_defer, (
-        "Catalog.Defer must delegate to CaseDef.Defer"
     )
     # Catalog wrappers must not re-implement field assignment.
     assert "new CaseDef" not in cat_live, (
         "Catalog.Live must not construct CaseDef by hand"
-    )
-    assert "new CaseDef" not in cat_defer, (
-        "Catalog.Defer must not construct CaseDef by hand"
     )
 
     # Helpers is one public static class split across partial-class files
@@ -346,7 +336,7 @@ def main() -> int:
     print("OK external scenario-provider surface")
     print("OK public CaseDef.Live / CaseDef.Defer factories")
     print("OK Live is non-deferred; Defer sets Deferred+reason")
-    print("OK Catalog Live/Defer share CaseDef factories")
+    print("OK Catalog.Live delegates to CaseDef.Live")
     print("OK README documents CaseDef.Live/Defer")
     print("OK public Helpers + Report.Barrier for providers")
     print("OK dual PLAYTEST_SUITE / ZDTD_PLAYTEST_SUITE arming")

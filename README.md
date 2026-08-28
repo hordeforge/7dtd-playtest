@@ -65,7 +65,6 @@ Full scenario list: **[SCENARIOS.md](SCENARIOS.md)** (demo / benchmark / full ca
 
 ```bash
 make playtest-demo           # attract-mode + combat wait (telnet spawn)
-make playtest-demo-fresh     # wipe save first (clean dig pad)
 make playtest-gate           # PR gate: live smoke+core only
 make playtest-bench LAPS=3   # timed repeats of bench path
 make playtest-full           # demo domains + soak (no persist/mp/apm/bot)
