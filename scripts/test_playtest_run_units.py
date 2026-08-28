@@ -369,9 +369,9 @@ def test_fresh_save_quarantines_named_saves_recoverably() -> None:
         print("PASS fresh_save_quarantine removed save recoverable from quarantine")
 
 
-def test_fresh_save_unusable_quarantine_keeps_data_in_place() -> None:
-    """If the quarantine cannot take the save, it stays (stale-run warning)
-    rather than being destroyed without a recovery path."""
+def test_fresh_save_unusable_quarantine_aborts_before_stale_run() -> None:
+    """If quarantine cannot take the save, the run aborts rather than
+    measuring stale terrain as a clean world."""
     with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
         ud = Path(td) / "userdata"
         qroot_file = Path(td) / "not-a-dir"
@@ -380,15 +380,17 @@ def test_fresh_save_unusable_quarantine_keeps_data_in_place() -> None:
         game.mkdir(parents=True)
         (game / "main.ttw").write_text("precious", encoding="utf-8")
 
-        errbuf = io.StringIO()
-        with contextlib.redirect_stderr(errbuf):
+        try:
             playtest_run.fresh_save(ud, "PlaytestNav", qroot_file)
+        except playtest_run.FreshSaveError as ex:
+            assert "refusing to run against stale state" in str(ex)
+        else:
+            raise AssertionError("unusable quarantine must abort the fresh run")
 
         assert game.is_dir() and (game / "main.ttw").is_file(), (
             "unusable quarantine must keep the save in place"
         )
-        assert "stale save will be reused" in errbuf.getvalue()
-        print("PASS fresh_save_quarantine_unavailable data kept, stale warned")
+        print("PASS fresh_save_quarantine_unavailable data kept, run aborted")
 
 
 def test_fresh_zdtd_world_moves_state_and_overlays_recoverably() -> None:
@@ -1947,7 +1949,7 @@ def main() -> int:
         ("fresh_save_quarantine", test_fresh_save_quarantines_named_saves_recoverably),
         (
             "fresh_save_quarantine_unavailable",
-            test_fresh_save_unusable_quarantine_keeps_data_in_place,
+            test_fresh_save_unusable_quarantine_aborts_before_stale_run,
         ),
         ("fresh_zdtd_world", test_fresh_zdtd_world_moves_state_and_overlays_recoverably),
         ("prune_quarantine", test_prune_quarantine_keeps_newest_entries),

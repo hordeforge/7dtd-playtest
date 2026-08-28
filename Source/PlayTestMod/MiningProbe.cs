@@ -150,22 +150,18 @@ namespace ZdtdPlaytest
 
         public bool Assert(CaseCtx ctx)
         {
-            Restore(ctx);
-            if (ctx != null)
-                ctx.Detail = _result.Detail;
-            if (_result.Phase == MiningPhase.Passed)
-                return true;
-            if (_result.Harvested)
+            if (_result.Phase != MiningPhase.Passed && _result.Harvested)
             {
                 _result.Phase = MiningPhase.Passed;
                 _result.Detail = Describe("pass");
-                if (ctx != null) ctx.Detail = _result.Detail;
-                return true;
             }
-            if (string.IsNullOrEmpty(_result.Detail) || _result.Detail == "idle")
+            if (_result.Phase != MiningPhase.Passed
+                && (string.IsNullOrEmpty(_result.Detail) || _result.Detail == "idle"))
                 _result.Detail = Describe("missing damage or award");
+            if (!Restore(ctx, out string restoreError))
+                Fail("cleanup failed restoring mining target: " + restoreError);
             if (ctx != null) ctx.Detail = _result.Detail;
-            return false;
+            return _result.Phase == MiningPhase.Passed;
         }
 
         void Setup(CaseCtx ctx)
@@ -223,7 +219,12 @@ namespace ZdtdPlaytest
                 _savedBlock = ctx.World.GetBlock(_result.Target);
                 _haveSavedBlock = true;
             }
-            catch { _haveSavedBlock = false; }
+            catch (Exception ex)
+            {
+                _haveSavedBlock = false;
+                Fail("could not capture mining target before seed: " + ex.Message);
+                return;
+            }
             Helpers.SetBlockRpc(ctx.World, _result.Target, seed);
             _seeded = true;
             _result.Phase = MiningPhase.WaitSeed;
@@ -499,11 +500,30 @@ namespace ZdtdPlaytest
             _result.Detail = detail;
         }
 
-        void Restore(CaseCtx ctx)
+        bool Restore(CaseCtx ctx, out string error)
         {
-            if (!_haveSavedBlock || ctx == null || ctx.World == null) return;
-            try { Helpers.SetBlockRpc(ctx.World, _result.Target, _savedBlock); }
-            catch { /* best-effort cleanup */ }
+            error = null;
+            if (!_seeded) return true;
+            if (!_haveSavedBlock)
+            {
+                error = "original block was not captured";
+                return false;
+            }
+            if (ctx == null || ctx.World == null)
+            {
+                error = "world unavailable";
+                return false;
+            }
+            try
+            {
+                Helpers.SetBlockRpc(ctx.World, _result.Target, _savedBlock);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
         }
     }
 }

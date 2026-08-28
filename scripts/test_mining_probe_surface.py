@@ -89,6 +89,8 @@ def main() -> int:
     assert "Helpers.TryGiveItem" in src
     assert "Helpers.TryEquipItemType" in src
     assert "Helpers.PushPlayerInventory" in src
+    assert "could not capture mining target before seed" in src
+    assert "cleanup failed restoring mining target" in src
 
     press = method_body(src, r"public\s+bool\s+PressPrimary\s*\([^)]*\)")
     release = method_body(src, r"public\s+void\s+ReleasePrimary\s*\([^)]*\)")

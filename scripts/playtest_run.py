@@ -1686,6 +1686,10 @@ def _quarantine_move(src: Path, entry: Path, rel: str) -> bool:
         return False
 
 
+class FreshSaveError(RuntimeError):
+    """The required clean starting state could not be established."""
+
+
 def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
     """Move stock save folders aside into `quarantine` for a clean world.
 
@@ -1700,10 +1704,10 @@ def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
     try:
         world_dirs = [d for d in saves.iterdir() if d.is_dir()]
     except OSError as ex:
-        # Same fail-open as an unusable quarantine below: a stale save reused
-        # is diagnosable from the run, a crash here is not better than it.
-        warn(f"fresh-save: could not scan {saves}: {ex}; stale save will be reused")
-        return
+        raise FreshSaveError(
+            f"fresh-save: could not scan {saves}; refusing to reuse an "
+            f"unknown prior save: {ex}"
+        ) from ex
     entry = _quarantine_entry(quarantine, "stock-save")
     removed = 0
     failed = 0
@@ -1716,18 +1720,19 @@ def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
             )
             if not moved:
                 # A surviving save would silently poison the run: dig/place
-                # would then fail on the previous run's terrain, not on the
-                # server. Say so instead of logging a false "removed".
+                # would then test the previous run's terrain, not the server.
                 failed += 1
-                warn(
-                    f"fresh-save: could not remove {target}; "
-                    "stale save will be reused"
-                )
+                warn(f"fresh-save: could not remove {target}")
                 continue
             removed += 1
             log(f"fresh-save removed {target}")
     if removed == 0 and failed == 0:
         log(f"fresh-save: no existing save named {game_name}")
+    if failed:
+        raise FreshSaveError(
+            f"fresh-save: {failed} existing save(s) named {game_name} could not "
+            "be quarantined; refusing to run against stale state"
+        )
 
 
 def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
@@ -1739,23 +1744,47 @@ def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
     """
     if not world.is_dir():
         return
-    entry = _quarantine_entry(quarantine, f"zdtd-world--{world.name}")
-    if entry is None:
-        warn(f"fresh-save: could not clean {world}; stale world will be reused")
-        return
-    state = 0
-    for name in ("players.zsv", "containers.zct", "blockmeta.zbm"):
-        p = world / name
-        if p.is_file() and _quarantine_move(p, entry, "state"):
-            state += 1
-            log(f"fresh-save removed {p}")
-    chunks = 0
-    for ch in sorted(world.glob("c_*.zch*")):
-        if _quarantine_move(ch, entry, "chunks"):
-            chunks += 1
-    if state == 0 and chunks == 0:
+    try:
+        chunks_to_move = sorted(world.glob("c_*.zch*"))
+    except OSError as ex:
+        raise FreshSaveError(
+            f"fresh-save: could not scan zdtd world {world}; refusing to reuse "
+            f"unknown persisted state: {ex}"
+        ) from ex
+    state_files = [
+        world / name
+        for name in ("players.zsv", "containers.zct", "blockmeta.zbm")
+        if (world / name).is_file()
+    ]
+    if not state_files and not chunks_to_move:
         log(f"fresh-save: no persisted zdtd state under {world}")
         return
+    entry = _quarantine_entry(quarantine, f"zdtd-world--{world.name}")
+    if entry is None:
+        raise FreshSaveError(
+            f"fresh-save: could not quarantine persisted state under {world}; "
+            "refusing to run against stale state"
+        )
+    state = 0
+    failed: list[Path] = []
+    for p in state_files:
+        if _quarantine_move(p, entry, "state"):
+            state += 1
+            log(f"fresh-save removed {p}")
+        else:
+            failed.append(p)
+    chunks = 0
+    for ch in chunks_to_move:
+        if _quarantine_move(ch, entry, "chunks"):
+            chunks += 1
+        else:
+            failed.append(ch)
+    if failed:
+        names = ", ".join(str(path) for path in failed)
+        raise FreshSaveError(
+            f"fresh-save: could not quarantine persisted zdtd state: {names}; "
+            "refusing to run against stale state"
+        )
     log(
         f"fresh-save zdtd world cleaned under {world} "
         f"(state={state}, chunks={chunks})"
