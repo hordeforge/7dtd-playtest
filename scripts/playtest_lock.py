@@ -71,6 +71,19 @@ GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.IGNO
 class LockStorage:
     """Filesystem port. Only these calls may touch durable state."""
 
+    def canonical_path(self, path: Path) -> Path:
+        """One inode identity for the lock file and its flock sidecar.
+
+        Acquire serializes on ``flock_path_for(path)``. Two spellings of the
+        same file (relative vs absolute, ``~``, a symlink) must not take
+        different sidecars and both publish ``running=yes``.
+        """
+        p = path.expanduser()
+        try:
+            return p.resolve()
+        except OSError:
+            return p if p.is_absolute() else Path.cwd() / p
+
     def is_file(self, path: Path) -> bool:
         return path.is_file()
 
@@ -103,14 +116,20 @@ class LockStorage:
 
     def exclusive(self, path: Path, fn: Callable[[], None]) -> None:
         """Run ``fn`` while holding the cross-process lock for ``path``."""
+        path = self.canonical_path(path)
         self.mkdir_parents(path)
         flock_path = flock_path_for(path)
-        with open(flock_path, "a+", encoding="utf-8") as lf:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            try:
-                fn()
-            finally:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        # flock is per-process on some platforms (and a no-op on some NFS).
+        # Threads in this process still need a mutex around the read-modify
+        # publish, or two HeartbeatThread/acquire callers can both win.
+        gate = _thread_gate(flock_path)
+        with gate:
+            with open(flock_path, "a+", encoding="utf-8") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    fn()
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
 class LockEnv:
@@ -138,6 +157,18 @@ class LockEnv:
 
 SYSTEM_ENV = LockEnv()
 _ENV: LockEnv = SYSTEM_ENV
+_THREAD_GATES: dict[str, threading.Lock] = {}
+_THREAD_GATES_GUARD = threading.Lock()
+
+
+def _thread_gate(flock_path: Path) -> threading.Lock:
+    key = str(flock_path)
+    with _THREAD_GATES_GUARD:
+        gate = _THREAD_GATES.get(key)
+        if gate is None:
+            gate = threading.Lock()
+            _THREAD_GATES[key] = gate
+        return gate
 
 
 def current_env() -> LockEnv:
@@ -262,6 +293,11 @@ def flock_path_for(lock_path: Path) -> Path:
     return Path(str(lock_path) + ".flock")
 
 
+def _lock_path(path: Path | None, env: LockEnv | None) -> Path:
+    p = default_lock_path() if path is None else path
+    return _env(env).storage.canonical_path(p)
+
+
 def utc_now_iso(env: LockEnv | None = None) -> str:
     """UTC timestamp with second precision, always Z-suffixed.
 
@@ -326,8 +362,9 @@ def new_session_id(prefix: str = "playtest", *, env: LockEnv | None = None) -> s
 
 
 def read_lock(path: Path | None = None, *, env: LockEnv | None = None) -> LockState:
-    path = path or default_lock_path()
-    store = _env(env).storage
+    e = _env(env)
+    path = _lock_path(path, e)
+    store = e.storage
     if not store.is_file(path):
         return LockState(running=False, session=None)
     text = store.read_text(path)
@@ -376,6 +413,7 @@ def write_lock(
     env: LockEnv | None = None,
 ) -> None:
     e = _env(env)
+    path = _lock_path(path, e)
     store = e.storage
     store.mkdir_parents(path)
     if running:
@@ -519,7 +557,7 @@ def can_start(
     if not session:
         return False
     e = _env(env)
-    path = path or default_lock_path()
+    path = _lock_path(path, e)
     # Default: client OR dedicated/zdtd (full playtest runtime).
     probe = live_probe if live_probe is not None else default_live_runtime_running
     state = read_lock(path, env=e)
@@ -576,7 +614,7 @@ def acquire(
     """
     session = _require_session(session)
     e = _env(env)
-    path = path or default_lock_path()
+    path = _lock_path(path, e)
     probe = live_probe if live_probe is not None else default_live_runtime_running
     result: dict[str, LockState | None] = {"state": None}
 
@@ -653,7 +691,7 @@ def heartbeat(
     """Refresh heartbeat for the owning session. No-op fail if not owner."""
     session = _require_session(session)
     e = _env(env)
-    path = path or default_lock_path()
+    path = _lock_path(path, e)
     result: dict[str, LockState | None] = {"state": None}
 
     def _body() -> None:
@@ -700,7 +738,7 @@ def release(
     """
     session = _require_session(session)
     e = _env(env)
-    path = path or default_lock_path()
+    path = _lock_path(path, e)
     result: dict[str, LockState | None] = {"state": None}
 
     def _body() -> None:
@@ -747,11 +785,12 @@ class HeartbeatLoop:
         self.session = session
         self.env = env
         e = _env(env)
-        self.path = path or default_lock_path()
+        self.path = _lock_path(path, env)
         self.interval_sec = (
             e.heartbeat_interval_sec() if interval_sec is None else interval_sec
         )
         self.on_error = on_error
+        self._mu = threading.RLock()
         self.last_touch: float | None = None
         self.touches = 0
         self.errors = 0
@@ -767,22 +806,27 @@ class HeartbeatLoop:
 
     def due(self, now: float | None = None) -> bool:
         t = _env(self.env).now() if now is None else now
-        if self.last_touch is None:
-            return True
-        return (t - self.last_touch) >= self.interval_sec
+        with self._mu:
+            if self.last_touch is None:
+                return True
+            return (t - self.last_touch) >= self.interval_sec
 
     def tick(self, now: float | None = None, *, force: bool = False) -> bool:
         """Refresh if due. Returns True when a refresh was attempted."""
         e = _env(self.env)
         t = e.now() if now is None else now
-        if not force and not self.due(t):
-            return False
-        self.last_touch = t
+        with self._mu:
+            if not force and not self.due(t):
+                return False
+            self.last_touch = t
         try:
+            # File publish is serialized by exclusive(); keep I/O off this lock.
             heartbeat(self.session, path=self.path, env=self.env)
-            self.touches += 1
+            with self._mu:
+                self.touches += 1
         except BaseException as ex:
-            self.errors += 1
+            with self._mu:
+                self.errors += 1
             if isinstance(ex, PlaytestLockError) and ex.reason == "foreign_holder":
                 self._lost_event.set()
             if self.on_error is not None:
@@ -825,15 +869,21 @@ class HeartbeatThread:
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
-        # Cleanup paths call stop() unconditionally; if start() itself failed
-        # (thread resource exhaustion) join would raise and abort whatever
-        # cleanup follows, e.g. the lock release in playtest_run's finally.
-        if not self._started:
+        # Cleanup paths call stop() unconditionally; join on a thread that
+        # never started raises RuntimeError and would abort playtest_run's
+        # finally (skipping the lock release). ident is set inside
+        # Thread.start() before it returns, so a signal between that return
+        # and `_started = True` still joins instead of leaking the daemon
+        # across release.
+        if self._thread.ident is None:
             return
         self._thread.join(timeout=timeout)
 
     def _run(self) -> None:
-        # Immediate first touch so age stays low even if interval is long.
+        # Immediate first touch so age stays low even if interval is long,
+        # unless stop() already won the race before this body ran.
+        if self._stop.is_set():
+            return
         self.loop.tick(force=True)
         while not self._stop.wait(self.loop.interval_sec):
             self.loop.tick(force=True)
