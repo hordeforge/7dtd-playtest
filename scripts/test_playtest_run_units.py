@@ -932,14 +932,13 @@ def test_config_summary_redacts_telnet_password() -> None:
     assert "suite=smoke" in line and "port=26900" in line and "server=stock" in line, line
     assert "fresh_save=True" in line, line
 
-    # Attach mode without env: the state is named (legacy fallback) but no
-    # value ever appears. An own-server run without env generates instead,
-    # which still counts as "set".
+    # Direct callers can represent an invalid attach configuration, but it
+    # remains visibly unset and main() rejects it before any runtime work.
     attach = argparse.Namespace(
         **{**vars(args), "telnet_password": "", "no_server": True}
     )
     line = playtest_run.config_summary(attach)
-    assert "telnet_password=legacy-attach-default" in line, line
+    assert "telnet_password=unset" in line, line
     generated = argparse.Namespace(**{**vars(args), "telnet_password": ""})
     assert "telnet_password=set" in playtest_run.config_summary(generated)
 
@@ -1324,24 +1323,21 @@ def test_result_row_echoes_all_routed_through_helper() -> None:
 
 
 def test_resolve_telnet_password_paths() -> None:
-    """Operator-provided wins verbatim; --no-server attach falls back to the
-    documented lab default (the running dedicated's config was written by
-    someone else); servers this orchestrator starts get an ephemeral secret,
-    unique per run and never equal to the published default."""
+    """Attach mode requires an operator credential; owned servers receive a
+    unique ephemeral secret that is never logged."""
     resolve = playtest_run.resolve_telnet_password
-    legacy = playtest_run.LEGACY_TELNET_PASSWORD
 
     assert resolve("operator-pw", no_server=False) == "operator-pw"
     assert resolve("operator-pw", no_server=True) == "operator-pw"
 
-    assert resolve("", no_server=True) == legacy, (
-        "attach mode without env must use the documented lab default"
-    )
+    try:
+        resolve("", no_server=True)
+    except ValueError as ex:
+        assert "--telnet-password" in str(ex), ex
+    else:
+        raise AssertionError("attach mode accepted a missing telnet credential")
 
     generated = [resolve("", no_server=False) for _ in range(2)]
-    assert all(pw != legacy for pw in generated), (
-        "the static published default must never serve as the run password"
-    )
     assert len(set(generated)) == 2, "generated secrets must differ per call"
     for pw in generated:
         # Command-safe alphabet (token_urlsafe): survives the generated XML

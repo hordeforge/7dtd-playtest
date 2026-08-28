@@ -167,14 +167,6 @@ GAME_PROC_PATTERNS = [
     r"proton.*7DaysToDie",
 ]
 
-# Documented lab default shipped by the loadgen template and older playtest
-# runs. Only used when attaching to an already-running dedicated
-# (--no-server) whose generated config this process did not write; servers
-# started by this orchestrator get an ephemeral per-run password instead, so
-# a network-reachable telnet listener never opens with a published default.
-LEGACY_TELNET_PASSWORD = "retest"
-
-
 def mod_version() -> str:
     """Version declared by ModInfo.xml (single source of truth), "unknown" if absent."""
     try:
@@ -242,13 +234,9 @@ def config_summary(args: argparse.Namespace) -> str:
     everything here is already visible in --help or the generated paths.
     """
     # Credential state without the value: operator-supplied or generated
-    # per-run both count as set; only the --no-server attach fallback to the
-    # legacy lab default is called out by name so logs show which path ran.
-    pw_state = (
-        "set"
-        if (args.telnet_password or not args.no_server)
-        else "legacy-attach-default"
-    )
+    # per-run both count as set. Stock attach mode is rejected before this
+    # function when no explicit credential was supplied.
+    pw_state = "set" if (args.telnet_password or not args.no_server) else "unset"
     parts = [
         f"server={args.server}",
         f"suite={args.suite.strip()}",
@@ -2055,15 +2043,16 @@ def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> s
     TelnetAdmin session:
 
       operator-provided   -> used verbatim (config + client agree);
-      --no-server attach  -> legacy lab default (the running dedicated's
-                             config was written by someone else);
+      --no-server attach  -> explicit operator-provided credential required;
       own stock server    -> ephemeral per-run secret written into the 0600
                              generated config and never logged.
     """
     if operator_value:
         return operator_value
     if no_server:
-        return LEGACY_TELNET_PASSWORD
+        raise ValueError(
+            "--no-server requires --telnet-password or PLAYTEST_TELNET_PASSWORD"
+        )
     return secrets.token_urlsafe(15)
 
 
@@ -2283,8 +2272,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "stock dedicated telnet password (env PLAYTEST_TELNET_PASSWORD); "
             "when unset the orchestrator generates an ephemeral per-run "
-            "secret for servers it starts itself, and falls back to "
-            f"{LEGACY_TELNET_PASSWORD!r} for --no-server attach"
+            "secret for servers it starts itself; --no-server requires an "
+            "explicit credential"
         ),
     )
     ap.add_argument(
@@ -2349,6 +2338,8 @@ def main(argv: list[str] | None = None) -> int:
     # PORT= empty) reaches here without --port.
     if args.port is None:
         args.port = 27025 if args.server == "zdtd" else 26900
+    if args.server == "stock" and args.no_server and not args.telnet_password:
+        ap.error("--no-server requires --telnet-password or PLAYTEST_TELNET_PASSWORD")
     if (
         not math.isfinite(args.loadgen_server_cvar_tolerance)
         or args.loadgen_server_cvar_tolerance < 0
