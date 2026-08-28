@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 import time
@@ -100,13 +101,21 @@ def md_cell(text: str) -> str:
 def ran_epoch_of(path: Path, res: dict) -> float | None:
     """Best-known run epoch for a side: payload field, report-<epoch>.json
     filename, or file mtime as a last resort. None when unknown."""
-    if res.get("ran_epoch"):
-        return float(res["ran_epoch"])
+    reported = res.get("ran_epoch")
+    if reported is not None and not isinstance(reported, bool):
+        try:
+            epoch = float(reported)
+        except (TypeError, ValueError, OverflowError):
+            epoch = None
+        if epoch is not None and math.isfinite(epoch):
+            return epoch
     m = re.match(r"report-(\d+)\.json$", path.name)
     if m:
-        return float(m.group(1))
+        epoch = float(m.group(1))
+        return epoch if math.isfinite(epoch) else None
     try:
-        return path.stat().st_mtime
+        epoch = path.stat().st_mtime
+        return epoch if math.isfinite(epoch) else None
     except OSError:
         return None
 
@@ -114,7 +123,21 @@ def ran_epoch_of(path: Path, res: dict) -> float | None:
 def fmt_utc(epoch: float | None) -> str:
     if epoch is None:
         return "unknown"
-    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%MZ")
+    try:
+        return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%MZ")
+    except (OverflowError, OSError, ValueError):
+        return "unknown"
+
+
+def non_negative_int(text: str) -> int:
+    """argparse type for a count where zero explicitly disables the feature."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be non-negative, got {text!r}")
+    return value
 
 
 def newest_report(d: Path) -> Path | None:
@@ -148,7 +171,7 @@ def main() -> int:
                     help="diff the newest report-*.json under this zdtd dir")
     ap.add_argument("--out", type=Path, default=Path("."),
                     help="directory for playtest-compare.{md,json} (default .)")
-    ap.add_argument("--require-fresh-minutes", type=int, default=0,
+    ap.add_argument("--require-fresh-minutes", type=non_negative_int, default=0,
                     help="refuse to diff a side whose run is older than this "
                          "many minutes (0 disables the check)")
     args = ap.parse_args()
