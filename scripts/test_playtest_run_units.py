@@ -28,12 +28,14 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_lock as pl  # noqa: E402
+import playtest_log  # noqa: E402
 import playtest_run  # noqa: E402
 
 ROOT = _SCRIPTS.parent
@@ -577,16 +579,25 @@ def test_wait_file_contains_incremental() -> None:
         ), "missing needle must time out False"
 
         result: list[bool] = []
+        first_miss = threading.Event()
+        poll = playtest_log.LogTail.poll
+
+        def poll_and_signal(tail: playtest_log.LogTail) -> str:
+            chunk = poll(tail)
+            if "StartGame done" not in chunk:
+                first_miss.set()
+            return chunk
 
         def waiter() -> None:
             result.append(playtest_run.wait_file_contains(log, "StartGame done", 30.0))
 
-        th = threading.Thread(target=waiter)
-        th.start()
-        time.sleep(0.7)  # let at least one poll miss pass before appending
-        with log.open("a", encoding="utf-8") as fh:
-            fh.write("StartGame done\n")
-        th.join(timeout=30)
+        with mock.patch.object(playtest_log.LogTail, "poll", poll_and_signal):
+            th = threading.Thread(target=waiter)
+            th.start()
+            assert first_miss.wait(5), "waiter never polled before the append"
+            with log.open("a", encoding="utf-8") as fh:
+                fh.write("StartGame done\n")
+            th.join(timeout=5)
         assert result == [True], f"late append never matched: {result}"
         print("PASS wait_file_contains incremental pre-existing/late-append/timeout")
 

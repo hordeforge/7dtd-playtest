@@ -483,7 +483,7 @@ def test_heartbeat_thread_ticks_until_stopped(tmp: Path) -> None:
     finally:
         th.stop()
     ticks_at_stop = th.loop.touches
-    time.sleep(0.15)  # three full intervals: a live thread would tick again
+    _assert(not th._thread.is_alive(), "stop() returned before heartbeat thread exited")
     _assert(
         th.loop.touches == ticks_at_stop,
         f"thread kept writing after stop(): {ticks_at_stop} -> {th.loop.touches}",
