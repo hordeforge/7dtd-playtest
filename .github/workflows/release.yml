@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   verify-tag:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       # Actions pinned by full commit SHA (tag in comment) so a moved tag or a

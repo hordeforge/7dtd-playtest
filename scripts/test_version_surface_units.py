@@ -11,6 +11,8 @@ synthetic tree, so the promise cannot quietly rot again.
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -22,7 +24,41 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from version_surface import discover_tag_versions, uncovered_tag_versions  # noqa: E402
 
+_ROOT = Path(__file__).resolve().parents[1]
 GATE = Path(__file__).resolve().parent / "test_version_surface.py"
+
+
+def assert_nuget_pins() -> None:
+    """net48 reference assemblies stay exact-pinned, restore locked to nuget.org."""
+    csproj = (_ROOT / "Source" / "PlayTestMod" / "PlayTestMod.csproj").read_text(
+        encoding="utf-8"
+    )
+    assert re.search(
+        r'Include="Microsoft\.NETFramework\.ReferenceAssemblies"'
+        r'\s+Version="\[1\.0\.3\]"',
+        csproj,
+    ), "csproj must exact-pin Microsoft.NETFramework.ReferenceAssemblies to [1.0.3]"
+    lock = json.loads(
+        (_ROOT / "Source" / "PlayTestMod" / "packages.lock.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    requested = lock["dependencies"][".NETFramework,Version=v4.8"][
+        "Microsoft.NETFramework.ReferenceAssemblies"
+    ]["requested"]
+    assert requested == "[1.0.3, 1.0.3]", (
+        f"packages.lock.json requested {requested!r}; expected '[1.0.3, 1.0.3]'"
+    )
+    nuget = (_ROOT / "nuget.config").read_text(encoding="utf-8")
+    assert "<clear" in nuget, "nuget.config must <clear /> extra package sources"
+    assert "api.nuget.org" in nuget, "nuget.config must name nuget.org as the only feed"
+    release = (_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "ubuntu-latest" not in release, (
+        "release.yml must not use floating ubuntu-latest"
+    )
+    assert "ubuntu-24.04" in release, "release.yml must pin ubuntu-24.04 like CI"
 
 
 def make_git_dir(git_dir: Path, loose: dict[str, str], packed: list[tuple[str, str]]) -> None:
@@ -75,6 +111,9 @@ def run_gate(root: Path) -> subprocess.CompletedProcess[str]:
 
 
 def main() -> int:
+    assert_nuget_pins()
+    print("OK net48 reference assemblies are exact-pinned and restore is nuget.org-only")
+
     with tempfile.TemporaryDirectory(prefix="version-surface-units-") as td:
         base = Path(td)
 

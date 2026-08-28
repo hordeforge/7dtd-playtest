@@ -32,10 +32,11 @@
     <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Pin the net48 reference assemblies explicitly instead of letting each
-         SDK inject its own version at restore time (network on first build).
+    <!-- Pin the net48 reference assemblies to an exact version. A bare
+         Version="1.0.3" is NuGet's minimum range [1.0.3, ), so a later 1.x
+         on the feed would be legal the next time the lock is regenerated.
          Build-only, never shipped. -->
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="[1.0.3]" PrivateAssets="All" />
   </ItemGroup>
   <PropertyGroup>
     <!-- Record resolved packages (with content hashes) in a committed lock so

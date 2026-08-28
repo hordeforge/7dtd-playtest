@@ -22,6 +22,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Changed
+
+- `Microsoft.NETFramework.ReferenceAssemblies` is exact-pinned at `[1.0.3]`
+  (a bare `1.0.3` is NuGet's minimum range `[1.0.3, )`). Restore uses a
+  repo `nuget.config` that clears extra package sources so it cannot fall
+  through to a user-level feed.
+- Release tag verification runs on `ubuntu-24.04`, matching CI, instead of
+  floating `ubuntu-latest`.
+
 ### Fixed
 
 - Catalog melee aim (`block_damage_melee`, `explosion_client`) uses
