@@ -141,11 +141,10 @@ def client_compat_for_game(game: Path, env: dict[str, str] | None = None) -> Pat
     configured = (environment.get("COMPAT") or "").strip()
     if configured:
         return Path(configured)
-    text = str(game)
-    marker = "/steamapps/common/"
-    if marker in text:
-        library = text[: text.index(marker)] + "/steamapps"
-        return Path(library) / "compatdata" / STEAM_APPID
+    common = game.parent
+    steamapps = common.parent
+    if common.name == "common" and steamapps.name == "steamapps":
+        return steamapps / "compatdata" / STEAM_APPID
     return DEFAULT_COMPAT
 
 

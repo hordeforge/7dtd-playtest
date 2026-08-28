@@ -1432,6 +1432,10 @@ def test_client_compat_follows_the_install_library() -> None:
         "/data/games/Steam/steamapps/compatdata/" + playtest_run.STEAM_APPID
     )
     assert compat == expected, compat
+    relative_game = pathlib.Path("Steam/steamapps/common/7 Days To Die")
+    assert playtest_run.client_compat_for_game(relative_game, env={}) == (
+        pathlib.Path("Steam/steamapps/compatdata") / playtest_run.STEAM_APPID
+    )
     override = pathlib.Path("/elsewhere/prefix")
     assert playtest_run.client_compat_for_game(game, env={"COMPAT": str(override)}) == override
     print("PASS client_compat_follows_library prefix derived from the library")
