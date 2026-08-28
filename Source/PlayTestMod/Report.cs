@@ -20,6 +20,7 @@ namespace ZdtdPlaytest
         static readonly Stopwatch Wall = new Stopwatch();
         static readonly List<(string id, float ms)> Timings = new List<(string, float)>();
 
+        /// <summary>Clears accumulated results and starts a new suite wall clock.</summary>
         public static void Reset()
         {
             Results.Clear();
@@ -29,12 +30,20 @@ namespace ZdtdPlaytest
             Wall.Start();
         }
 
+        /// <summary>
+        /// Emits a prefixed human log line and a JSON <c>log</c> event.
+        /// Providers use this for diagnostics that must survive host parsing.
+        /// </summary>
         public static void Info(string msg)
         {
             Log.Out("[7dtd-playtest] " + msg);
             EmitJson("log", "\"level\":\"info\",\"msg\":" + JsonString(msg));
         }
 
+        /// <summary>
+        /// Requests a host-side fixture action through the stable <c>barrier</c>
+        /// log event. Unknown names are inert on the stock host.
+        /// </summary>
         public static void Barrier(string name)
         {
             // Host orchestrator greps this and runs telnet/admin setup.
@@ -75,6 +84,10 @@ namespace ZdtdPlaytest
                 + ",\"detail\":" + JsonString(detail ?? ""));
         }
 
+        /// <summary>
+        /// Records one case result. The runner owns normal use; providers
+        /// should express outcomes through <see cref="CaseDef"/> callbacks.
+        /// </summary>
         public static void Result(string suite, string caseId, string status, float ms, string detail)
         {
             status = (status ?? "fail").ToLowerInvariant();
@@ -98,6 +111,7 @@ namespace ZdtdPlaytest
                 + ",\"detail\":" + JsonString(detail ?? ""));
         }
 
+        /// <summary>Emits final aggregate counts and the slowest live cases.</summary>
         public static void Summary(string[] suites)
         {
             long wallMs = Wall.ElapsedMilliseconds;
@@ -135,6 +149,7 @@ namespace ZdtdPlaytest
             EmitJson("summary", sb.ToString());
         }
 
+        /// <summary>Emits the terminal exit hint after <see cref="Summary"/>.</summary>
         public static void Done()
         {
             int exitHint = Fail > 0 ? 1 : 0;

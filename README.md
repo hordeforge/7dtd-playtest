@@ -11,6 +11,18 @@
 
 Stock-client **gameplay automation** for 7 Days to Die servers (EAC off). Works against the **stock dedicated server** (the default) and against **zdtd-server** (`--server zdtd` / `make playtest-zdtd`). Drives real client APIs, waits for server-visible state where it matters, and emits structured scenario test results for a host orchestrator.
 
+## Quick start
+
+With the prerequisites in [Requirements](#requirements) installed, build and
+install the playtest and connection mods together:
+
+```bash
+make install-pair
+```
+
+Everything below is reference detail, including the offline development loop
+and live suite commands.
+
 Host-side concurrency (the exclusivity lock) is covered by deterministic
 simulation: `make dst`, documented in **[DST.md](DST.md)**.
 
@@ -37,21 +49,27 @@ as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/
 - dotnet SDK 8.0.x for the mod build (pinned by `global.json`; found on
   `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`)
 
-## Install
-
-```bash
-make install-pair    # playtest + connect into $GAME/Mods/
-```
-
 ## Offline dev loop (no game install)
 
 Everything CI checks runs offline in seconds; `make` alone prints the full
 target list.
 
+Run every offline gate:
+
 ```bash
-make test                        # lint + typecheck + all offline gates
-make test-one GATE=test_dst.py   # one gate while iterating
-make check                       # exactly what CI runs (test + DST sweep)
+make test
+```
+
+Run one gate while iterating:
+
+```bash
+make test-one GATE=test_dst.py
+```
+
+Run the full local CI equivalent:
+
+```bash
+make check
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR expectations these gates
@@ -63,31 +81,29 @@ Default server is the **stock dedicated** (Navezgane, EAC off, port **26900**).
 
 Full scenario list: **[SCENARIOS.md](SCENARIOS.md)** (demo / benchmark / full catalog).
 
-```bash
-make playtest-demo           # attract-mode + combat wait (telnet spawn)
-make playtest-gate           # PR gate: live smoke+core only
-make playtest-bench LAPS=3   # timed repeats of bench path
-make playtest-full           # demo domains + soak (no persist/mp/apm/bot)
-make playtest-smoke          # boot only
-make playtest SUITE=combat
-make playtest-zdtd           # demo against zdtd on 27025
-make playtest-persist        # multi-phase rejoin (setup → save → verify)
-make playtest-mp             # loadgen multi-peer
-make playtest-apm            # zdtd APM dump attach (SERVER=zdtd)
-make playtest-soak-long      # ≥15 min host soak
-make playtest-residual       # persist + mp + apm + soak_long
-make playtest-compare        # same suite vs stock AND zdtd, diffed per case
-                             # (SUITE=smoke; report in
-                             # workspace/comparison-playtest/<suite>/)
-make playtest-repeat LAPS=3  # flake detection: N fresh-server laps, all must pass
-```
+| Command | Purpose |
+|---|---|
+| `make playtest-demo` | Attract-mode + combat fixture wait |
+| `make playtest-gate` | PR gate: live smoke + core only |
+| `make playtest-bench LAPS=3` | Timed repeats of the benchmark path |
+| `make playtest-full` | Demo domains + soak, excluding persist/mp/apm/bot |
+| `make playtest-smoke` | Boot only |
+| `make playtest SUITE=combat` | Combat suite |
+| `make playtest-zdtd` | Demo against zdtd on port 27025 |
+| `make playtest-persist` | Multi-phase rejoin: setup, save, verify |
+| `make playtest-mp` | Multi-peer loadgen |
+| `make playtest-apm` | zdtd APM dump attach |
+| `make playtest-soak-long` | At least 15 minutes of host soak |
+| `make playtest-residual` | Persist + mp + apm + soak_long |
+| `make playtest-compare` | Compare stock and zdtd; defaults to `SUITE=smoke` and writes `workspace/comparison-playtest/<suite>/` |
+| `make playtest-repeat LAPS=3` | Flake detection across fresh-server laps; all laps must pass |
 
 `playtest-compare` diffs per case into `playtest-compare.{md,json}` and also
 reports a wall-time axis (server session seconds, from the orchestrator
 reports) - a cost observation, never a per-case finding (zdtd being faster is
 a known divergence, not a mismatch).
 
-v0.7.1 gameplay surface (stock motor / stock attack / real C2S, **not** tele-fakes):
+v0.8.0 gameplay surface (stock motor / stock attack / real C2S, **not** tele-fakes):
 - locomotion + jump + stamina; entity/block melee; **ranged** (pipe pistol Meta)
 - **ItemDropServer**, **loot Collect**, **keystone place**, eat, dig/place
 - **creative** UI; **craft wooden club** (queue + output); **campfire TE** place
@@ -165,7 +181,7 @@ GamePrefs / in-game audio sliders). Independent of master volume. Requires
 | `CLIENT_MUTE_TIMEOUT` | Seconds to wait for the audio stream (default 60) |
 
 ```bash
-CLIENT_MUTE=0 make playtest-demo   # keep speakers on
+CLIENT_MUTE=0 make playtest-demo
 ```
 
 ### Live-client exclusivity lock
@@ -376,11 +392,15 @@ variable reaches the game process (`steam -applaunch` often drops it).
 
 ### Fresh / disposable world (no OCR New Game)
 
-Wipe the orchestrator save before launch so dig pads and fixtures start clean:
+Run a suite against a fresh save so dig pads and fixtures start clean:
 
 ```bash
 make playtest SUITE=your_suite
-# or
+```
+
+Or invoke the orchestrator directly:
+
+```bash
 uv run --locked --project . python scripts/playtest_run.py --suite your_suite
 ```
 
@@ -580,7 +600,7 @@ and is somebody else's run.
 
 ```csharp
 queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
-    ctx => WearSuitAndOpenBackpack(ctx),   // true when the scene is really up
+    ctx => WearSuitAndOpenBackpack(ctx),
     holdSeconds: 10f));
 ```
 
@@ -611,8 +631,15 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
    started, shoots N frames, crops them to the client window and builds a
    contact sheet:
 
+Run the default capture:
+
 ```bash
 ./scripts/capture_frames.sh --suite <id>
+```
+
+Use a custom output directory and runner:
+
+```bash
 ./scripts/capture_frames.sh --suite <id> --out ./frames --runner ./my-wrapper.sh
 ```
 
@@ -631,8 +658,15 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
    Same `--runner` contract, same refuse-to-overlap guard; the recording is
    material for a human verdict, and nothing in it judges:
 
+Run the default audio capture:
+
 ```bash
 ./scripts/capture_audio.sh --suite <id>
+```
+
+Use a custom output directory and runner:
+
+```bash
 ./scripts/capture_audio.sh --suite <id> --out ./audio --runner ./my-wrapper.sh
 ```
 
@@ -664,8 +698,15 @@ count, never a padded one, and
 the last frame to land (the write is asynchronous), and muxes the frames into
 an mp4 with `ffmpeg` plus a contact sheet:
 
+Capture the whole staged clip:
+
 ```bash
 ./scripts/capture_video.sh --suite <id>
+```
+
+Capture only a named clip:
+
+```bash
 ./scripts/capture_video.sh --suite <id> --clip-id motion_myProp
 ```
 
@@ -762,13 +803,18 @@ was never going to appear.
 
 ## Manual / pair launch
 
+Start the client after the dedicated or zdtd server is ready:
+
 ```bash
-# terminal 1: stock dedicated or zdtd
-# terminal 2 (connect preserves env into the game process):
 7DTD_CONNECT=127.0.0.1:27025 PLAYTEST_SUITE=smoke,core \
   ../7dtd-fastconnect/scripts/launch_client.sh
-# also accepted:
-# ZDTD_PLAYTEST_SUITE=smoke,core ...
+```
+
+The older suite variable is also accepted:
+
+```bash
+7DTD_CONNECT=127.0.0.1:27025 ZDTD_PLAYTEST_SUITE=smoke,core \
+  ../7dtd-fastconnect/scripts/launch_client.sh
 ```
 
 Legacy: `PLAYTEST=1` or `ZDTD_PLAYTEST=1` arms `demo`.

@@ -10,10 +10,10 @@ is the repo's own gate surface; nothing here needs a game install.
    (e.g. `sudo apt install shellcheck`). These are the only two host tools
    the offline gates need beyond make/git: uv fetches the interpreter pinned
    by `.python-version` and every locked dev dependency on first use.
-3. Sanity check:
+3. Run every offline gate:
 
 ```bash
-make test    # lint + typecheck + all offline suites (~10 s)
+make test
 ```
 
 For the mod build and live suites you additionally need dotnet SDK 8.0.x

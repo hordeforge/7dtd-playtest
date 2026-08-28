@@ -13,7 +13,17 @@ namespace ZdtdPlaytest
     /// </summary>
     public interface IScenarioProvider
     {
+        /// <summary>
+        /// Suite ids this provider owns. Matching is case-insensitive; an id
+        /// claimed by a built-in suite remains built-in.
+        /// </summary>
         IEnumerable<string> SuiteIds { get; }
+
+        /// <summary>
+        /// Appends this provider's cases for one requested suite and benchmark
+        /// lap. Use the supplied <paramref name="lap"/> to keep repeated case
+        /// ids distinct in host reports.
+        /// </summary>
         void AppendSuite(List<CaseDef> queue, string suite, int lap);
     }
 
