@@ -20,7 +20,7 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-from test_version_surface import discover_tag_versions, uncovered_tag_versions  # noqa: E402
+from version_surface import discover_tag_versions, uncovered_tag_versions  # noqa: E402
 
 GATE = Path(__file__).resolve().parent / "test_version_surface.py"
 
@@ -47,6 +47,7 @@ def make_root(
 ) -> None:
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(GATE, root / "scripts" / "test_version_surface.py")
+    shutil.copy2(_SCRIPTS / "version_surface.py", root / "scripts" / "version_surface.py")
     (root / "ModInfo.xml").write_text(
         '<xml>\n  <Version value="' + version + '" />\n</xml>\n', encoding="utf-8"
     )
