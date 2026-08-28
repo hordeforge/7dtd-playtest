@@ -267,7 +267,7 @@ environment variables.
 | render thread cannot keep up with `clipFps` | Fewer frames land in `holdSeconds`; `clip complete` reports the real count, never a padded one |
 | last frame file missing after the poll window | `capture_video.sh` reports the short count and mux fails loudly rather than muxing a gap as if it were continuous motion |
 | `ffmpeg` not installed | Exit non-zero, name the frame directory as the evidence that does exist |
-| two staged clips reuse the same `id` in one run | Second `CaptureClipFrame` call overwrites the first's frames (same collision rule flat `playtest-shots/` already has); name clip ids for what they show, same as any other case id |
+| two staged clips reuse the same `id` in one run | `StagedClip` clears that clip's frame directory before each take, so the later take replaces the earlier evidence rather than mixing stale frames into it; name clip ids for what they show, same as any other case id |
 
 ## Implementation
 
