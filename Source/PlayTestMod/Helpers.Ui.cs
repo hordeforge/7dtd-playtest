@@ -134,11 +134,10 @@ namespace ZdtdPlaytest
         /// </returns>
         public static bool OpenWindowGroup(EntityPlayerLocal player, string group, bool modal = false)
         {
-            if (player == null || string.IsNullOrEmpty(group)) return false;
+            if (string.IsNullOrEmpty(group)) return false;
             try
             {
-                var ui = LocalPlayerUI.GetUIForPlayer(player);
-                var wm = ui != null ? ui.windowManager : null;
+                var wm = UiFor(player)?.windowManager;
                 if (wm == null || wm.nameToWindowMap == null) return false;
                 // Checked before the call, because Open answers an unknown name
                 // with a log warning and no return value: without this a typo
@@ -158,17 +157,21 @@ namespace ZdtdPlaytest
         /// </summary>
         public static bool CloseWindowGroup(EntityPlayerLocal player, string group)
         {
-            if (player == null || string.IsNullOrEmpty(group)) return false;
+            if (string.IsNullOrEmpty(group)) return false;
             try
             {
-                var ui = LocalPlayerUI.GetUIForPlayer(player);
-                var wm = ui != null ? ui.windowManager : null;
+                var wm = UiFor(player)?.windowManager;
                 if (wm == null || wm.nameToWindowMap == null) return false;
                 bool known = wm.nameToWindowMap.ContainsKey(group);
                 wm.Close(group);
                 return known;
             }
             catch { return false; }
+        }
+
+        static LocalPlayerUI UiFor(EntityPlayerLocal player)
+        {
+            return player == null ? null : LocalPlayerUI.GetUIForPlayer(player);
         }
 
 
@@ -184,8 +187,7 @@ namespace ZdtdPlaytest
         {
             try
             {
-                var ui = LocalPlayerUI.GetUIForPlayer(player);
-                var wm = ui != null ? ui.windowManager : null;
+                var wm = UiFor(player)?.windowManager;
                 if (wm == null || wm.openWindows == null) return "";
                 var names = new List<string>();
                 for (int i = 0; i < wm.openWindows.Count; i++)
@@ -219,26 +221,12 @@ namespace ZdtdPlaytest
         public static string CaptureFrame(string name, int superSize = 2)
         {
             if (string.IsNullOrEmpty(name)) name = "frame";
-            if (superSize < 1) superSize = 1;
-            // Same profile derivation the connect mod uses: resolves to the
-            // Proton user directory under wine and stays valid natively.
-            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(profile)) return null;
-            string dir = System.IO.Path.Combine(profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots");
-            try { System.IO.Directory.CreateDirectory(dir); }
-            catch (Exception e)
-            {
-                Log.Warning("[7dtd-playtest] cannot create " + dir + ": " + e.Message);
-                return null;
-            }
+            string dir = ShotsRoot();
+            if (dir == null) return null;
             string safe = SafeFileName(name);
-            string path = System.IO.Path.Combine(dir, safe + ".png");
-            try { ScreenCapture.CaptureScreenshot(path, superSize); }
-            catch (Exception e)
-            {
-                Log.Warning("[7dtd-playtest] capture of " + safe + " failed: " + e.Message);
-                return null;
-            }
+            string path = WriteScreenshot(dir, safe + ".png", superSize,
+                "capture of " + safe + " failed");
+            if (path == null) return null;
             // The line a collector greps for; the file appears a frame later.
             Log.Out("[7dtd-playtest] shot " + safe + " x" + superSize + " -> " + path);
             return path;
@@ -285,25 +273,13 @@ namespace ZdtdPlaytest
         public static string CaptureClipFrame(string clipId, int frameIndex, int superSize = 2)
         {
             if (string.IsNullOrEmpty(clipId)) clipId = "clip";
-            if (superSize < 1) superSize = 1;
-            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(profile)) return null;
-            string shots = System.IO.Path.Combine(profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots");
+            string shots = ShotsRoot();
+            if (shots == null) return null;
             string safe = SafeFileName(clipId);
             string dir = System.IO.Path.Combine(shots, "clips", safe);
-            try { System.IO.Directory.CreateDirectory(dir); }
-            catch (Exception e)
-            {
-                Log.Warning("[7dtd-playtest] cannot create " + dir + ": " + e.Message);
-                return null;
-            }
-            string path = System.IO.Path.Combine(dir, string.Format("frame-{0:D4}.png", frameIndex));
-            try { ScreenCapture.CaptureScreenshot(path, superSize); }
-            catch (Exception e)
-            {
-                Log.Warning("[7dtd-playtest] clip frame " + safe + " " + frameIndex + " failed: " + e.Message);
-                return null;
-            }
+            string path = WriteScreenshot(dir, string.Format("frame-{0:D4}.png", frameIndex),
+                superSize, "clip frame " + safe + " " + frameIndex + " failed");
+            if (path == null) return null;
             // The line a collector greps for; the file appears a frame later.
             Log.Out("[7dtd-playtest] clip frame " + safe + " " + frameIndex + " x" + superSize + " -> " + path);
             return path;
@@ -328,11 +304,9 @@ namespace ZdtdPlaytest
         public static void ResetClipDir(string clipId)
         {
             if (string.IsNullOrEmpty(clipId)) clipId = "clip";
-            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (string.IsNullOrEmpty(profile)) return;
-            string dir = System.IO.Path.Combine(
-                profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots",
-                "clips", SafeFileName(clipId));
+            string shots = ShotsRoot();
+            if (shots == null) return;
+            string dir = System.IO.Path.Combine(shots, "clips", SafeFileName(clipId));
             try
             {
                 if (System.IO.Directory.Exists(dir))
@@ -343,6 +317,34 @@ namespace ZdtdPlaytest
             {
                 Log.Warning("[7dtd-playtest] cannot reset clip dir " + dir + ": " + e.Message);
             }
+        }
+
+        // Same profile derivation the connect mod uses: Proton user directory
+        // under wine, and the native home directory otherwise.
+        static string ShotsRoot()
+        {
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (string.IsNullOrEmpty(profile)) return null;
+            return System.IO.Path.Combine(profile, "AppData", "Roaming", "7DaysToDie", "playtest-shots");
+        }
+
+        static string WriteScreenshot(string dir, string fileName, int superSize, string failLabel)
+        {
+            if (superSize < 1) superSize = 1;
+            try { System.IO.Directory.CreateDirectory(dir); }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] cannot create " + dir + ": " + e.Message);
+                return null;
+            }
+            string path = System.IO.Path.Combine(dir, fileName);
+            try { ScreenCapture.CaptureScreenshot(path, superSize); }
+            catch (Exception e)
+            {
+                Log.Warning("[7dtd-playtest] " + failLabel + ": " + e.Message);
+                return null;
+            }
+            return path;
         }
 
         /// <summary>A file name that cannot escape its directory.</summary>

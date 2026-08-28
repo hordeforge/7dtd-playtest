@@ -65,19 +65,6 @@ namespace ZdtdPlaytest
                         // persist needs persist_setup host barriers; soak_long is ≥15m.
                         AddUnique(list, "mp", "soak");
                         break;
-                    case "persist":
-                        // Client only runs verify cases; setup is separate suite id.
-                        AddUnique(list, "persist");
-                        break;
-                    case "persist_setup":
-                        AddUnique(list, "persist_setup");
-                        break;
-                    case "soak_long":
-                        AddUnique(list, "soak_long");
-                        break;
-                    case "apm":
-                        AddUnique(list, "apm");
-                        break;
                     default:
                         AddUnique(list, s);
                         break;
