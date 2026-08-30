@@ -356,16 +356,21 @@ case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
 
 `CaseDef.WalkEntity(suite, id, className, spawnOffset, holdSeconds, clipFps,
 speed, ...)` spawns a non-remote `EntityAlive` of `className` beside the
-player and drives it forward for `holdSeconds` while recording a clip. It
-drives the creature's **own motor** (`alive.SetMoveForward(1f)` per wait
-tick) rather than teleporting it (`SetPosition`): teleporting pins the
-last-read Y so the engine's `MoveHelper → CharacterController` chain never
-re-grounds the entity, and the gait animation swings the feet relative to
-the frozen root — the "legs clip in, then float, then ride high over a
-bump" read. Driving the motor lets the CC settle Y onto the surface every
-tick, the way a real animal or a server-side spawn grounds. The assert line
-reports the entity's **Y range** (`y[min..max]`) across the walk so a
-grounding regression is a number, not a frame you have to squint at.
+player and walks it for `holdSeconds` while recording a clip. To be
+**judgeable** rather than merely "passing", the creature is held in front of
+the player's camera every wait tick — repositioned to a point a few metres
+ahead of the camera (with a slow side-swing so it reads as a walk) and
+snapped to the terrain surface via `World.GetHeightAt` — so the clip
+actually photographs the creature walking on the ground. Two naive
+approaches were tried and abandoned: driving the entity's motor
+(`SetMoveForward`) made it sprint its full `MoveSpeed` away from the camera
+(~80 m, a ~67 m Y range), and stepping it along its own facing at a fixed
+world offset let it walk out of the player's view entirely — in both cases
+the case "passed" (position moved, renderer present) while the frames showed
+only terrain, because nothing ever framed the creature. The assert line
+reports the entity's **Y range** (`y[min..max]`) across the walk and checks a
+`SkinnedMeshRenderer` is present, so a grounding regression is a number and
+an invisible spawn is a failure, not a green run.
 
 `Helpers.LookAt(player, worldPos)` aims the player camera at a world position.
 It follows the stock `EntityPlayerLocal.SetRotation` convention: negative X
