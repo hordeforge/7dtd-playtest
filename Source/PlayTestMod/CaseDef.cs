@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ZdtdPlaytest
@@ -28,6 +29,37 @@ namespace ZdtdPlaytest
         public string Suite;
         public string Id;
         public string[] Tags = Array.Empty<string>();
+
+        static readonly List<GameObject> StagedObjects = new List<GameObject>();
+
+        /// <summary>
+        /// Track a camera-staged instance so the next <see cref="Staged"/> case
+        /// (and the end of this hold) destroys it. Prefabs instantiated in the
+        /// player's face otherwise pile up at the same spot — a particle system,
+        /// then a mesh, then a cube, all occupying one point, which is not a
+        /// picture anyone can sign off.
+        ///
+        /// Do not register a block placed on a voxel or a garment grafted onto
+        /// the player: those are the feature under test, not a disposable look
+        /// instance.
+        /// </summary>
+        public static void RegisterStaged(GameObject go)
+        {
+            if (go != null)
+                StagedObjects.Add(go);
+        }
+
+        /// <summary>Destroy every object <see cref="RegisterStaged"/> tracked.</summary>
+        public static void ClearStaged()
+        {
+            for (int i = 0; i < StagedObjects.Count; i++)
+            {
+                var go = StagedObjects[i];
+                if (go != null)
+                    UnityEngine.Object.Destroy(go);
+            }
+            StagedObjects.Clear();
+        }
         /// <summary>If true, record skip immediately (deferred / needs admin / fixture).</summary>
         public bool Deferred;
         public string DeferReason = "";
@@ -116,6 +148,13 @@ namespace ZdtdPlaytest
         /// something to photograph. A staging case must never claim the scene
         /// looked right, because no fixture in this harness can see. Pair it with
         /// <c>scripts/capture_frames.sh</c>, and leave the verdict to a person.</para>
+        ///
+        /// <para>One concern per run. Consecutive cases of one feature in
+        /// this suite are that concern. A particle system that is already
+        /// part of the staged prefab is not a second picture. Do not hang a
+        /// second, unrelated prefab in the player's face from a suite that
+        /// exists to prove something else, and do not comma-list this suite
+        /// with an unrelated one.</para>
         /// </summary>
         /// <param name="stage">
         /// Stages the scene and returns true when it is genuinely on screen.
@@ -168,6 +207,7 @@ namespace ZdtdPlaytest
                 tags,
                 act: ctx =>
                 {
+                    ClearStaged();
                     bool ok = false;
                     try { ok = stage(ctx); }
                     catch (Exception e)
@@ -199,7 +239,12 @@ namespace ZdtdPlaytest
                         ctx.IntB = 1;
                         Helpers.CaptureFrame(id, captureSuperSize);
                     }
-                    return elapsed >= holdSeconds;
+                    if (elapsed >= holdSeconds)
+                    {
+                        ClearStaged();
+                        return true;
+                    }
+                    return false;
                 },
                 assert: ctx => ctx.IntA == 1,
                 timeout: holdSeconds + 20f,
@@ -271,6 +316,7 @@ namespace ZdtdPlaytest
                 tags,
                 act: ctx =>
                 {
+                    ClearStaged();
                     bool ok = false;
                     try { ok = stage(ctx); }
                     catch (Exception e)
@@ -311,6 +357,7 @@ namespace ZdtdPlaytest
                     if (done && ctx.IntC == 0)
                     {
                         ctx.IntC = 1;
+                        ClearStaged();
                         // The single, well-defined completion signal a waiting
                         // host process greps for; the count is the real one.
                         Log.Out("[7dtd-playtest] clip complete " + id + " frames=" + ctx.IntB

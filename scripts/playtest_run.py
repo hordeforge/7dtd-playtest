@@ -1916,20 +1916,53 @@ FIXTURE_SUITE_IDS = frozenset(
 )
 
 
+def suite_tokens(suite: str) -> tuple[str, ...]:
+    """Split a PLAYTEST_SUITE list on comma, semicolon, or whitespace."""
+    return tuple(token for token in re.split(r"[,;\s]+", suite.strip()) if token)
+
+
 def mixed_visual_suites(suite: str) -> bool:
     """True when a suite list asks for both prefab-look and block-place.
 
-    Instantiating a prefab in front of the camera (`*_look`) and placing a
-    block on a voxel (`*_block_*`) are different pictures. Mixing them in
-    one PLAYTEST_SUITE list is how a consumer self-test rendered a texture
-    mid-air AND a placed block in the same session, repeatedly. The naming
-    is the contract: a suite that hangs a prefab in the player's face ends
-    in `_look`; a suite that SetBlockRpc's or places ends with `_block_*`.
+    One instance of mixing unrelated concerns: a prefab in the player's face
+    and a block on a voxel are different pictures. The naming is how this
+    instance is gated. Not a mix: a particle system that is already part of
+    the staged prefab; consecutive cases of one feature in one suite.
     """
-    tokens = [token for token in re.split(r"[,;\s]+", suite.strip()) if token]
+    tokens = suite_tokens(suite)
     look = any(token.endswith("_look") for token in tokens)
     block = any("_block_" in token for token in tokens)
     return look and block
+
+
+# Comma-lists the harness itself documents as one run (README: smoke,core).
+# Every other 2+ token list is mixed unrelated concerns unless the caller
+# declares the exact set via --concern-suites / PLAYTEST_CONCERN_SUITES.
+HARNESS_CONCERN_GROUPS: tuple[frozenset[str], ...] = (frozenset({"smoke", "core"}),)
+
+
+def mixed_unrelated_suites(suite: str, *, concern_suites: str = "") -> bool:
+    """True when a PLAYTEST_SUITE list is more than one undeclared concern.
+
+    One invocation proves one concern. A single suite id is always one
+    concern. Catalog aliases (demo, full, …) are one token. Comma-listing
+    two feature suites is mixing — run them as separate invocations (a
+    matrix) — unless the caller declares *exactly* that list as one concern
+    because the cases are consecutive steps of one feature.
+
+    A child that is part of a built prefab is not a second suite. look+block
+    is always mixed, even if declared.
+    """
+    tokens = suite_tokens(suite)
+    if mixed_visual_suites(suite):
+        return True
+    if len(tokens) <= 1:
+        return False
+    token_set = frozenset(tokens)
+    if token_set in HARNESS_CONCERN_GROUPS:
+        return False
+    declared = frozenset(suite_tokens(concern_suites)) if concern_suites.strip() else frozenset()
+    return token_set != declared
 
 
 def suite_wants_host_fixtures(suite: str) -> bool:
@@ -2446,12 +2479,29 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("PLAYTEST_SESSION_ID", ""),
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
+    ap.add_argument(
+        "--concern-suites",
+        default=os.environ.get("PLAYTEST_CONCERN_SUITES", ""),
+        help=(
+            "exact PLAYTEST_SUITE token list that is one declared concern "
+            "(consecutive steps of one feature). Required when --suite lists "
+            "more than one id. PLAYTEST_CONCERN_SUITES is the env form."
+        ),
+    )
     args = ap.parse_args(argv)
     if mixed_visual_suites(args.suite):
         ap.error(
             "PLAYTEST_SUITE mixes a prefab-look suite (*_look) and a "
             "block-placement suite (*_block_*); they are different pictures. "
             "Run them as separate playtest invocations."
+        )
+    if mixed_unrelated_suites(args.suite, concern_suites=args.concern_suites):
+        ap.error(
+            "PLAYTEST_SUITE lists more than one suite; that is more than one "
+            "concern. Run them as separate invocations (a matrix), or pass "
+            "--concern-suites with exactly this list when they are consecutive "
+            "steps of one feature. A child that is part of a built prefab is "
+            "not a second suite."
         )
     # Backend default resolves before the validation below: require_litenet_room
     # compares an int, and every default-port invocation (make playtest with

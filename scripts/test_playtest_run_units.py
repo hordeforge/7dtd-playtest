@@ -721,7 +721,36 @@ def test_mixed_visual_suites_are_look_plus_block() -> None:
     assert not mixed("mod_look")
     assert not mixed("demo")
     assert not mixed("soak_walk_look_cycle")
-    print("PASS mixed_visual_suites look+block is mixed; load+block and catalog look_ are not")
+    print("PASS mixed_visual_suites look+block is mixed; catalog look_ is not")
+
+
+def test_mixed_unrelated_suites_are_undeclared_comma_lists() -> None:
+    """Two feature suites in one list are mixing unless declared as one concern."""
+    unrelated = playtest_run.mixed_unrelated_suites
+    assert unrelated("godmode-drop,nuke-side-box")
+    assert unrelated("mod_bundle,mod_block_model")
+    assert not unrelated("atomic-doomsday-godmode-drop")
+    assert not unrelated("demo")
+    assert not unrelated("smoke,core")
+    declared = "mod_bundle,mod_block_model,mod_editorless"
+    assert not unrelated(declared, concern_suites=declared)
+    assert unrelated(declared, concern_suites="mod_bundle")
+    assert unrelated("mod_look,mod_block_model", concern_suites="mod_look,mod_block_model")
+    print("PASS mixed_unrelated_suites undeclared comma-list is mixing")
+
+
+def test_one_concern_contract_is_documented() -> None:
+    """The mix rule is one concern per run, not only look-versus-block."""
+    root = Path(__file__).resolve().parents[1]
+    agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    for text, label in ((agents, "AGENTS.md"), (readme, "README.md")):
+        lowered = text.lower()
+        assert "one concern per run" in lowered, label
+        assert "part of" in lowered, label
+        assert "consecutive" in lowered, label
+        assert "matrix" in lowered or "separate invocation" in lowered, label
+    print("PASS one-concern contract is in AGENTS.md and README.md")
 
 
 def _expand_suites_alias_map(text: str) -> dict[str, tuple[str, ...]]:
@@ -2018,6 +2047,8 @@ def main() -> int:
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("mixed_visual_suites", test_mixed_visual_suites_are_look_plus_block),
+        ("mixed_unrelated_suites", test_mixed_unrelated_suites_are_undeclared_comma_lists),
+        ("one_concern_contract_docs", test_one_concern_contract_is_documented),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
         ("fixture_gate_alias_surface", test_fixture_gate_covers_every_expand_suites_alias),
         ("barrier_tables_pair", test_new_barrier_tables_fresh_pair_per_generation),

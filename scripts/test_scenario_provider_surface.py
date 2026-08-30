@@ -88,6 +88,18 @@ def main() -> int:
         r"public\s+static\s+CaseDef\s+Staged\s*\(",
         casedef,
     ), "CaseDef.Staged must be a public static factory"
+    assert "public static void RegisterStaged" in casedef, (
+        "CaseDef.RegisterStaged must exist so camera-staged prefabs are destroyed "
+        "instead of piling up at the same world point"
+    )
+    assert "public static void ClearStaged" in casedef
+    staged_body = method_body(
+        casedef,
+        r"public\s+static\s+CaseDef\s+Staged\s*\([^)]*\)",
+    )
+    assert "ClearStaged()" in staged_body, (
+        "CaseDef.Staged must clear previously staged instances before a new hold"
+    )
     assert re.search(
         r"public\s+static\s+CaseDef\s+StagedClip\s*\(",
         casedef,

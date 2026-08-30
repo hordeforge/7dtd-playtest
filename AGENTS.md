@@ -221,23 +221,42 @@ belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged`. Ne
 marker/hold/assert triple, that is what made every screenshot loop grep a
 different sentence.
 
-### One visual mode per run. Never mix them.
+### One concern per run. Do not mix tests.
 
-A prefab instantiated in front of the camera and a block sitting on a voxel
-are **different pictures**. Do not comma-list them in one `PLAYTEST_SUITE`.
+A playtest invocation proves **one concern**. Do not pile unrelated cases
+into one `PLAYTEST_SUITE` because the client is already up. A person
+watching cannot tell which picture they are signing off, and shared
+world/inventory state makes a borrowed case change every case after it.
 
-Naming contract, gated by `playtest_run.mixed_visual_suites`:
+Two things **are** one concern, and belong together:
 
-- a suite that hangs a prefab in the player's face ends in `_look`
-- a suite that `SetBlockRpc`s or has the player place a block contains `_block_`
+- consecutive actions of one feature (equip, then use, then capture; place
+  the bomb, then arm the detonator, then watch the fuse)
+- a child that is already **part of** the built object (a particle system
+  on the entity prefab, not spawned as a second instantiate next to it)
 
-`playtest_run.py --suite a_look,a_block_model` errors before the client
-starts. Consumers (7dtd-asset-pipeline) have the same refusal in their
-wrapper and in the generated provider. Do not work around it by dragging a
-`BlockEntityData.transform` into the camera, and do not fold instantiate-look
-cases into a block suite "so there is something to photograph". Point the
-camera at the voxel (`Helpers.LookAt`). Run `_look` as its own invocation
-if you need the floating prefab.
+Two things that are **not** one concern, and must be separate invocations:
+
+- a placed block on a voxel, and a prefab hanging in the player's face
+- a load-only mechanical case, and a staged visual of a different asset
+  "so there is something to photograph"
+
+Look-versus-block is the form the harness can gate by name. A suite that
+hangs a prefab in the player's face ends in `_look`; a suite that
+`SetBlockRpc`s or has the player place a block contains `_block_`.
+`playtest_run.mixed_visual_suites` refuses both in one list. The name **is**
+the picture: putting `Object.Instantiate` / `CaseDef.Staged` of a floating
+prefab into a suite that is **not** named `*_look`, so it can ride along
+with `*_block_*`, is the mix with the gate turned off.
+
+The general rule is not limited to those suffixes. Do not comma-list
+unrelated features. Do not smuggle a second picture into a suite whose
+name does not say so. Do not instantiate two look-prefabs at the same
+world point: `CaseDef.RegisterStaged` on every camera-staged instance so
+`ClearStaged` can destroy it before the next hold. Consumers
+(7dtd-asset-pipeline) generate **one look suite per prefab** and refuse
+an undeclared comma-list. Point a block look at the voxel
+(`Helpers.LookAt`). Run a floating-prefab look as its own invocation.
 
 ## Offline gates (no game install)
 
