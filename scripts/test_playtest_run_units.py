@@ -750,6 +750,8 @@ def test_one_concern_contract_is_documented() -> None:
         assert "part of" in lowered, label
         assert "consecutive" in lowered, label
         assert "matrix" in lowered or "separate invocation" in lowered, label
+        assert "concern-suites" in lowered or "playtest_concern_suites" in lowered, label
+        assert "registerstaged" in lowered, label
     print("PASS one-concern contract is in AGENTS.md and README.md")
 
 

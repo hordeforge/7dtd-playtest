@@ -2273,7 +2273,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--suite",
         default="demo",
-        help="suite alias or list: demo, gate, benchmark, full, smoke, core, …",
+        help=(
+            "one suite id or alias (demo, gate, smoke, core, …). "
+            "A 2+ id list needs --concern-suites unless it is smoke,core"
+        ),
     )
     ap.add_argument(
         "--world-name",

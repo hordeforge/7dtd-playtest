@@ -31,6 +31,11 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- README / AGENTS how-to: one suite id, `smoke,core` as the only
+  undeclared combo, `--concern-suites` / `PLAYTEST_CONCERN_SUITES` in
+  the env table, matrix as separate invocations, and a
+  `CaseDef.RegisterStaged` sample on the public surface. `--suite` help
+  names the 2+ list rule.
 - One concern per playtest run is a gate, not a paragraph:
   `mixed_unrelated_suites` refuses an undeclared comma-list of suite ids.
   `--concern-suites` / `PLAYTEST_CONCERN_SUITES` is how consecutive steps of

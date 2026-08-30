@@ -258,6 +258,19 @@ world point: `CaseDef.RegisterStaged` on every camera-staged instance so
 an undeclared comma-list. Point a block look at the voxel
 (`Helpers.LookAt`). Run a floating-prefab look as its own invocation.
 
+How to run it:
+
+```bash
+make playtest SUITE=one_id
+```
+
+The only undeclared multi-id list the harness accepts is `smoke,core`.
+Any other comma-list must be declared as exactly one concern (consecutive
+steps of one feature), via `--concern-suites` or `PLAYTEST_CONCERN_SUITES`,
+with the **same tokens** as `--suite` / `PLAYTEST_SUITE`. Look plus block
+cannot be declared. Unrelated features: separate invocations, not one list.
+README "Visual confirmation" has the `RegisterStaged` sample.
+
 ## Offline gates (no game install)
 
 `make test` runs lint + typecheck plus the fourteen offline gate files on

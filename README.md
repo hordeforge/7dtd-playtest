@@ -349,7 +349,7 @@ uv run --locked --project . python scripts/playtest_run.py --suite your_suite --
 `--no-fixtures` is the overriding opt-out when both options are present.
 
 Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged` /
-`StagedClip`, `CaseCtx`,
+`StagedClip`, `CaseDef.RegisterStaged` / `ClearStaged`, `CaseCtx`,
 `IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`),
 `MiningSpec` / `MiningProbe` / `MiningResult`. The stock `mining_harvest`
 case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
@@ -380,6 +380,7 @@ The runner arms from the **first non-empty** of:
 |---|---|
 | `PLAYTEST_SUITE` | Canonical suite list / aliases |
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias (Atomic / older hosts) |
+| `PLAYTEST_CONCERN_SUITES` | Exact token list that is one declared concern (same tokens as `PLAYTEST_SUITE` when you comma-list consecutive steps of one feature). Env form of `--concern-suites` |
 | `PLAYTEST=1` or `ZDTD_PLAYTEST=1` | Legacy arm → `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
 
@@ -401,6 +402,32 @@ Or invoke the orchestrator directly:
 ```bash
 uv run --locked --project . python scripts/playtest_run.py --suite your_suite
 ```
+
+One invocation is **one concern**. A single suite id is always one concern.
+The only harness combo that needs no declaration is `smoke,core` (the
+`gate` alias). Every other comma-list is mixing unless you declare it:
+
+```bash
+uv run --locked --project . python scripts/playtest_run.py \
+    --suite mod_bundle,mod_block_model,mod_editorless \
+    --concern-suites mod_bundle,mod_block_model,mod_editorless
+```
+
+```bash
+PLAYTEST_CONCERN_SUITES=mod_bundle,mod_block_model,mod_editorless \
+    make playtest SUITE=mod_bundle,mod_block_model,mod_editorless
+```
+
+The declared list must be **exactly** those tokens. Look (`*_look`) and
+block (`*_block_*`) are never one concern, even if declared — run them as
+separate invocations:
+
+```bash
+make playtest SUITE=mod_burst_look
+make playtest SUITE=mod_block_model
+```
+
+Unrelated features are a matrix of single-suite runs, not one comma-list.
 
 Every run starts from a fresh save: a hard rule, no opt-out. The orchestrator
 wipes the state before each run, so `--fresh-save` is accepted only as a no-op
@@ -601,6 +628,29 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
     ctx => WearSuitAndOpenBackpack(ctx),
     holdSeconds: 10f));
 ```
+
+A **camera-staged prefab** (something you `Instantiate` in front of the
+lens, not a block on a voxel and not a garment already on the player)
+must be registered so the next hold cannot stack on it. `Staged` /
+`StagedClip` call `ClearStaged` at hold start and hold end; they only
+destroy what you registered:
+
+```csharp
+queue.Add(CaseDef.Staged(suite, "look_burst", new[] { "capture", "bundle" },
+    stage: ctx =>
+    {
+        var prefab = DataLoader.LoadAsset<GameObject>(uri);
+        var staged = UnityEngine.Object.Instantiate(prefab);
+        CaseDef.RegisterStaged(staged);
+        staged.transform.position = camera.position + camera.forward * 3.5f;
+        return true;
+    },
+    holdSeconds: 12f));
+```
+
+Name that suite `*_look`. One look suite per prefab. Do not register a
+placed block or a grafted garment: those are the feature, not a disposable
+instance.
 
    Staging the game's own interface? Use `Helpers.OpenWindowGroup(player,
    "<group>")`, which returns whether the **name is known** (the request was
