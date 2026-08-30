@@ -22,6 +22,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- `playtest_run.py` refuses a `PLAYTEST_SUITE` list that mixes a prefab-look
+  suite (`*_look`) with a block-placement suite (`*_block_*`). Those are
+  different pictures; hanging a prefab in front of the camera and placing a
+  block on a voxel must be separate invocations.
+
 ### Changed
 
 - `Microsoft.NETFramework.ReferenceAssemblies` is exact-pinned at `[1.0.3]`

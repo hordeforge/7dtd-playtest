@@ -624,7 +624,14 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 
 3. Never assert how it *looks*. No fixture here can see; `CaseDef.Staged`'s
    assert only establishes that there was something to photograph.
-4. Photograph it with [`scripts/capture_frames.sh`](scripts/capture_frames.sh),
+4. **One visual mode per run.** Instantiating a prefab in front of the
+   camera (`*_look`) and placing a block on a voxel (`*_block_*`) are
+   different pictures. Do not comma-list them in one `PLAYTEST_SUITE`.
+   `playtest_run.py` refuses that mix. A block look is `SetBlockRpc` (or
+   the player) then `Helpers.LookAt` the voxel, not
+   `Object.Instantiate` and not dragging the model transform into the
+   lens.
+5. Photograph it with [`scripts/capture_frames.sh`](scripts/capture_frames.sh),
    which runs the suite, waits for that marker in a log written *after* the run
    started, shoots N frames, crops them to the client window and builds a
    contact sheet:

@@ -712,6 +712,18 @@ def test_fixture_gate_covers_every_barrier_emitting_suite() -> None:
     )
 
 
+def test_mixed_visual_suites_are_look_plus_block() -> None:
+    """Prefab-look and block-place must not share one PLAYTEST_SUITE list."""
+    mixed = playtest_run.mixed_visual_suites
+    assert mixed("mod_look,mod_block_model")
+    assert mixed("mod_block_place; mod_look")
+    assert not mixed("mod_bundle,mod_block_model")
+    assert not mixed("mod_look")
+    assert not mixed("demo")
+    assert not mixed("soak_walk_look_cycle")
+    print("PASS mixed_visual_suites look+block is mixed; load+block and catalog look_ are not")
+
+
 def _expand_suites_alias_map(text: str) -> dict[str, tuple[str, ...]]:
     """Parse Catalog.ExpandSuites switch arms into {alias: expansion ids}.
 
@@ -2005,6 +2017,7 @@ def main() -> int:
         ("prune_run_artifacts_wiring", test_prune_run_artifacts_wired_into_main),
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
+        ("mixed_visual_suites", test_mixed_visual_suites_are_look_plus_block),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
         ("fixture_gate_alias_surface", test_fixture_gate_covers_every_expand_suites_alias),
         ("barrier_tables_pair", test_new_barrier_tables_fresh_pair_per_generation),
