@@ -123,13 +123,12 @@ class LockStorage:
         # Threads in this process still need a mutex around the read-modify
         # publish, or two HeartbeatThread/acquire callers can both win.
         gate = _thread_gate(flock_path)
-        with gate:
-            with open(flock_path, "a+", encoding="utf-8") as lf:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-                try:
-                    fn()
-                finally:
-                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        with gate, open(flock_path, "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                fn()
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
 class LockEnv:

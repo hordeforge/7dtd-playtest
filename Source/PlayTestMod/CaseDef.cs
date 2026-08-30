@@ -372,6 +372,100 @@ namespace ZdtdPlaytest
                 pause: pause);
         }
 
+        /// <summary>
+        /// Build a **walking entity** case: spawn a real entity class beside
+        /// the player and drive it walking along the ground for the hold,
+        /// recording a frame clip.
+        ///
+        /// <para>The spawn is the game's own (`SpawnEntityNear` →
+        /// <c>EntityFactory.CreateEntity</c> + <c>SpawnEntityInWorld</c>), so the
+        /// game grounds the entity with its own physics and casts its shadow —
+        /// a spawned animal is never a staged prefab hovering in front of the
+        /// camera, which is how a static staged look ends up with its feet
+        /// measured against a terrain query that disagrees with the collider.
+        /// Each tick the case steps the entity forward along the ground (a
+        /// position drive, only in x/z so the game's grounding is preserved),
+        /// so an AvatarController that plays clips by motion state —
+        /// <c>GameObjectAnimalAnimation</c> plays <c>Walk</c> while the entity's
+        /// motion is non-zero — animates the gait. The entity is despawned when
+        /// the hold ends.</para>
+        ///
+        /// <para>The assert establishes that the entity spawned and actually
+        /// travelled; it never claims the gait looked right. The verdict is the
+        /// muxed clip, and a person's.</para>
+        /// </summary>
+        public static CaseDef WalkEntity(
+            string suite,
+            string id,
+            string className,
+            Vector3 spawnOffset,
+            float holdSeconds = 12f,
+            float clipFps = 4f,
+            float speed = 0.8f,
+            int captureSuperSize = 2,
+            string fail = null,
+            float pause = 0.5f)
+        {
+            if (string.IsNullOrEmpty(className))
+                throw new ArgumentException("CaseDef.WalkEntity(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") has no className to spawn");
+            if (!(holdSeconds > 0f))
+                throw new ArgumentOutOfRangeException(nameof(holdSeconds), holdSeconds,
+                    "CaseDef.WalkEntity(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") holdSeconds must be > 0");
+            return Live(suite, id, new[] { "capture", "clip" },
+                act: ctx =>
+                {
+                    var player = ctx.Player;
+                    if (player == null) { ctx.Detail = "no player to spawn beside"; ctx.IntA = -1; return; }
+                    var spawned = Helpers.SpawnEntityNear(player, className, spawnOffset);
+                    if (spawned == null) { ctx.Detail = "SpawnEntityNear(" + className + ") returned null"; ctx.IntA = -1; return; }
+                    ctx.TargetEntityId = spawned.entityId;
+                    ctx.StartPos = spawned.GetPosition();
+                    ctx.FloatA = Time.unscaledTime;
+                    ctx.FloatB = 0f;
+                    Helpers.BeginClip(id, captureSuperSize, clipFps);
+                },
+                wait: ctx =>
+                {
+                    var world = ctx.World;
+                    var e = (ctx.TargetEntityId <= 0 || world == null)
+                        ? null : Helpers.FindAliveById(world, ctx.TargetEntityId);
+                    float elapsed = Time.unscaledTime - ctx.FloatA;
+                    if (e != null)
+                    {
+                        var pos = e.GetPosition();
+                        var fwd = e.transform.forward;
+                        pos += new Vector3(fwd.x, 0f, fwd.z) * (speed * Time.deltaTime);
+                        try { e.SetPosition(pos); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
+                        ctx.FloatB = (e.GetPosition() - ctx.StartPos).magnitude;
+                    }
+                    bool done = elapsed >= holdSeconds;
+                    if (done && ctx.TargetEntityId > 0 && world != null)
+                    {
+                        var last = Helpers.FindAliveById(world, ctx.TargetEntityId);
+                        try
+                        {
+                            if (last != null) world.RemoveEntityFromMap(last, EnumRemoveEntityReason.Despawned);
+                        }
+                        catch (Exception ex) { ctx.Detail = "despawn threw: " + ex.Message; }
+                    }
+                    return done;
+                },
+                assert: ctx =>
+                {
+                    Helpers.EndClip(id);
+                    bool ok = ctx.TargetEntityId > 0 && ctx.FloatB > 0.5f;
+                    Report.Info(id + ": spawned_id=" + ctx.TargetEntityId
+                        + " travelled=" + ctx.FloatB + "m clip=playtest-shots/clips/" + id);
+                    return ok;
+                },
+                timeout: holdSeconds + 25f,
+                fail: fail ?? ("the spawned " + className + " entity did not spawn and walk; "
+                    + "check the class is deployed and has AvatarController=GameObjectAnimalAnimation"),
+                pause: pause);
+        }
+
         /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
         /// <paramref name="tags"/> is informational only (catalog listing).</summary>
         public static CaseDef Defer(string suite, string id, string[] tags, string reason)        {
