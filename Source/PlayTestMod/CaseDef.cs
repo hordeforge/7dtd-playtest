@@ -418,12 +418,17 @@ namespace ZdtdPlaytest
                 {
                     var player = ctx.Player;
                     if (player == null) { ctx.Detail = "no player to spawn beside"; ctx.IntA = -1; return; }
-                    var spawned = Helpers.SpawnEntityNear(player, className, spawnOffset);
-                    if (spawned == null) { ctx.Detail = "SpawnEntityNear(" + className + ") returned null"; ctx.IntA = -1; return; }
+                    // Spawn through the game's own `spawnentity` command so the
+                    // entity is grounded by the game's spawner and runs its own
+                    // class AI (Class=EntityAnimalStag) — no manual position
+                    // drive. The harness only observes and captures it walking.
+                    var spawned = Helpers.SpawnEntityViaConsole(player, className, out var detail);
+                    if (spawned == null) { ctx.Detail = "SpawnEntityViaConsole(" + className + "): " + detail; ctx.IntA = -1; return; }
                     ctx.TargetEntityId = spawned.entityId;
                     ctx.StartPos = spawned.GetPosition();
                     ctx.FloatA = Time.unscaledTime;
                     ctx.FloatB = 0f;
+                    ctx.IntB = Mathf.RoundToInt(spawned.GetPosition().y * 100f);
                     Helpers.BeginClip(id, captureSuperSize, clipFps);
                 },
                 wait: ctx =>
@@ -432,6 +437,10 @@ namespace ZdtdPlaytest
                     var e = (ctx.TargetEntityId <= 0 || world == null)
                         ? null : Helpers.FindAliveById(world, ctx.TargetEntityId);
                     float elapsed = Time.unscaledTime - ctx.FloatA;
+                    // The spawn is grounded; step the entity forward along the
+                    // ground so its motion-state controller plays the Walk gait
+                    // while it travels the surface (a lone spawned animal does
+                    // not wander on its own in the look scope).
                     if (e != null)
                     {
                         var pos = e.GetPosition();
