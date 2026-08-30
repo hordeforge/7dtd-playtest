@@ -354,6 +354,19 @@ Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged` /
 `MiningSpec` / `MiningProbe` / `MiningResult`. The stock `mining_harvest`
 case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
 
+`CaseDef.WalkEntity(suite, id, className, spawnOffset, holdSeconds, clipFps,
+speed, ...)` spawns a non-remote `EntityAlive` of `className` beside the
+player and drives it forward for `holdSeconds` while recording a clip. It
+drives the creature's **own motor** (`alive.SetMoveForward(1f)` per wait
+tick) rather than teleporting it (`SetPosition`): teleporting pins the
+last-read Y so the engine's `MoveHelper → CharacterController` chain never
+re-grounds the entity, and the gait animation swings the feet relative to
+the frozen root — the "legs clip in, then float, then ride high over a
+bump" read. Driving the motor lets the CC settle Y onto the surface every
+tick, the way a real animal or a server-side spawn grounds. The assert line
+reports the entity's **Y range** (`y[min..max]`) across the walk so a
+grounding regression is a number, not a frame you have to squint at.
+
 `Helpers.LookAt(player, worldPos)` aims the player camera at a world position.
 It follows the stock `EntityPlayerLocal.SetRotation` convention: negative X
 pitch looks below the horizon and positive X pitch looks above it. Use the
