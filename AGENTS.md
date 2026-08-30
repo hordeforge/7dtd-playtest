@@ -221,6 +221,24 @@ belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged`. Ne
 marker/hold/assert triple, that is what made every screenshot loop grep a
 different sentence.
 
+### One visual mode per run. Never mix them.
+
+A prefab instantiated in front of the camera and a block sitting on a voxel
+are **different pictures**. Do not comma-list them in one `PLAYTEST_SUITE`.
+
+Naming contract, gated by `playtest_run.mixed_visual_suites`:
+
+- a suite that hangs a prefab in the player's face ends in `_look`
+- a suite that `SetBlockRpc`s or has the player place a block contains `_block_`
+
+`playtest_run.py --suite a_look,a_block_model` errors before the client
+starts. Consumers (7dtd-asset-pipeline) have the same refusal in their
+wrapper and in the generated provider. Do not work around it by dragging a
+`BlockEntityData.transform` into the camera, and do not fold instantiate-look
+cases into a block suite "so there is something to photograph". Point the
+camera at the voxel (`Helpers.LookAt`). Run `_look` as its own invocation
+if you need the floating prefab.
+
 ## Offline gates (no game install)
 
 `make test` runs lint + typecheck plus the fourteen offline gate files on

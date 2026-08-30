@@ -1916,6 +1916,22 @@ FIXTURE_SUITE_IDS = frozenset(
 )
 
 
+def mixed_visual_suites(suite: str) -> bool:
+    """True when a suite list asks for both prefab-look and block-place.
+
+    Instantiating a prefab in front of the camera (`*_look`) and placing a
+    block on a voxel (`*_block_*`) are different pictures. Mixing them in
+    one PLAYTEST_SUITE list is how a consumer self-test rendered a texture
+    mid-air AND a placed block in the same session, repeatedly. The naming
+    is the contract: a suite that hangs a prefab in the player's face ends
+    in `_look`; a suite that SetBlockRpc's or places ends with `_block_*`.
+    """
+    tokens = [token for token in re.split(r"[,;\s]+", suite.strip()) if token]
+    look = any(token.endswith("_look") for token in tokens)
+    block = any("_block_" in token for token in tokens)
+    return look and block
+
+
 def suite_wants_host_fixtures(suite: str) -> bool:
     """True when any selected suite id needs host telnet fixtures.
 
@@ -2431,6 +2447,12 @@ def main(argv: list[str] | None = None) -> int:
         help="playtest lock session id (or PLAYTEST_SESSION_ID); auto-generated if empty",
     )
     args = ap.parse_args(argv)
+    if mixed_visual_suites(args.suite):
+        ap.error(
+            "PLAYTEST_SUITE mixes a prefab-look suite (*_look) and a "
+            "block-placement suite (*_block_*); they are different pictures. "
+            "Run them as separate playtest invocations."
+        )
     # Backend default resolves before the validation below: require_litenet_room
     # compares an int, and every default-port invocation (make playtest with
     # PORT= empty) reaches here without --port.
