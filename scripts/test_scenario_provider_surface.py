@@ -209,6 +209,9 @@ def main() -> int:
     # README documents the public entry points for provider authors.
     assert "CaseDef.Live" in readme, "README must document CaseDef.Live"
     assert "CaseDef.Defer" in readme, "README must document CaseDef.Defer"
+    assert "CaseDef.RegisterStaged" in readme, (
+        "README must document CaseDef.RegisterStaged for camera-staged prefabs"
+    )
 
     # Public Helpers + Report for external providers (give/equip/vehicle/barriers).
     assert re.search(r"public\s+static\s+(partial\s+)?class\s+Helpers\b", helpers), (

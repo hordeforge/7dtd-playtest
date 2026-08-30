@@ -15,7 +15,10 @@ consumer of the capability, `7dtd-asset-pipeline`'s
 [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
 is implemented and generates `StagedClip` cases for assets declared with a
 motion kind in the mod's `.shamway.toml` (`[acceptance] motion_kinds`).
-Feeds [VIDEO_MODEL_FEEDBACK.md](VIDEO_MODEL_FEEDBACK.md)
+A clip run is still **one concern**: one `*_look` / motion suite per
+invocation, `CaseDef.RegisterStaged` on every camera-staged instance so
+consecutive holds cannot overlay. Do not comma-list a motion look with
+`*_block_*`. Feeds [VIDEO_MODEL_FEEDBACK.md](VIDEO_MODEL_FEEDBACK.md)
 (what a clip is reviewed for) and
 [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md) (what a clip is
 used for once reviewed).
