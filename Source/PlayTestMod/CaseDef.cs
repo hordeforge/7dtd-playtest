@@ -439,6 +439,7 @@ namespace ZdtdPlaytest
                         pos += new Vector3(fwd.x, 0f, fwd.z) * (speed * Time.deltaTime);
                         try { e.SetPosition(pos); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
                         ctx.FloatB = (e.GetPosition() - ctx.StartPos).magnitude;
+                        ctx.IntB = Mathf.RoundToInt(e.GetPosition().y * 100f);
                     }
                     bool done = elapsed >= holdSeconds;
                     if (done && ctx.TargetEntityId > 0 && world != null)
@@ -457,7 +458,8 @@ namespace ZdtdPlaytest
                     Helpers.EndClip(id);
                     bool ok = ctx.TargetEntityId > 0 && ctx.FloatB > 0.5f;
                     Report.Info(id + ": spawned_id=" + ctx.TargetEntityId
-                        + " travelled=" + ctx.FloatB + "m clip=playtest-shots/clips/" + id);
+                        + " travelled=" + ctx.FloatB + "m y=" + (ctx.IntB / 100f)
+                        + " clip=playtest-shots/clips/" + id);
                     return ok;
                 },
                 timeout: holdSeconds + 25f,
