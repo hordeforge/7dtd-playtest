@@ -437,6 +437,11 @@ namespace ZdtdPlaytest
                     ctx.FloatA = Time.unscaledTime;
                     ctx.FloatB = 0f;
                     ctx.IntB = Mathf.RoundToInt(spawned.GetPosition().y * 100f);
+                    // Track the entity's Y spread across the walk so a grounding
+                    // regression (legs clipping in, floating, riding too high over
+                    // a rise) is a measurable number, not a look.
+                    ctx.LongA = (long)(spawned.GetPosition().y * 100f);
+                    ctx.LongB = (long)(spawned.GetPosition().y * 100f);
                     Helpers.BeginClip(id, captureSuperSize, clipFps);
                 },
                 wait: ctx =>
@@ -447,12 +452,32 @@ namespace ZdtdPlaytest
                     float elapsed = Time.unscaledTime - ctx.FloatA;
                     if (e != null)
                     {
-                        var pos = e.GetPosition();
-                        var fwd = e.transform.forward;
-                        pos += new Vector3(fwd.x, 0f, fwd.z) * (speed * Time.deltaTime);
-                        try { e.SetPosition(pos); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
+                        // Drive the creature's own motor (SetMoveForward) rather
+                        // than teleporting it (SetPosition): SetPosition pins the
+                        // Y the caller last read, so the engine's MoveHelper →
+                        // CharacterController chain never re-grounds the entity
+                        // and the feet clip/float/ride-high over terrain. Its
+                        // own motor keeps X/Z moving while the CC settles Y onto
+                        // the collider surface every tick — the way a real animal
+                        // (or a server-side spawn) grounds.
+                        var alive = e as EntityAlive;
+                        if (alive != null)
+                        {
+                            try { alive.SetMoveForward(1f); }
+                            catch (Exception ex) { ctx.Detail = "SetMoveForward threw: " + ex.Message; }
+                        }
+                        else
+                        {
+                            var pos = e.GetPosition();
+                            var fwd = e.transform.forward;
+                            pos += new Vector3(fwd.x, 0f, fwd.z) * (speed * Time.deltaTime);
+                            try { e.SetPosition(pos); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
+                        }
                         ctx.FloatB = (e.GetPosition() - ctx.StartPos).magnitude;
-                        ctx.IntB = Mathf.RoundToInt(e.GetPosition().y * 100f);
+                        int yNow = Mathf.RoundToInt(e.GetPosition().y * 100f);
+                        ctx.IntB = yNow;
+                        if (yNow < ctx.LongA) ctx.LongA = yNow;
+                        if (yNow > ctx.LongB) ctx.LongB = yNow;
                     }
                     bool done = elapsed >= holdSeconds;
                     if (done && ctx.IntA > 0 && world != null)
@@ -460,7 +485,7 @@ namespace ZdtdPlaytest
                         var last = Helpers.FindAliveById(world, ctx.IntA);
                         try
                         {
-                            if (last != null) world.RemoveEntityFromMap(last, EnumRemoveEntityReason.Despawned);
+                            if (last != null) { var al = last as EntityAlive; if (al != null) try { al.SetMoveForward(0f); } catch { } world.RemoveEntityFromMap(last, EnumRemoveEntityReason.Despawned); }
                         }
                         catch (Exception ex) { ctx.Detail = "despawn threw: " + ex.Message; }
                     }
@@ -470,9 +495,11 @@ namespace ZdtdPlaytest
                 {
                     Helpers.EndClip(id);
                     bool ok = ctx.IntA > 0 && ctx.FloatB > 0.5f;
+                    double yMin = ctx.LongA / 100.0;
+                    double yMax = ctx.LongB / 100.0;
                     Report.Info(id + ": spawned_id=" + ctx.IntA
-                        + " travelled=" + ctx.FloatB + "m y=" + (ctx.IntB / 100f)
-                        + " clip=playtest-shots/clips/" + id);
+                        + " travelled=" + ctx.FloatB + "m y[" + yMin.ToString("0.00")
+                        + ".." + yMax.ToString("0.00") + "] clip=playtest-shots/clips/" + id);
                     return ok;
                 },
                 timeout: holdSeconds + 25f,
@@ -510,6 +537,9 @@ namespace ZdtdPlaytest
         public int IntC;
         public float FloatA;
         public float FloatB;
+        /// <summary>Min/max Y (×100) reached by a walking entity, to expose a grounding regression as a number.</summary>
+        public long LongA;
+        public long LongB;
         /// <summary>Optional entity id for combat fixtures (ranged target, etc.).</summary>
         public int TargetEntityId;
         public ulong WorldTime0;
