@@ -31,6 +31,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- One concern per playtest run is a gate, not a paragraph:
+  `mixed_unrelated_suites` refuses an undeclared comma-list of suite ids.
+  `--concern-suites` / `PLAYTEST_CONCERN_SUITES` is how consecutive steps of
+  one feature declare themselves as one list. A child that is part of a built
+  prefab is not a second suite. look-versus-block stays a hard incompatibility
+  even when declared. Unrelated features run as separate invocations.
+- `CaseDef.RegisterStaged` / `ClearStaged`: camera-staged instances are
+  destroyed at the start of the next hold and when this hold ends, so a
+  particle system, a mesh and a cube cannot occupy the same world point.
 - `Microsoft.NETFramework.ReferenceAssemblies` is exact-pinned at `[1.0.3]`
   (a bare `1.0.3` is NuGet's minimum range `[1.0.3, )`). Restore uses a
   repo `nuget.config` that clears extra package sources so it cannot fall

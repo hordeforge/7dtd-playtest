@@ -624,13 +624,16 @@ queue.Add(CaseDef.Staged(suite, "cbrn_suit", new[] { "capture", "models" },
 
 3. Never assert how it *looks*. No fixture here can see; `CaseDef.Staged`'s
    assert only establishes that there was something to photograph.
-4. **One visual mode per run.** Instantiating a prefab in front of the
-   camera (`*_look`) and placing a block on a voxel (`*_block_*`) are
-   different pictures. Do not comma-list them in one `PLAYTEST_SUITE`.
-   `playtest_run.py` refuses that mix. A block look is `SetBlockRpc` (or
-   the player) then `Helpers.LookAt` the voxel, not
-   `Object.Instantiate` and not dragging the model transform into the
-   lens.
+4. **One concern per run.** Do not comma-list unrelated suites in one
+   `PLAYTEST_SUITE`. `playtest_run.py` refuses an undeclared 2+ suite
+   list; pass `--concern-suites` with exactly that list only when the
+   cases are consecutive steps of one feature. A particle system that
+   is already part of the staged prefab is not a second suite. Two
+   different pictures (a prefab in the player's face, a block on a
+   voxel) are never one concern, even if declared. Run unrelated
+   features as separate invocations (a matrix). Camera-staged instances
+   must call `CaseDef.RegisterStaged` so the next hold cannot overlay
+   a particle system, a mesh, and a cube at the same world point.
 5. Photograph it with [`scripts/capture_frames.sh`](scripts/capture_frames.sh),
    which runs the suite, waits for that marker in a log written *after* the run
    started, shoots N frames, crops them to the client window and builds a
