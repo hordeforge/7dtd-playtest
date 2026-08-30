@@ -196,6 +196,90 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Detach the player's camera from the player (the game's own debug
+        /// detached-camera mode) so the clip recorder can photograph a scene the
+        /// player is not inside. `EntityPlayerLocal.SetCameraAttachedToPlayer(false)`
+        /// reparents the camera transform to null (verified from EntityPlayerLocal
+        /// IL), so the camera becomes a free transform: position it and point it at
+        /// a world target with <see cref="PointCameraAt"/>.
+        /// </summary>
+        private static Camera _captureCam;
+
+        /// <summary>
+        /// Detach the player's camera and replace the rendered output with a
+        /// dedicated capture camera. The player's first-person view draws an
+        /// arm/body overlay that no renderer toggle removes (it is part of the
+        /// FP controller composite), so the only clean way to photograph a
+        /// creature is to stop the player's FP cameras and give the world a free
+        /// camera the clip recorder (ScreenCapture) then captures. `SetCameraAttachedToPlayer`
+        /// is still the game's own detach; this adds the capture-camera half it
+        /// does not provide.
+        /// </summary>
+        public static void DetachCamera(EntityPlayerLocal player)
+        {
+            if (player == null) return;
+            try { player.SetCameraAttachedToPlayer(false, false); } catch { /* */ }
+            try { if (player.playerCamera != null) player.playerCamera.enabled = false; } catch { /* */ }
+            try { if (player.finalCamera != null) player.finalCamera.enabled = false; } catch { /* */ }
+            EnsureCaptureCamera();
+        }
+
+        /// <summary>
+        /// Re-attach the player's camera (undo <see cref="DetachCamera"/>).
+        /// </summary>
+        public static void AttachCamera(EntityPlayerLocal player)
+        {
+            if (player == null) return;
+            try { player.SetCameraAttachedToPlayer(true, false); } catch { /* */ }
+            try { if (player.playerCamera != null) player.playerCamera.enabled = true; } catch { /* */ }
+            try { if (player.finalCamera != null) player.finalCamera.enabled = true; } catch { /* */ }
+            if (_captureCam != null)
+            {
+                try { UnityEngine.Object.Destroy(_captureCam); } catch { /* */ }
+                _captureCam = null;
+            }
+        }
+
+        private static void EnsureCaptureCamera()
+        {
+            if (_captureCam != null) return;
+            var go = new GameObject("ShamwayCaptureCam");
+            _captureCam = go.AddComponent<Camera>();
+            _captureCam.enabled = true;
+            // Defaults: culling mask = everything, clear flags = skybox,
+            // targetDisplay = 0. It renders the world (creature + terrain) to
+            // the game view, which ScreenCapture.CaptureScreenshot captures.
+        }
+
+        /// <summary>
+        /// Position the capture camera (or the player camera as a fallback) at
+        /// <paramref name="camPos"/> and point it at <paramref name="lookAt"/>,
+        /// so the recorded framebuffer frames a world object rather than the
+        /// player's own view. Uses the same yaw-only convention as
+        /// <see cref="LookAt"/>: no roll.
+        /// </summary>
+        public static bool PointCameraAt(EntityPlayerLocal player, Vector3 camPos, Vector3 lookAt)
+        {
+            if (player == null) return false;
+            var cam = _captureCam != null ? _captureCam.transform
+                : (player.playerCamera != null ? player.playerCamera.transform : null);
+            if (cam == null) return false;
+            try
+            {
+                cam.position = camPos - Origin.position;
+                var dir = lookAt - camPos;
+                float len = dir.magnitude;
+                if (len < 0.01f) return true;
+                dir /= len;
+                float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
+                float pitch = Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
+                cam.rotation = Quaternion.Euler(pitch, yaw, 0f);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
         /// Start real motor walk: stock autorun with forward input injected
         /// through <see cref="LocomotionDrive"/>, not a teleport. Used by
         /// generated walk-cycle recording cases, which equip a worn asset and

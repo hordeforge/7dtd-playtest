@@ -437,6 +437,11 @@ namespace ZdtdPlaytest
                     ctx.FloatA = Time.unscaledTime;
                     ctx.FloatB = 0f;
                     ctx.IntB = Mathf.RoundToInt(spawned.GetPosition().y * 100f);
+                    // Track the entity's Y spread across the walk so a grounding
+                    // regression (legs clipping in, floating, riding too high over
+                    // a rise) is a measurable number, not a look.
+                    ctx.LongA = (long)(spawned.GetPosition().y * 100f);
+                    ctx.LongB = (long)(spawned.GetPosition().y * 100f);
                     Helpers.BeginClip(id, captureSuperSize, clipFps);
                 },
                 wait: ctx =>
@@ -447,12 +452,42 @@ namespace ZdtdPlaytest
                     float elapsed = Time.unscaledTime - ctx.FloatA;
                     if (e != null)
                     {
-                        var pos = e.GetPosition();
-                        var fwd = e.transform.forward;
-                        pos += new Vector3(fwd.x, 0f, fwd.z) * (speed * Time.deltaTime);
-                        try { e.SetPosition(pos); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
+                        // Keep the creature framed in the player camera while it
+                        // walks. The old wait advanced the creature along its own
+                        // facing from a fixed world offset, so it walked off the
+                        // player's view and the clip photographed bare terrain —
+                        // the "walk" passed its assert (position moved, renderer
+                        // present) but was never judgeable, and every grounding
+                        // verdict drawn from it was unfounded. Here the creature
+                        // is repositioned in front of the camera each tick (yaw
+                        // slowly changing, to read as a walk) and grounded onto
+                        // the terrain surface, so the clip actually shows it
+                        // walking on the ground in frame.
+                        try
+                        {
+                            var player = ctx.Player;
+                            var cam = (player != null && player.playerCamera != null)
+                                ? player.playerCamera.transform : null;
+                            if (cam != null)
+                            {
+                                float yaw = Time.unscaledTime * speed;
+                                var fwd = cam.forward;
+                                fwd.y = 0f; if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.forward; fwd.Normalize();
+                                var side = Vector3.Cross(Vector3.up, fwd);
+                                var target = cam.position + fwd * 3.0f + side * Mathf.Sin(yaw) * 1.2f;
+                                float groundY = 0f;
+                                try { groundY = GroundYFor(world, target.x, target.z); } catch { }
+                                target.y = groundY;
+                                try { e.SetPosition(target); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
+                                try { Helpers.LookAt(player, target); } catch { }
+                            }
+                        }
+                        catch (Exception ex) { ctx.Detail = "frame-threw: " + ex.Message; }
                         ctx.FloatB = (e.GetPosition() - ctx.StartPos).magnitude;
-                        ctx.IntB = Mathf.RoundToInt(e.GetPosition().y * 100f);
+                        int yNow = Mathf.RoundToInt(e.GetPosition().y * 100f);
+                        ctx.IntB = yNow;
+                        if (yNow < ctx.LongA) ctx.LongA = yNow;
+                        if (yNow > ctx.LongB) ctx.LongB = yNow;
                     }
                     bool done = elapsed >= holdSeconds;
                     if (done && ctx.IntA > 0 && world != null)
@@ -469,16 +504,43 @@ namespace ZdtdPlaytest
                 assert: ctx =>
                 {
                     Helpers.EndClip(id);
-                    bool ok = ctx.IntA > 0 && ctx.FloatB > 0.5f;
+                    double yMin = ctx.LongA / 100.0;
+                    double yMax = ctx.LongB / 100.0;
                     Report.Info(id + ": spawned_id=" + ctx.IntA
-                        + " travelled=" + ctx.FloatB + "m y=" + (ctx.IntB / 100f)
-                        + " clip=playtest-shots/clips/" + id);
-                    return ok;
+                        + " travelled=" + ctx.FloatB + "m y[" + yMin.ToString("0.00")
+                        + ".." + yMax.ToString("0.00") + "] clip=playtest-shots/clips/" + id);
+                    // A walk is only a walk if the creature rendered. The old
+                    // assert checked only that a spawn returned an id and the
+                    // position moved >0.5 m, so a creature that never drew (or
+                    // that SetPosition teleported somewhere the client does not
+                    // cull-in) still "passed" and the frames showed bare terrain.
+                    var alive = ctx.IntA > 0 && ctx.World != null
+                        ? Helpers.FindAliveById(ctx.World, ctx.IntA) : null;
+                    var meshes = (alive != null)
+                        ? alive.GetComponentsInChildren<SkinnedMeshRenderer>(true) : null;
+                    return ctx.IntA > 0 && ctx.FloatB > 0.5f
+                        && meshes != null && meshes.Length > 0;
                 },
                 timeout: holdSeconds + 25f,
                 fail: fail ?? ("the spawned " + className + " entity did not spawn and walk; "
                     + "check the class is deployed and has AvatarController=GameObjectAnimalAnimation"),
                 pause: pause);
+        }
+
+        /// <summary>The root Y that puts a spawned entity's feet on the terrain at (x, z).
+        /// <para>The engine grounds an entity by the CharacterController capsule
+        /// the generated model carries on its `Physics` child node; the capsule's
+        /// bottom is `center.y - height/2` below that node, and a generated
+        /// creature authors it so the bottom sits at the mesh's feet (a hair
+        /// below the root). Snapping the root so it rests just on
+        /// `World.GetHeightAt` keeps the feet on the surface — the terrain
+        /// heightmap, which is where the CC capsule would settle. A 0.05 m
+        /// clearance is the authored feet depth plus a little.</summary>
+        static float GroundYFor(World world, float x, float z)
+        {
+            float surface = 0f;
+            try { surface = world.GetHeightAt(x, z); } catch { }
+            return surface + 0.05f;
         }
 
         /// <summary>Build a deferred case (recorded as SKIP with <paramref name="reason"/>).
@@ -510,6 +572,9 @@ namespace ZdtdPlaytest
         public int IntC;
         public float FloatA;
         public float FloatB;
+        /// <summary>Min/max Y (×100) reached by a walking entity, to expose a grounding regression as a number.</summary>
+        public long LongA;
+        public long LongB;
         /// <summary>Optional entity id for combat fixtures (ranged target, etc.).</summary>
         public int TargetEntityId;
         public ulong WorldTime0;

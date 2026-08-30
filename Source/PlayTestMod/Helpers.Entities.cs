@@ -242,8 +242,12 @@ namespace ZdtdPlaytest
                 player.world.SpawnEntityInWorld(e);
                 return e;
             }
-            catch
+            catch (Exception ex)
             {
+                // Surface a swallowed spawn failure: without this, a creature
+                // that NREs during CreateEntity reports "returned null" and the
+                // cause is invisible in the client log.
+                Report.Info("SpawnEntityNear(" + className + ") threw: " + ex);
                 return null;
             }
         }
