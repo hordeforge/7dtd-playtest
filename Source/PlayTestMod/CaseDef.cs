@@ -418,13 +418,21 @@ namespace ZdtdPlaytest
                 {
                     var player = ctx.Player;
                     if (player == null) { ctx.Detail = "no player to spawn beside"; ctx.IntA = -1; return; }
-                    // Spawn through the game's own `spawnentity` command so the
-                    // entity is grounded by the game's spawner and runs its own
-                    // class AI (Class=EntityAnimalStag) — no manual position
-                    // drive. The harness only observes and captures it walking.
-                    var spawned = Helpers.SpawnEntityViaConsole(player, className, out var detail);
-                    if (spawned == null) { ctx.Detail = "SpawnEntityViaConsole(" + className + "): " + detail; ctx.IntA = -1; return; }
-                    ctx.TargetEntityId = spawned.entityId;
+                    // Spawn client-side but mark the entity NON-remote: the
+                    // client does not simulate a remote entity (gravity, AI, the
+                    // gait animation), and GameObjectAnimalAnimation only plays
+                    // for a non-remote one. Setting isEntityRemote=false makes
+                    // the client run it like a local entity — it grounds, its AI
+                    // wanders and the Walk gait plays. That is exactly what a
+                    // server-side spawn would give, without orchestrator plumbing.
+                    var spawned = Helpers.SpawnEntityNear(player, className, new Vector3(1.5f, 2f, 1.5f));
+                    if (spawned == null) { ctx.Detail = "SpawnEntityNear(" + className + ") returned null"; ctx.IntA = -1; return; }
+                    var alive = spawned as EntityAlive;
+                    if (alive != null)
+                    {
+                        try { alive.isEntityRemote = false; } catch (Exception ex) { ctx.Detail = "isEntityRemote set threw: " + ex.Message; }
+                    }
+                    ctx.IntA = spawned.entityId;
                     ctx.StartPos = spawned.GetPosition();
                     ctx.FloatA = Time.unscaledTime;
                     ctx.FloatB = 0f;
@@ -434,13 +442,9 @@ namespace ZdtdPlaytest
                 wait: ctx =>
                 {
                     var world = ctx.World;
-                    var e = (ctx.TargetEntityId <= 0 || world == null)
-                        ? null : Helpers.FindAliveById(world, ctx.TargetEntityId);
+                    var e = (ctx.IntA <= 0 || world == null)
+                        ? null : Helpers.FindAliveById(world, ctx.IntA);
                     float elapsed = Time.unscaledTime - ctx.FloatA;
-                    // The spawn is grounded; step the entity forward along the
-                    // ground so its motion-state controller plays the Walk gait
-                    // while it travels the surface (a lone spawned animal does
-                    // not wander on its own in the look scope).
                     if (e != null)
                     {
                         var pos = e.GetPosition();
@@ -451,9 +455,9 @@ namespace ZdtdPlaytest
                         ctx.IntB = Mathf.RoundToInt(e.GetPosition().y * 100f);
                     }
                     bool done = elapsed >= holdSeconds;
-                    if (done && ctx.TargetEntityId > 0 && world != null)
+                    if (done && ctx.IntA > 0 && world != null)
                     {
-                        var last = Helpers.FindAliveById(world, ctx.TargetEntityId);
+                        var last = Helpers.FindAliveById(world, ctx.IntA);
                         try
                         {
                             if (last != null) world.RemoveEntityFromMap(last, EnumRemoveEntityReason.Despawned);
@@ -465,8 +469,8 @@ namespace ZdtdPlaytest
                 assert: ctx =>
                 {
                     Helpers.EndClip(id);
-                    bool ok = ctx.TargetEntityId > 0 && ctx.FloatB > 0.5f;
-                    Report.Info(id + ": spawned_id=" + ctx.TargetEntityId
+                    bool ok = ctx.IntA > 0 && ctx.FloatB > 0.5f;
+                    Report.Info(id + ": spawned_id=" + ctx.IntA
                         + " travelled=" + ctx.FloatB + "m y=" + (ctx.IntB / 100f)
                         + " clip=playtest-shots/clips/" + id);
                     return ok;

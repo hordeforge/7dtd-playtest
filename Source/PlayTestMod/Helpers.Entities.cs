@@ -249,39 +249,6 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
-        /// Spawn an entity class **through the game's own `spawnentity` console
-        /// command** — the same command that spawns a zombie mid-game from a
-        /// client. It places the entity via `FindRandomSpawnPointNearPosition`
-        /// (a grounded spawn, not a raw offset) and the entity then runs its
-        /// own entity-class AI, so a `Class=EntityAnimalStag` creature walks and
-        /// grounds itself exactly as a stock animal does. Returns the spawned
-        /// `EntityAlive` (nearest after the command), or null with a `detail`.
-        /// </summary>
-        public static EntityAlive SpawnEntityViaConsole(EntityPlayerLocal player, string className, out string detail)
-        {
-            detail = "not run";
-            if (player == null || string.IsNullOrEmpty(className)) { detail = "no player/class"; return null; }
-            try
-            {
-                var console = SingletonMonoBehaviour<SdtdConsole>.Instance;
-                if (console == null) { detail = "no SdtdConsole"; return null; }
-                // playerId 0 = the local player; one instance.
-                console.ExecuteSync("spawnentity 0 " + className + " 1", null);
-                // The command spawns synchronously; the creature is the nearest
-                // EntityAlive to the player now.
-                EntityAlive found = Helpers.FindNearestOtherAlive(player.world, player.GetPosition(), 40f);
-                detail = found == null ? "no EntityAlive appeared after spawnentity" : "id=" + found.entityId;
-                return found;
-            }
-            catch (Exception ex)
-            {
-                detail = "spawnentity threw: " + ex.Message;
-                return null;
-            }
-        }
-
-
-        /// <summary>
         /// Put EntityAlive into sleeper pose. Returns true only if IsSleeping is
         /// observable after the call (not "pose requested").
         /// </summary>
