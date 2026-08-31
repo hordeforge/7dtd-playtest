@@ -9,13 +9,38 @@
   },
   "cases": [
     {
-      "id": "boot_to_world",
+      "id": "join_ready",
       "kind": "live",
-      "ref": "stock.boot_to_world",
-      "tags": ["smoke"]
+      "ref": "catalog.smoke.join_ready",
+      "tags": ["join", "demo", "smoke"]
+    },
+    {
+      "id": "cgo_ready",
+      "kind": "live",
+      "ref": "catalog.smoke.cgo_ready",
+      "tags": ["join", "mesh", "demo", "smoke"]
+    },
+    {
+      "id": "ground",
+      "kind": "live",
+      "ref": "catalog.smoke.ground",
+      "tags": ["world", "demo", "smoke"]
+    },
+    {
+      "id": "stats",
+      "kind": "live",
+      "ref": "catalog.smoke.stats",
+      "tags": ["player", "demo", "smoke"]
+    },
+    {
+      "id": "day_clock",
+      "kind": "live",
+      "ref": "catalog.smoke.day_clock",
+      "tags": ["world", "demo", "smoke"]
     }
   ],
   "notes": [
-    "Declarative topology for the smoke suite. Case refs resolve in Catalog / IScenarioProvider."
+    "Boot/join gate. Topology only; case refs resolve in Catalog.AddSmoke.",
+    "Default target sandbox is Safehouse lab isolation (local folder 7dtd-safehouse, repo 7dtd-sandbox)."
   ]
 }

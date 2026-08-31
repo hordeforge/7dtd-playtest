@@ -9,19 +9,122 @@
   },
   "cases": [
     {
-      "id": "boot_to_world",
+      "id": "look",
       "kind": "live",
-      "ref": "stock.boot_to_world",
-      "tags": ["core", "smoke"]
+      "ref": "catalog.core.look",
+      "tags": ["input", "demo", "core"]
     },
     {
-      "id": "move_and_look",
+      "id": "look_pitch",
       "kind": "live",
-      "ref": "stock.move_and_look",
-      "tags": ["core"]
+      "ref": "catalog.core.look_pitch",
+      "tags": ["input", "demo", "core"]
+    },
+    {
+      "id": "look_yaw_sweep",
+      "kind": "live",
+      "ref": "catalog.core.look_yaw_sweep",
+      "tags": ["input", "demo", "bench", "core"]
+    },
+    {
+      "id": "walk_motor",
+      "kind": "live",
+      "ref": "catalog.core.walk_motor",
+      "tags": ["move", "demo", "bench", "locomotion", "core"]
+    },
+    {
+      "id": "walk_ring",
+      "kind": "live",
+      "ref": "catalog.core.walk_ring",
+      "tags": ["move", "demo", "bench", "locomotion", "core"]
+    },
+    {
+      "id": "sprint_motor",
+      "kind": "live",
+      "ref": "catalog.core.sprint_motor",
+      "tags": ["move", "demo", "locomotion", "core"]
+    },
+    {
+      "id": "stamina_drains_sprint",
+      "kind": "live",
+      "ref": "catalog.core.stamina_drains_sprint",
+      "tags": ["player", "demo", "locomotion", "core"]
+    },
+    {
+      "id": "sneak_motor",
+      "kind": "live",
+      "ref": "catalog.core.sneak_motor",
+      "tags": ["move", "demo", "locomotion", "core"]
+    },
+    {
+      "id": "walk_lateral",
+      "kind": "live",
+      "ref": "catalog.core.walk_lateral",
+      "tags": ["move", "demo", "locomotion", "core"]
+    },
+    {
+      "id": "jump_motor",
+      "kind": "live",
+      "ref": "catalog.core.jump_motor",
+      "tags": ["move", "demo", "locomotion", "core"]
+    },
+    {
+      "id": "inventory",
+      "kind": "live",
+      "ref": "catalog.core.inventory",
+      "tags": ["inv", "demo", "core"]
+    },
+    {
+      "id": "bag_present",
+      "kind": "live",
+      "ref": "catalog.core.bag_present",
+      "tags": ["inv", "demo", "core"]
+    },
+    {
+      "id": "dig_confirm",
+      "kind": "live",
+      "ref": "catalog.core.dig_confirm",
+      "tags": ["world", "c2s", "setblock", "demo", "bench", "core"]
+    },
+    {
+      "id": "place_confirm",
+      "kind": "live",
+      "ref": "catalog.core.place_confirm",
+      "tags": ["world", "c2s", "setblock", "demo", "bench", "core"]
+    },
+    {
+      "id": "block_damage_melee",
+      "kind": "live",
+      "ref": "catalog.core.block_damage_melee",
+      "tags": ["world", "c2s", "demo", "melee", "core"]
+    },
+    {
+      "id": "mining_harvest",
+      "kind": "live",
+      "ref": "catalog.core.mining_harvest",
+      "tags": ["world", "c2s", "demo", "melee", "harvest", "core"]
+    },
+    {
+      "id": "held_slot_report",
+      "kind": "live",
+      "ref": "catalog.core.held_slot_report",
+      "tags": ["inv", "demo", "core"]
+    },
+    {
+      "id": "buffs",
+      "kind": "live",
+      "ref": "catalog.core.buffs",
+      "tags": ["player", "demo", "core"]
+    },
+    {
+      "id": "quests_journal",
+      "kind": "live",
+      "ref": "catalog.core.quests_journal",
+      "tags": ["quest", "demo", "core"]
     }
   ],
   "notes": [
-    "Declarative topology for the core suite. Case refs resolve in Catalog / IScenarioProvider."
+    "Play-loop spine. Topology only; case refs resolve in Catalog.AddCore.",
+    "Default target sandbox is Safehouse lab isolation (local folder 7dtd-safehouse, repo 7dtd-sandbox)."
   ]
 }
