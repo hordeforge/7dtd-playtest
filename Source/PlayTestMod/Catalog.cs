@@ -107,7 +107,7 @@ namespace ZdtdPlaytest
         static readonly string[] SuiteNames =
         {
             "smoke", "core", "world", "ui", "combat", "economy",
-            "quest", "vehicle", "power", "finale", "persist", "persist_setup",
+            "quest", "vehicle", "power", "finale", "parachute", "persist", "persist_setup",
             "mp", "soak", "soak_long", "apm", "benchmark", "bot",
         };
 

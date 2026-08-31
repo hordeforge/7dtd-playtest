@@ -32,6 +32,8 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_lock  # noqa: E402
+import playtest_targets  # noqa: E402
+import suite_loader  # noqa: E402
 from playtest_log import (  # noqa: E402
     ClientLogScan,
     LogTail,
@@ -42,8 +44,6 @@ from playtest_log import (  # noqa: E402
     barrier_line_hits,
     empty_client_log,
 )
-import playtest_targets  # noqa: E402
-import suite_loader  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent
@@ -2981,15 +2981,11 @@ def main(argv: list[str] | None = None) -> int:
                     err(f"sandbox target bring-up failed: {ex}")
                     return False
                 if env_map.get("SERVER_PORT"):
-                    try:
+                    with contextlib.suppress(ValueError):
                         args.port = int(env_map["SERVER_PORT"])
-                    except ValueError:
-                        pass
                 if env_map.get("SERVER_TELNET_PORT"):
-                    try:
+                    with contextlib.suppress(ValueError):
                         args.admin_port = int(env_map["SERVER_TELNET_PORT"])
-                    except ValueError:
-                        pass
                 if env_map.get("SERVER_GAME"):
                     args.game_srv = Path(env_map["SERVER_GAME"])
                 if env_map.get("SERVER_USERDATA"):
