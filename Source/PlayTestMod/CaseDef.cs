@@ -486,11 +486,16 @@ namespace ZdtdPlaytest
                             try { groundY = GroundYFor(world, target.x, target.z); } catch { }
                             target.y = groundY;
                             try { e.SetPosition(target); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
-                            // Frame the capture camera at a fixed vantage relative
-                            // to the creature (side + up), looking at it, so the
-                            // walk is always centered in the recorded clip.
-                            var cp = e.GetPosition();
-                            try { Helpers.PointCameraAt(player, cp + new Vector3(2.4f, 1.7f, 2.4f), cp); } catch { }
+                            // Frame the camera on the entity's TRANSFORM position,
+                            // not GetPosition(). The mesh renders at
+                            // transform.position (≈ GetPosition() − World.Origin);
+                            // GetPosition() is the save/world frame, Origin away
+                            // from where the mesh draws, so framing that framed
+                            // empty terrain ~48 m above the creature. A third-person
+                            // shot: park the camera above and behind (world −z) and
+                            // look at the creature, so it is not the creature's POV.
+                            var cp = e.transform.position;
+                            try { Helpers.PointCameraAt(player, cp + new Vector3(0f, 2.2f, -5.0f), cp); } catch { }
                         }
                         catch (Exception ex) { ctx.Detail = "frame-threw: " + ex.Message; }
                         ctx.FloatB = (e.GetPosition() - ctx.StartPos).magnitude;
@@ -531,6 +536,37 @@ namespace ZdtdPlaytest
                         ? Helpers.FindAliveById(ctx.World, ctx.IntA) : null;
                     var meshes = (alive != null)
                         ? alive.GetComponentsInChildren<SkinnedMeshRenderer>(true) : null;
+                    // Coordinate-frame divergence + mesh health: is the skinned
+                    // mesh actually drawing? A degenerate mesh reports a bounds
+                    // AABB at the transform but renders nothing. meshSize ≈ 0
+                    // means the skin collapsed; verts tells us the shared mesh is
+                    // still there; smrEnabled/meshActive/rootActive say whether
+                    // the renderer and its GameObjects are on.
+                    try
+                    {
+                        var smr = meshes != null && meshes.Length > 0 ? meshes[0] : null;
+                        Vector3 meshCenter = Vector3.zero, meshSize = Vector3.zero;
+                        bool smrEnabled = false, meshActive = false, rootActive = false;
+                        int verts = -1;
+                        if (smr != null)
+                        {
+                            meshCenter = smr.bounds.center; meshSize = smr.bounds.size;
+                            smrEnabled = smr.enabled;
+                            verts = smr.sharedMesh != null ? smr.sharedMesh.vertexCount : -1;
+                            meshActive = smr.gameObject != null && smr.gameObject.activeInHierarchy;
+                        }
+                        if (alive != null) rootActive = alive.transform != null
+                            && alive.transform.gameObject.activeInHierarchy;
+                        Report.Info(id + ": frame-div getpos=" + (alive != null ? alive.GetPosition().ToString("F2") : "n/a")
+                            + " tf=" + (alive != null ? alive.transform.position.ToString("F2") : "n/a")
+                            + " meshCenter=" + meshCenter.ToString("F2")
+                            + " meshSize=" + meshSize.ToString("F2")
+                            + " smrEnabled=" + smrEnabled
+                            + " verts=" + verts
+                            + " meshActive=" + meshActive
+                            + " rootActive=" + rootActive);
+                    }
+                    catch (Exception ex) { Report.Info(id + ": frame-div threw " + ex.Message); }
                     return ctx.IntA > 0 && ctx.FloatB > 0.5f
                         && meshes != null && meshes.Length > 0;
                 },
