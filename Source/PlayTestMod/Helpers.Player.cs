@@ -252,6 +252,147 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Return the actual camera pose used by an in-progress detached-camera
+        /// capture. This stays internal because providers position the camera
+        /// through <see cref="PointCameraAt"/>; the pose is diagnostic evidence,
+        /// not another way to drive it.
+        /// </summary>
+        internal static bool TryGetCaptureCameraPose(out Vector3 position, out Vector3 forward)
+        {
+            position = Vector3.zero;
+            forward = Vector3.zero;
+            if (_captureCam == null) return false;
+            try
+            {
+                position = _captureCam.transform.position;
+                forward = _captureCam.transform.forward;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Detach from the first-person body and frame one staged object by its
+        /// renderer bounds. Returns false when the object has nothing to frame.
+        /// Providers call this after placing their staged instance; the staged
+        /// case restores the player camera when the hold ends.
+        /// </summary>
+        public static bool FrameStagedObject(EntityPlayerLocal player, GameObject staged)
+        {
+            if (player == null || staged == null) return false;
+            Bounds bounds;
+            if (!TryGetRenderedBounds(staged, out bounds)) return false;
+            DetachCamera(player);
+            return FrameWorldBounds(player, staged.transform, bounds);
+        }
+
+        /// <summary>
+        /// Measure the geometry a renderer currently presents. A
+        /// SkinnedMeshRenderer's serialized AABB describes its authored mesh,
+        /// not necessarily its posed vertices, so bake the live skin before
+        /// combining bounds. Position curves can otherwise move an entire body
+        /// outside the AABB while every renderer-health check remains green.
+        /// </summary>
+        public static bool TryGetRenderedBounds(GameObject root, out Bounds bounds)
+        {
+            bounds = new Bounds();
+            if (root == null) return false;
+            var renderers = root.GetComponentsInChildren<Renderer>(true);
+            if (renderers == null || renderers.Length == 0) return false;
+            bool any = false;
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                var renderer = renderers[i];
+                Bounds current = renderer.bounds;
+                var smr = renderer as SkinnedMeshRenderer;
+                Mesh baked = null;
+                if (smr != null && smr.sharedMesh != null)
+                {
+                    try
+                    {
+                        baked = new Mesh();
+                        smr.BakeMesh(baked);
+                        current = TransformBounds(smr.transform, baked.bounds);
+                    }
+                    catch
+                    {
+                        current = renderer.bounds;
+                    }
+                    finally
+                    {
+                        if (baked != null) UnityEngine.Object.Destroy(baked);
+                    }
+                }
+                if (!any)
+                {
+                    bounds = current;
+                    any = true;
+                }
+                else bounds.Encapsulate(current);
+            }
+            return any;
+        }
+
+        static Bounds TransformBounds(Transform transform, Bounds local)
+        {
+            var ext = local.extents;
+            var first = transform.TransformPoint(local.center + new Vector3(-ext.x, -ext.y, -ext.z));
+            var world = new Bounds(first, Vector3.zero);
+            for (int x = -1; x <= 1; x += 2)
+            for (int y = -1; y <= 1; y += 2)
+            for (int z = -1; z <= 1; z += 2)
+                world.Encapsulate(transform.TransformPoint(
+                    local.center + new Vector3(ext.x * x, ext.y * y, ext.z * z)));
+            return world;
+        }
+
+        /// <summary>
+        /// Point the detached capture camera at rendered world bounds from a
+        /// nearby position that is neither occupied nor blocked from the target.
+        /// Internal because providers frame staged objects through
+        /// <see cref="FrameStagedObject"/>; live factories use this when the
+        /// bounds move every tick.
+        /// </summary>
+        internal static bool FrameWorldBounds(
+            EntityPlayerLocal player, Transform targetRoot, Bounds bounds)
+        {
+            if (player == null || targetRoot == null) return false;
+            EnsureCaptureCamera();
+            float extent = Mathf.Max(bounds.extents.x, bounds.extents.y, bounds.extents.z);
+            float distance = Mathf.Max(3.2f, extent * 4f);
+            float lift = Mathf.Max(1.2f, extent * 1.5f);
+            var offsets = new[]
+            {
+                new Vector3(0f, lift, -distance),
+                new Vector3(distance * 0.72f, lift, -distance * 0.72f),
+                new Vector3(-distance * 0.72f, lift, -distance * 0.72f),
+                new Vector3(distance, lift, 0f),
+                new Vector3(-distance, lift, 0f),
+                new Vector3(distance * 0.72f, lift, distance * 0.72f),
+                new Vector3(-distance * 0.72f, lift, distance * 0.72f),
+                new Vector3(0f, lift, distance),
+                new Vector3(0f, distance, -distance * 0.5f),
+            };
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                var candidate = bounds.center + offsets[i];
+                if (Physics.CheckSphere(candidate, 0.2f)) continue;
+                var toTarget = bounds.center - candidate;
+                float rayDistance = toTarget.magnitude;
+                if (rayDistance < 0.001f) continue;
+                RaycastHit hit;
+                if (!Physics.Raycast(
+                    candidate, toTarget / rayDistance, out hit, rayDistance + 0.1f))
+                    return PointCameraAt(player, candidate, bounds.center);
+                if (hit.transform != null && hit.transform.IsChildOf(targetRoot))
+                    return PointCameraAt(player, candidate, bounds.center);
+            }
+            return PointCameraAt(
+                player, bounds.center + new Vector3(0f, distance * 1.25f, -distance * 0.5f),
+                bounds.center);
+        }
+
+        /// <summary>
         /// Position the capture camera (or the player camera as a fallback) at
         /// <paramref name="camPos"/> and point it at <paramref name="lookAt"/>,
         /// so the recorded framebuffer frames a world object rather than the

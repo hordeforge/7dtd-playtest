@@ -350,18 +350,25 @@ uv run --locked --project . python scripts/playtest_run.py --suite your_suite --
 
 Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged` /
 `StagedClip`, `CaseDef.RegisterStaged` / `ClearStaged`, `CaseCtx`,
-`IScenarioProvider`, `Helpers`, `Report` (including `Report.Barrier`),
+`IScenarioProvider`, `Helpers` (including `FrameStagedObject`), `Report`
+(including `Report.Barrier`),
 `MiningSpec` / `MiningProbe` / `MiningResult`. The stock `mining_harvest`
 case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
 
 `CaseDef.WalkEntity(suite, id, className, spawnOffset, holdSeconds, clipFps,
 speed, ...)` spawns a non-remote `EntityAlive` of `className` beside the
 player and walks it for `holdSeconds` while recording a clip. To be
-**judgeable** rather than merely "passing", the creature is held in front of
-the player's camera every wait tick — repositioned to a point a few metres
-ahead of the camera (with a slow side-swing so it reads as a walk) and
-snapped to the terrain surface via `World.GetHeightAt` — so the clip
-actually photographs the creature walking on the ground. Two naive
+**judgeable** rather than merely "passing", the creature follows a slow orbit
+on the terrain and the detached capture camera follows its rendered bounds.
+The camera tries several nearby third-person angles and accepts one only when
+its position is unoccupied and a ray reaches the creature; a fixed world-axis
+offset photographed a rising `terrainCollider` and a nearby car instead of the
+body. The entity is snapped by a downward physics query to the actual
+traversable collider surface, with its root offset by the authored `Physics`
+capsule bottom, so slopes and partial blocks do not become invisible one-metre
+steps. `World.GetHeight(x,z) + 1` remains the fallback and trace comparison;
+`World.GetHeightAt` is the generator heightmap and measured one full block
+below the visible road in the regression scene. Two naive
 approaches were tried and abandoned: driving the entity's motor
 (`SetMoveForward`) made it sprint its full `MoveSpeed` away from the camera
 (~80 m, a ~67 m Y range), and stepping it along its own facing at a fixed
@@ -370,7 +377,41 @@ the case "passed" (position moved, renderer present) while the frames showed
 only terrain, because nothing ever framed the creature. The assert line
 reports the entity's **Y range** (`y[min..max]`) across the walk and checks a
 `SkinnedMeshRenderer` is present, so a grounding regression is a number and
-an invisible spawn is a failure, not a green run.
+an invisible spawn is a failure, not a green run. Once per walk it also emits
+`render-probe`: the actual detached-camera pose and view alignment, the first
+raycast hit between camera and mesh, material/shader support and `SetPass(0)`,
+authored and posed bounds from `SkinnedMeshRenderer.BakeMesh`, the root
+`Physics` capsule's dimensions and bottom, active solid-collider counts, and a
+physics ray that must hit the spawned entity. The case fails unless that
+collision evidence succeeds. It also reports the loaded voxel top, actual
+collider-surface ray, posed visual bottom and their deltas, and fails when the
+skin is buried or floating.
+That line separates a blocked camera, a rejected
+shader pass, displaced live skinning, and missing/non-queryable collision
+instead of treating all four as "the creature is invisible."
+
+Pass `--trace-entity` to `playtest_run.py` (or set
+`PLAYTEST_TRACE_ENTITY=1`) when one snapshot is insufficient. The same
+spawn/render/collision probe then runs once per second through the look. The
+default remains one sample so ordinary suite logs stay concise.
+
+The grounding regression's fresh d3d11 run demonstrated why both height
+values remain in the trace. One road sample reported
+`voxelTop=62.000 surfaceRay=61.000 voxelMinusSurface=1.000`; grounding on the
+ray hit kept `groundClearance=0.032`, both `groundReady` and `collisionReady`
+were true, and the looked-at movement no longer rose by a hidden full block.
+The precise-grounding acceptance therefore requires a physics-surface hit;
+the voxel ceiling is fallback placement and diagnostic context, not equivalent
+evidence.
+
+`Helpers.FrameStagedObject(player, instance)` is the provider-side visual
+camera. Call it after placing the instance in a `CaseDef.Staged` or
+`StagedClip` callback. It detaches from the first-person body, frames the
+combined posed renderer bounds, baking every live `SkinnedMeshRenderer` rather
+than trusting its serialized AABB, and chooses a camera lane only when its
+position is empty and its ray reaches the staged object. The case restores the
+player camera after the hold. Providers that need those bounds for placement
+can call `Helpers.TryGetRenderedBounds(instance, out bounds)` directly.
 
 `Helpers.LookAt(player, worldPos)` aims the player camera at a world position.
 It follows the stock `EntityPlayerLocal.SetRotation` convention: negative X
@@ -401,6 +442,7 @@ The runner arms from the **first non-empty** of:
 | `PLAYTEST_CONCERN_SUITES` | Exact token list that is one declared concern (same tokens as `PLAYTEST_SUITE` when you comma-list consecutive steps of one feature). Env form of `--concern-suites` |
 | `PLAYTEST=1` or `ZDTD_PLAYTEST=1` | Legacy arm → `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
+| `PLAYTEST_TRACE_ENTITY` / `ZDTD_PLAYTEST_TRACE_ENTITY` | Set `1`/`true` for per-second spawned-entity pose, renderer, grounding and collision probes; `--trace-entity` is the CLI form |
 
 `make playtest` / `scripts/playtest_run.py` set `PLAYTEST_SUITE`. Hosts that
 only set `ZDTD_PLAYTEST_SUITE` (e.g. Atomic `playtest-run.sh` via connect

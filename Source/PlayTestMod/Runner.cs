@@ -33,6 +33,8 @@ namespace ZdtdPlaytest
 
         /// <summary>Whether the suite has run to completion (aborts any clip a case left recording).</summary>
         public static bool Finished => _phase == Phase.Finished;
+        /// <summary>Opt-in per-second spawned-entity render/collision samples.</summary>
+        public static bool TraceEntity { get; private set; }
         /// <summary>One-shot guard so a throwing LocomotionDrive.Tick warns once, not per frame.</summary>
         static bool _locomotionFaultLogged;
         static int _benchmarkLaps = 1;
@@ -62,6 +64,9 @@ namespace ZdtdPlaytest
             string suiteEnv = EnvFirst("PLAYTEST_SUITE", "ZDTD_PLAYTEST_SUITE");
             string legacy = EnvFirst("PLAYTEST", "ZDTD_PLAYTEST");
             string laps = EnvFirst("PLAYTEST_LAPS", "ZDTD_PLAYTEST_LAPS");
+            string traceEntity = EnvFirst("PLAYTEST_TRACE_ENTITY", "ZDTD_PLAYTEST_TRACE_ENTITY");
+            TraceEntity = traceEntity == "1"
+                || string.Equals(traceEntity, "true", StringComparison.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(laps) && int.TryParse(laps, out int n) && n > 0)
                 _benchmarkLaps = Math.Min(n, 20);
             else
@@ -87,7 +92,8 @@ namespace ZdtdPlaytest
 
             Report.Reset();
             Report.Info("armed suites=" + string.Join(",", _suites)
-                + " laps=" + _benchmarkLaps + " v" + ModIdentity.Version);
+                + " laps=" + _benchmarkLaps + " trace_entity=" + TraceEntity
+                + " v" + ModIdentity.Version);
             if (string.Equals(suiteEnv, "list", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(suiteEnv, "catalog", StringComparison.OrdinalIgnoreCase))
             {

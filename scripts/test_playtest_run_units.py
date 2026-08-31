@@ -1008,6 +1008,7 @@ def test_config_summary_redacts_telnet_password() -> None:
         fresh_save=True,
         no_server=False,
         no_fixtures=False,
+        trace_entity=False,
         telnet_password="hunter2-secret",
         peer_client_name="",
     )

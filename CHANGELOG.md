@@ -24,6 +24,45 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- `CaseDef.WalkEntity` emits one live `render-probe` with the detached camera
+  pose and line-of-sight hit, material/shader/pass state, and baked skinned-mesh
+  bounds. A passing case whose clip contains no recognizable creature now says
+  whether the camera is blocked, the pass is rejected, or deformation produced
+  different geometry than the serialized renderer AABB.
+- The walk probe now makes collision a real acceptance condition: it reports
+  the root `Physics` capsule, active solid colliders and a physics ray into the
+  spawned entity, and the case fails unless the ray hits. `--trace-entity`
+  repeats the full pose/render/collision sample once per second; the default
+  still emits one sample.
+- `Helpers.TryGetRenderedBounds` bakes live skinned meshes before combining
+  world bounds. Staged grounding and camera framing can now expose a position
+  curve that moved the posed body outside its serialized AABB.
+- `CaseDef.WalkEntity` grounds against `World.GetHeight(x,z) + 1`, the loaded
+  top voxel face, and offsets the root by the authored `Physics` capsule
+  bottom. The previous `World.GetHeightAt` generator heightmap measured Y 60.05
+  under a road whose visible top was Y 61, so the harness forced a healthy
+  creature almost one full block into the floor every tick. The probe now logs
+  `voxelTop`, `visualBottom`, `groundClearance` and `groundReady`, and the
+  case fails on clipping or floating.
+- Uneven-ground placement now uses `Physics.RaycastAll` on the game's
+  traversable-surface mask and ignores the entity's own colliders.
+  `World.GetHeight + 1` is a top-voxel boundary, so a slope or partial road
+  block made an invisible one-metre bump even after the buried-ground fix.
+  The trace retains that value as `voxelTop` beside `surfaceRay` and
+  `voxelMinusSurface`, with `groundClearance` measured from the ray surface.
+  A fresh d3d11 run measured `voxelTop=62` while `surfaceRay=61`, kept the
+  posed bottom 0.032 m above collision, passed both readiness probes, and was
+  visually signed off without the previous excessive bump rise. A missing
+  physics-surface hit now fails precise grounding instead of silently treating
+  the fallback voxel ceiling as equivalent evidence.
+- `CaseDef.WalkEntity` aims at the skinned renderer's actual center and chooses
+  a nearby third-person camera lane only when its position is unoccupied and
+  its ray reaches the creature. The previous fixed world -z offset could put
+  terrain or a static car between camera and body while the look case passed.
+- `Helpers.FrameStagedObject` gives external staged providers the same detached,
+  bounds-centered, clear-line-of-sight camera, and `CaseDef.Staged` /
+  `StagedClip` restore the player camera after their hold. A first-person hand
+  overlay can no longer cover the staged subject while the case passes.
 - `playtest_run.py` refuses a `PLAYTEST_SUITE` list that mixes a prefab-look
   suite (`*_look`) with a block-placement suite (`*_block_*`). Those are
   different pictures; hanging a prefab in front of the camera and placing a
