@@ -442,6 +442,13 @@ namespace ZdtdPlaytest
                     // a rise) is a measurable number, not a look.
                     ctx.LongA = (long)(spawned.GetPosition().y * 100f);
                     ctx.LongB = (long)(spawned.GetPosition().y * 100f);
+                    // Detach the player's FP camera for the clip: its arm/body
+                    // overlay is part of the FP controller composite and no
+                    // renderer toggle removes it, so a clip recorded with the
+                    // player camera attached photographs the arm, never the
+                    // creature. The dedicated capture camera the clip recorder
+                    // then captures shows the world (creature + terrain) instead.
+                    Helpers.DetachCamera(player);
                     Helpers.BeginClip(id, captureSuperSize, clipFps);
                 },
                 wait: ctx =>
@@ -479,7 +486,12 @@ namespace ZdtdPlaytest
                                 try { groundY = GroundYFor(world, target.x, target.z); } catch { }
                                 target.y = groundY;
                                 try { e.SetPosition(target); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
-                                try { Helpers.LookAt(player, target); } catch { }
+                                // Frame the creature with the detached capture camera
+                                // (the player's own camera is disabled for this
+                                // clip). PointCameraAt positions that camera at the
+                                // player's eye and points it at the creature, so the
+                                // recorded clip is the walk, not the FP arm.
+                                try { Helpers.PointCameraAt(player, cam.position, target); } catch { }
                             }
                         }
                         catch (Exception ex) { ctx.Detail = "frame-threw: " + ex.Message; }
@@ -503,7 +515,10 @@ namespace ZdtdPlaytest
                 },
                 assert: ctx =>
                 {
+                    // Stop the clip first, then re-attach the player's camera so
+                    // the case restores the FP view it replaced.
                     Helpers.EndClip(id);
+                    Helpers.AttachCamera(ctx.Player);
                     double yMin = ctx.LongA / 100.0;
                     double yMax = ctx.LongB / 100.0;
                     Report.Info(id + ": spawned_id=" + ctx.IntA
