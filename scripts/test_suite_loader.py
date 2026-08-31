@@ -166,7 +166,7 @@ def main() -> int:
         try:
             fn()
             print(f"PASS {name}")
-        except Exception as ex:  # noqa: BLE001 - gate surface
+        except Exception as ex:
             fails += 1
             print(f"FAIL {name}: {ex}")
     if fails:

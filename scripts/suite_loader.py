@@ -86,7 +86,9 @@ def _optional_bool(obj: dict[str, Any], key: str, default: bool) -> bool:
     return raw
 
 
-def _string_list(obj: dict[str, Any], key: str, *, default: list[str] | None = None) -> tuple[str, ...]:
+def _string_list(
+    obj: dict[str, Any], key: str, *, default: list[str] | None = None
+) -> tuple[str, ...]:
     raw = obj.get(key, default if default is not None else [])
     if not isinstance(raw, list) or not all(isinstance(x, str) and x.strip() for x in raw):
         raise SuiteLoadError(f"field {key!r} must be a list of non-empty strings")
