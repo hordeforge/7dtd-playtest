@@ -130,6 +130,15 @@ def main() -> int:
     assert "public static void StopWalk" in helpers, (
         "Helpers.StopWalk must be public for generated walk-cycle cases"
     )
+    assert "public static bool FrameStagedObject" in helpers, (
+        "staged providers need a detached, unobstructed subject camera"
+    )
+    assert "public static bool TryGetRenderedBounds" in helpers and "BakeMesh" in helpers, (
+        "skinned subjects must be framed from their posed vertices, not a stale AABB"
+    )
+    assert "internal static bool TryGetCaptureCameraPose" in helpers, (
+        "WalkEntity diagnostics must read the actual detached capture-camera pose"
+    )
     assert "ClipRecorder.Tick(Runner.Finished)" in runner, (
         "the gmUpdate hook must tick the on-demand clip recorder"
     )
@@ -144,6 +153,86 @@ def main() -> int:
     )
     assert "StagedClip" in readme, (
         "README's public surface must document CaseDef.StagedClip"
+    )
+    walk_body = method_body(
+        casedef,
+        r"public\s+static\s+CaseDef\s+WalkEntity\s*\([^)]*\)",
+    )
+    assert "ReportWalkEntityRenderProbe" in walk_body, (
+        "WalkEntity must sample the renderer after the animator starts"
+    )
+    assert "FrameWorldBounds" in walk_body, (
+        "WalkEntity must select a camera lane that is clear to the rendered body"
+    )
+    probe_body = method_body(
+        casedef,
+        r"static\s+bool\s+ReportWalkEntityRenderProbe\s*\([^)]*\)",
+    )
+    for evidence in (
+        "render-probe",
+        "BakeMesh",
+        "shader.isSupported",
+        "material.SetPass(0)",
+        "Physics.Raycast",
+        "TryGetCaptureCameraPose",
+        "PhysicsCapsule",
+        "collisionRay",
+        "collisionReady",
+        "voxelTop",
+        "surfaceRay",
+        "surfaceHit",
+        "voxelMinusSurface",
+        "visualBottom",
+        "groundClearance",
+        "groundReady",
+    ):
+        assert evidence in probe_body, (
+            f"WalkEntity must keep {evidence} in its live renderer diagnostic"
+        )
+    ground_body = method_body(
+        casedef,
+        r"static\s+float\s+GroundYFor\s*\([^)]*\)",
+    )
+    assert "world.GetHeight(" in ground_body and "+ 1f" in ground_body, (
+        "WalkEntity must ground on the loaded top voxel face"
+    )
+    assert "surface = world.GetHeightAt" not in ground_body, (
+        "the generator heightmap can sit a full block below the visible surface"
+    )
+    assert "capsule.center.y - capsule.height * 0.5f" in ground_body, (
+        "root placement must account for the authored Physics capsule bottom"
+    )
+    assert "TryGroundSurface" in ground_body, (
+        "partial and sloped blocks need their actual collider surface, not a voxel ceiling"
+    )
+    surface_body = method_body(
+        casedef,
+        r"static\s+bool\s+TryGroundSurface\s*\([^)]*\)",
+    )
+    assert "Physics.RaycastAll" in surface_body and "268500992" in surface_body, (
+        "grounding must query the game's traversable-surface collider mask"
+    )
+    assert "transform.IsChildOf(alive.transform)" in surface_body, (
+        "a downward ground ray must ignore the spawned entity's own colliders"
+    )
+    assert "!float.IsNaN(surfaceRay)" in probe_body, (
+        "a fallback voxel ceiling is diagnostic only and cannot pass precise grounding"
+    )
+    clear_camera_body = method_body(
+        helpers,
+        r"internal\s+static\s+bool\s+FrameWorldBounds\s*\([^)]*\)",
+    )
+    assert "Physics.CheckSphere" in clear_camera_body, (
+        "the WalkEntity camera must not start inside a world prop"
+    )
+    assert "Physics.Raycast" in clear_camera_body, (
+        "the WalkEntity camera must have line of sight to the rendered body"
+    )
+    assert "AttachCamera(ctx.Player)" in staged_body, (
+        "CaseDef.Staged must restore the first-person camera after its hold"
+    )
+    assert "render-probe" in readme, (
+        "README must document the WalkEntity renderer diagnostic line"
     )
     clip_body = method_body(
         casedef,
@@ -276,6 +365,9 @@ def main() -> int:
         "ArmFromEnv must accept PLAYTEST_SUITE and ZDTD_PLAYTEST_SUITE"
     )
     assert "ZDTD_PLAYTEST_LAPS" in arm or "PLAYTEST_LAPS" in arm
+    assert "PLAYTEST_TRACE_ENTITY" in arm and "ZDTD_PLAYTEST_TRACE_ENTITY" in arm, (
+        "ArmFromEnv must accept opt-in spawned-entity tracing"
+    )
 
     # A suite that appends nothing (typo'd id, uninstalled provider) must be a
     # recorded failure, never a silent green run with zero cases.

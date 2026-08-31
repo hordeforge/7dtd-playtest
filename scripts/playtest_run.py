@@ -248,6 +248,7 @@ def config_summary(args: argparse.Namespace) -> str:
         "fresh_save=True",
         f"no_server={bool(args.no_server)}",
         f"fixtures={not args.no_fixtures}",
+        f"trace_entity={bool(args.trace_entity)}",
         f"telnet_password={pw_state}",
     ]
     if args.peer_client_name:
@@ -2279,6 +2280,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     ap.add_argument(
+        "--trace-entity",
+        action="store_true",
+        default=os.environ.get("PLAYTEST_TRACE_ENTITY", "").strip().lower()
+        in ("1", "true", "yes", "on"),
+        help=(
+            "emit per-second spawned-entity pose, renderer, grounding, and collision probes "
+            "(env PLAYTEST_TRACE_ENTITY)"
+        ),
+    )
+    ap.add_argument(
         "--world-name",
         default="Navezgane",
         help="stock GameWorld (Navezgane, Pregen06k01, …)",
@@ -2934,6 +2945,8 @@ def main(argv: list[str] | None = None) -> int:
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
         apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
         client_extra_env: dict[str, str] = {}
+        if args.trace_entity:
+            client_extra_env["PLAYTEST_TRACE_ENTITY"] = "1"
         # Same , ; space delimiters as the client's Catalog.ExpandSuites (see
         # suite_wants_host_fixtures): "smoke apm" must arm the dump env exactly
         # like "smoke,apm", or the in-client apm case waits on a path this
