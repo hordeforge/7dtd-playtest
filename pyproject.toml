@@ -106,5 +106,5 @@ module = [
 disallow_any_generics = false
 
 [[tool.mypy.overrides]]
-module = ["dst", "playtest_compare"]
+module = ["dst", "playtest_compare", "suite_loader", "test_suite_loader"]
 disallow_any_explicit = false
