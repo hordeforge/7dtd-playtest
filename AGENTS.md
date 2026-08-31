@@ -1,26 +1,37 @@
 # AGENTS.md - 7dtd-playtest
 
-Stock-client **gameplay automation** against real servers: the **stock
-dedicated** (default target) and **zdtd-server**. Drive stock APIs and assert
-observable state. Prefer missing over fakes.
+Stock-client **gameplay automation** against real servers. Drive stock APIs
+and assert observable state. Prefer missing over fakes.
+
+Targets (`--target` / `PLAYTEST_TARGET`): `stock` | `sandbox` | `attach` |
+`zdtd` | `live`. Declarative topology lives under `suites/*.json`; C#
+`IScenarioProvider` / Catalog still own case `ref` implementations. Fresh
+save is a hard rule (no reuse-save path).
 
 Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)
 
-Workspace: [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md).  
-Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).  
+Workspace: [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md).
+Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).
 Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
+Lab isolation: [`../7dtd-safehouse/`](../7dtd-safehouse/).
+Production host: [`../7dtd-server-container/`](../7dtd-server-container/).
 
 ## Owns
 
 - Client mod `Mods/7dtd-playtest` (scenario runner, oracles, structured logs)
 - Host orchestrator (`scripts/playtest_run.py`) and make targets
-- Suite definitions (smoke, core, later combat/economy)
+- Target adapters (`scripts/playtest_targets.py`) and declarative suites
+  (`suites/`, `schema/suite.schema.json`, `scripts/suite_loader.py`)
+- Stock-fidelity suite definitions (smoke, core, later combat/economy)
+- Generic live-test infra for sandbox or attach/live envs
 
 ## Does not own
 
 - IP connect / intro skip (that is **7dtd-fastconnect**)
-- Server implementation (zdtd)
-- Load volume bots (7dtd-loadgen)
+- Server implementation (zdtd) or production deploy (**7dtd-server-container**)
+- Lab instance isolation / wipe / `sb` CLI (**7dtd-safehouse**)
+- Load volume bots (**7dtd-loadgen**; demand only, not the world under test)
+- Mod-local playtest cases (stay in the owning mod via `IScenarioProvider`)
 - Inventing world/chunk/sign/inventory S2C to keep tests green
 
 ## Rules
@@ -163,6 +174,7 @@ make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
 make playtest-review-video SUITE=<id> INTENT=<path>  # capture staged clips, then vision-review them through deadeye
 make playtest SUITE=core SERVER=stock
+make playtest SUITE=smoke TARGET=sandbox   # Safehouse lab (PLAYTEST_TARGET)
 ```
 
 External scenario providers whose cases emit host barriers pass
@@ -174,6 +186,9 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | Var | Meaning |
 |---|---|
 | `PLAYTEST_SUITE` | Canonical suite list / aliases (`smoke`, `core`, `demo`, …) |
+| `PLAYTEST_TARGET` | Where the suite runs: `stock`/`sandbox`/`attach`/`zdtd`/`live` (or `--target`) |
+| `PLAYTEST_SANDBOX_NAME` | Sandbox pair base name for `--target sandbox` (creates `srv-<name>` / `client-<name>`) |
+| `PLAYTEST_SUITE_FILE` | Optional declarative suite JSON path (or `--suite-file`) |
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
 | `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
@@ -273,7 +288,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the fourteen offline gate files on
+`make test` runs lint + typecheck plus the sixteen offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -315,6 +330,11 @@ the run order that both `make test` and `make coverage` expand):
     from the trailing directory, CRLF-safe.
 13. video-review surface (`scripts/test_video_review.py`): intent parsing and
     the deadeye review runner fail closed on malformed input.
+14. playtest target adapters (`scripts/test_playtest_targets.py`): resolve /
+    apply / report fields for `stock|sandbox|attach|zdtd|live`, Safehouse
+    path defaults, and missing-`sb` failure.
+15. declarative suite loader (`scripts/test_suite_loader.py`): `suites/*.json`
+    discover/load/report; reject unknown target, empty cases, `fresh: false`.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

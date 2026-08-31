@@ -296,6 +296,26 @@ view. Requires `BotMod` in the dedicated server's `Mods/`.
 
 ---
 
+## parachute: 7dtd-wasm bridge + unmodified zdtd parachute mod
+
+End-to-end check of the WebAssembly mod host running the sibling zdtd
+parachute module unmodified: the client wears the glider item (sense v4
+`wearing_glider`), lifts itself 60 blocks (client-side `SetPosition`; the
+stock server's `teleportplayer` does not move remote-player entities, so
+the fall is client-owned physics), and the mod arms the glide exemption and
+announces through the stock chat broadcast, which the client asserts. The
+bridge's glide handling applies a fall-damage immunity buff and clamps the
+descent to the sink rate. Requires the `1_HordeForge_WasmHost` bridge and
+the `parachute` wasm module under `Mods/Wasm` on the dedicated server, plus
+the parachute item modlet (items.xml + buffs.xml) on server and client.
+
+| Case | Status | Tags | Assert |
+|---|---|---|---|
+| `parachute_equip` | live | parachute, equip | Item resolves, is given, and sits in an equipment slot with the `parachute` tag |
+| `parachute_fall_announce` | live | parachute, fall | After the 60-block lift, the client sees the mod's deploy announce while falling |
+
+---
+
 ## Demo sequence (fixed order)
 
 When `SUITE=demo`, the client runs this attract-mode path:
@@ -340,7 +360,8 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 | soak_long | 1 | 0 |
 | apm | 1 | 0 |
 | bot | 4 | 0 |
-| **catalog total** | **109** | **0** |
+| parachute | 2 | 0 |
+| **catalog total** | **111** | **0** |
 
 Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
 (smoke…finale attract path; residual suites separate). Residual promotion gate:

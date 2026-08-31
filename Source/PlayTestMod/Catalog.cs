@@ -134,6 +134,7 @@ namespace ZdtdPlaytest
                 case "vehicle": AddVehicle(q, label); break;
                 case "power": AddPower(q, label); break;
                 case "finale": AddFinale(q, label); break;
+                case "parachute": AddParachute(q, label); break;
                 case "persist_setup": AddPersistSetup(q, label); break;
                 case "persist": AddPersistVerify(q, label); break;
                 case "mp": AddMp(q, label); break;
@@ -275,6 +276,92 @@ namespace ZdtdPlaytest
                     ctx.PlaceBlockType = 0;
                 }
             }, assert: ctx => ctx.PlaceBlockType == 1));
+        }
+
+        // ── parachute (7dtd-wasm bridge + unmodified zdtd parachute mod) ─
+
+        static void AddParachute(List<CaseDef> q, string suite)
+        {
+            // Give and wear the glider item. The parachute is chest clothing
+            // (extends clothingOutfitT1, EquipSlot ClothingChest); it must sit
+            // in an equipment slot for the server's sense v4 wearing_glider
+            // bit, so this goes through Equipment.SetSlotItem, not the
+            // toolbelt path TryEquipItem uses.
+            q.Add(Live(suite, "parachute_equip", new[] { "parachute", "equip" }, ctx =>
+            {
+                var p = ctx.Player;
+                bool gave = false;
+                if (p?.equipment != null && Helpers.TryGetItem("parachute", out var iv))
+                {
+                    gave = Helpers.TryGiveItem(p, new ItemStack(iv, 1));
+                    if (gave)
+                    {
+                        try
+                        {
+                            p.equipment.SetSlotItem((int)EquipmentSlots.ClothingChest, iv, true);
+                        }
+                        catch (Exception ex)
+                        {
+                            ctx.Detail = "set slot failed: " + ex.Message;
+                            gave = false;
+                        }
+                    }
+                }
+                ctx.IntA = gave ? 1 : 0;
+                ctx.Detail = "item resolved=" + (ctx.IntA == 1) + " " + ctx.Detail;
+            }, assert: ctx =>
+            {
+                var p = ctx.Player;
+                if (p?.equipment == null) return false;
+                try
+                {
+                    var items = p.equipment.GetItems();
+                    if (items == null) return false;
+                    foreach (var it in items)
+                    {
+                        if (it == null || it.IsEmpty() || it.ItemClass == null) continue;
+                        if (it.ItemClass.HasAnyTags(FastTags<TagGroup.Global>.Parse("parachute")))
+                            return true;
+                    }
+                }
+                catch { /* */ }
+                return false;
+            }, fail: "parachute item not worn"));
+
+            // The case lifts the player 200 blocks straight up. The client
+            // does the teleport itself (client-side SetPosition): on a stock
+            // dedicated server the client owns its physics, so a local lift
+            // is followed by a real fall whose position updates reach the
+            // server (the orchestrator teleportplayer was a no-op on the
+            // entity in V3.2.0). The mod watches sense v4, arms the glide
+            // exemption, and announces via the stock chat broadcast; the
+            // client asserts it saw the announce while falling. The player
+            // lands on its own; the suite ends here.
+            q.Add(Live(suite, "parachute_fall_announce", new[] { "parachute", "fall" }, ctx =>
+            {
+                ChatProbe.Clear();
+                ctx.StartPos = ctx.Player.GetPosition();
+                ctx.FloatA = ctx.StartPos.y; // lift target base
+                Vector3 lift = ctx.StartPos + new Vector3(0f, 200f, 0f);
+                ctx.Player.SetPosition(lift);
+                Report.Barrier("parachute_lift:" + ctx.Player.entityId);
+                ctx.Detail = "start=" + ctx.StartPos + " lifted=" + lift;
+            }, wait: ctx =>
+            {
+                bool hit = ChatProbe.Contains("deployed their parachute");
+                Vector3 p = ctx.Player != null ? ctx.Player.GetPosition() : Vector3.zero;
+                // The stock server intermittently rejects a one-shot client
+                // teleport; re-assert the lift until the player is clearly
+                // airborne (up to ~4s), so the fall is not skipped.
+                if (!hit && ctx.Player != null && Time.unscaledTime - ctx.CaseStartUnscaled < 4f &&
+                    p.y < ctx.FloatA + 180f)
+                {
+                    ctx.Player.SetPosition(new Vector3(p.x, ctx.FloatA + 200f, p.z));
+                }
+                ctx.Detail = "hit=" + hit + " last=" + ChatProbe.Last + " pos=" + p;
+                return hit;
+            }, assert: ctx => ChatProbe.Contains("deployed their parachute"),
+                timeout: 30f, fail: "no parachute deploy announce after lift"));
         }
 
         // ── core (play loop) ─────────────────────────────────────────────

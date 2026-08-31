@@ -10,6 +10,7 @@ SUITE ?= demo
 OUT ?= $(ROOT)/.local/capture/$(SUITE)-review
 # Default target is stock dedicated (Navezgane). Override SERVER=zdtd for zig dedi.
 SERVER ?= stock
+TARGET ?=
 WORLD_NAME ?= Navezgane
 GAME_NAME ?= PlaytestNav
 WORLD ?= $(ROOT)/../zdtd-server/worlds/playtest_auto
@@ -140,6 +141,8 @@ GATES := \
 	test_no_unbound_locals.py \
 	test_report_surface.py \
 	test_playtest_run_units.py \
+	test_playtest_targets.py \
+	test_suite_loader.py \
 	test_playtest_compare.py \
 	test_capture_video_surface.py \
 	test_video_review.py
@@ -206,6 +209,7 @@ playtest: install-pair
 	@mkdir -p "$(WORLD)"
 	PLAYTEST_LAPS="$(LAPS)" \
 	$(UV) "$(ROOT)/scripts/playtest_run.py" \
+		$(if $(TARGET),--target "$(TARGET)",) \
 		--server "$(SERVER)" \
 		--suite "$(SUITE)" \
 		--world-name "$(WORLD_NAME)" \

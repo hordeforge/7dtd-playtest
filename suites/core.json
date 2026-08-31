@@ -1,0 +1,27 @@
+{
+  "id": "core",
+  "target": "sandbox",
+  "fresh": true,
+  "mods": ["playtest", "fastconnect"],
+  "host": {
+    "fixtures": false,
+    "loadgen": false
+  },
+  "cases": [
+    {
+      "id": "boot_to_world",
+      "kind": "live",
+      "ref": "stock.boot_to_world",
+      "tags": ["core", "smoke"]
+    },
+    {
+      "id": "move_and_look",
+      "kind": "live",
+      "ref": "stock.move_and_look",
+      "tags": ["core"]
+    }
+  ],
+  "notes": [
+    "Declarative topology for the core suite. Case refs resolve in Catalog / IScenarioProvider."
+  ]
+}

@@ -514,6 +514,23 @@ def _any_preloader_running_game(
     return False
 
 
+def client_running(*, proc_root: Path = PROC_ROOT) -> bool:
+    """True when a stock/Proton client is present (client-only probe).
+
+    Used by ``--no-server`` attach runs: an already-running dedicated server
+    is the point of attaching, so only a stray client should block a second
+    orchestrator from starting.
+    """
+    return _any_executable_running(
+        STOCK_CLIENT_EXECUTABLES, proc_root=proc_root
+    ) or _any_preloader_running_game(proc_root=proc_root)
+
+
+def server_running(*, proc_root: Path = PROC_ROOT) -> bool:
+    """True when a dedicated/zdtd server is present."""
+    return _any_executable_running(STOCK_SERVER_EXECUTABLES, proc_root=proc_root)
+
+
 def default_live_runtime_running() -> bool:
     """True when a stock/Proton client or dedicated/zdtd server is present.
 
@@ -522,11 +539,7 @@ def default_live_runtime_running() -> bool:
     Used as the default acquire gate: playtest_run starts both, and a second
     run must not double-bind ports or kill the first holder's processes.
     """
-    return (
-        _any_executable_running(STOCK_CLIENT_EXECUTABLES)
-        or _any_preloader_running_game()
-        or _any_executable_running(STOCK_SERVER_EXECUTABLES)
-    )
+    return client_running() or server_running()
 
 
 def tcp_port_in_use(port: int, host: str = "127.0.0.1") -> bool:

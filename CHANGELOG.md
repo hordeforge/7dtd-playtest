@@ -22,6 +22,29 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+
+### Added
+
+- Target adapters and declarative suites: `--target` /
+  `PLAYTEST_TARGET` (`stock` | `sandbox` | `attach` | `zdtd` | `live`),
+  `--sandbox-name` / `PLAYTEST_SANDBOX_NAME`, `--suite-file` /
+  `PLAYTEST_SUITE_FILE`, `scripts/playtest_targets.py`,
+  `scripts/suite_loader.py`, `suites/*.json`, and
+  `schema/suite.schema.json`. `live` is attach-only to
+  server-container (never deploy/restart). Offline gates:
+  `test_playtest_targets.py`, `test_suite_loader.py`.
+  Lab isolation path is `7dtd-safehouse` (Safehouse); Quarantine
+  remains the wasm host brand.
+
+- `parachute` suite: end-to-end check of the 7dtd-wasm bridge running the
+  unmodified zdtd parachute module. The client wears the glider item
+  (equipment slot, sense v4 wearing_glider) and lifts itself 60 blocks
+  (client-side SetPosition, since the stock server's teleportplayer does
+  not move remote-player entities), then asserts the mod's deploy announce
+  through the stock chat broadcast while falling. Requires the
+  `1_HordeForge_WasmHost` bridge + parachute wasm module on the server.
+  See SCENARIOS.md.
+
 ### Fixed
 
 - `CaseDef.WalkEntity` emits one live `render-probe` with the detached camera

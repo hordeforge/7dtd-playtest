@@ -1,0 +1,21 @@
+{
+  "id": "smoke",
+  "target": "sandbox",
+  "fresh": true,
+  "mods": ["playtest", "fastconnect"],
+  "host": {
+    "fixtures": false,
+    "loadgen": false
+  },
+  "cases": [
+    {
+      "id": "boot_to_world",
+      "kind": "live",
+      "ref": "stock.boot_to_world",
+      "tags": ["smoke"]
+    }
+  ],
+  "notes": [
+    "Declarative topology for the smoke suite. Case refs resolve in Catalog / IScenarioProvider."
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hordeforge.local/7dtd-playtest/suite.schema.json",
+  "title": "PlaytestSuite",
+  "description": "Declarative playtest suite: what runs and where. C# IScenarioProvider/Catalog owns how (ref).",
+  "type": "object",
+  "required": ["id", "target", "fresh", "cases"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Suite id matched by PLAYTEST_SUITE / --suite"
+    },
+    "target": {
+      "type": "string",
+      "enum": ["stock", "sandbox", "attach", "zdtd", "live"],
+      "description": "Where the suite runs (see playtest_targets.py)"
+    },
+    "fresh": {
+      "type": "boolean",
+      "const": true,
+      "description": "Hard rule: every run starts on a fresh save"
+    },
+    "mods": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": ["playtest", "fastconnect"]
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "fixtures": { "type": "boolean", "default": false },
+        "loadgen": { "type": "boolean", "default": false }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "ref"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["live", "staged", "defer"] },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Catalog or IScenarioProvider case implementation id"
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "barriers": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}
