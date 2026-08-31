@@ -273,13 +273,13 @@ namespace ZdtdPlaytest
                 // capture camera away from the action and the clip photographs
                 // fog.
                 cam.position = camPos;
-                var dir = lookAt - camPos;
-                float len = dir.magnitude;
-                if (len < 0.01f) return true;
-                dir /= len;
-                float yaw = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
-                float pitch = Mathf.Asin(Mathf.Clamp(dir.y, -1f, 1f)) * Mathf.Rad2Deg;
-                cam.rotation = Quaternion.Euler(pitch, yaw, 0f);
+                // Point the camera at the target with Unity's own LookAt rather
+                // than a hand-rolled pitch/yaw: a Camera looks down its -Z axis,
+                // so building the rotation from atan2/asin of the direction and
+                // feeding it to Quaternion.Euler can aim it at the sky instead of
+                // the target. LookAt resolves the orientation for us. up=Vector3
+                // up keeps it level (no roll), matching the yaw-only convention.
+                cam.LookAt(lookAt, Vector3.up);
                 return true;
             }
             catch { return false; }
