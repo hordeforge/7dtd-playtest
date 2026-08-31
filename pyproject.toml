@@ -102,6 +102,8 @@ module = [
     "playtest_log",
     "playtest_run",
     "test_playtest_compare",
+    "suite_loader",
+    "test_suite_loader",
 ]
 disallow_any_generics = false
 
