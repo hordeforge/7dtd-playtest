@@ -266,7 +266,13 @@ namespace ZdtdPlaytest
             if (cam == null) return false;
             try
             {
-                cam.position = camPos - Origin.position;
+                // camPos is a world-space position (Transform.position is always
+                // world space). Do NOT shift it by Origin: Origin is a
+                // chunk/region offset in the save's coordinate space, unrelated
+                // to the camera's world transform, so subtracting it throws the
+                // capture camera away from the action and the clip photographs
+                // fog.
+                cam.position = camPos;
                 var dir = lookAt - camPos;
                 float len = dir.magnitude;
                 if (len < 0.01f) return true;

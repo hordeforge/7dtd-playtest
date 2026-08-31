@@ -473,26 +473,24 @@ namespace ZdtdPlaytest
                         try
                         {
                             var player = ctx.Player;
-                            var cam = (player != null && player.playerCamera != null)
-                                ? player.playerCamera.transform : null;
-                            if (cam != null)
-                            {
-                                float yaw = Time.unscaledTime * speed;
-                                var fwd = cam.forward;
-                                fwd.y = 0f; if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.forward; fwd.Normalize();
-                                var side = Vector3.Cross(Vector3.up, fwd);
-                                var target = cam.position + fwd * 3.0f + side * Mathf.Sin(yaw) * 1.2f;
-                                float groundY = 0f;
-                                try { groundY = GroundYFor(world, target.x, target.z); } catch { }
-                                target.y = groundY;
-                                try { e.SetPosition(target); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
-                                // Frame the creature with the detached capture camera
-                                // (the player's own camera is disabled for this
-                                // clip). PointCameraAt positions that camera at the
-                                // player's eye and points it at the creature, so the
-                                // recorded clip is the walk, not the FP arm.
-                                try { Helpers.PointCameraAt(player, cam.position, target); } catch { }
-                            }
+                            // Drive the creature in a slow orbit around its spawn,
+                            // grounding it each tick, so the clip reads as a walk
+                            // on the terrain instead of a creature flung around by
+                            // a camera. Decoupled from the player camera: with the
+                            // player's FP camera detached for this clip, its
+                            // transform position is not a reliable framing anchor.
+                            float yaw = Time.unscaledTime * speed;
+                            var pivot = ctx.StartPos;
+                            var target = pivot + new Vector3(Mathf.Sin(yaw) * 3.0f, 0f, Mathf.Cos(yaw) * 3.0f);
+                            float groundY = 0f;
+                            try { groundY = GroundYFor(world, target.x, target.z); } catch { }
+                            target.y = groundY;
+                            try { e.SetPosition(target); } catch (Exception ex) { ctx.Detail = "SetPosition threw: " + ex.Message; }
+                            // Frame the capture camera at a fixed vantage relative
+                            // to the creature (side + up), looking at it, so the
+                            // walk is always centered in the recorded clip.
+                            var cp = e.GetPosition();
+                            try { Helpers.PointCameraAt(player, cp + new Vector3(2.4f, 1.7f, 2.4f), cp); } catch { }
                         }
                         catch (Exception ex) { ctx.Detail = "frame-threw: " + ex.Message; }
                         ctx.FloatB = (e.GetPosition() - ctx.StartPos).magnitude;
