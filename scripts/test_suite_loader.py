@@ -46,7 +46,7 @@ def test_suite_to_report_shape() -> None:
     assert report["id"] == "smoke"
     assert report["target"] == "sandbox"
     assert report["fresh"] is True
-    assert "fixtures" in report["host"]
+    assert "fixtures" in report["host"]  # type: ignore[operator]
     assert isinstance(report["cases"], list)
     assert report["cases"][0]["ref"]
 
