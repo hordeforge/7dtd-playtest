@@ -10,9 +10,9 @@ dependencies = []
 # unpinned from PyPI on every `make test`.
 dev = [
     "pytest==9.1.1",
-    "ruff==0.16.4",
-    "mypy==2.1.0",
-    "coverage==7.15.4",
+    "ruff==0.16.5",
+    "mypy==2.3.1",
+    "coverage==7.16.0",
 ]
 
 [tool.uv]
