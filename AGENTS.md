@@ -3,17 +3,30 @@
 Stock-client **gameplay automation** against real servers. Drive stock APIs
 and assert observable state. Prefer missing over fakes.
 
-Targets (`--target` / `PLAYTEST_TARGET`): `stock` | `sandbox` | `attach` |
-`zdtd` | `live`. Declarative topology lives under `suites/*.json`; C#
-`IScenarioProvider` / Catalog still own case `ref` implementations. Fresh
-save is a hard rule (no reuse-save path).
+Tier 2 of the workspace testing stack
+([ADR 0001](https://github.com/hordeforge/.github/blob/main/docs/adr/0001-test-tiers-and-declarative-suites.md)).
+Two axes, not one fused target:
+
+| Axis | Values | Meaning |
+|---|---|---|
+| `--provision` (`PLAYTEST_PROVISION`) | `managed` \| `attach` | Safehouse brings the server up and tears it down, or it is already running and this repo touches no lifecycle. `--no-server` is the shorthand for attach |
+| `--server` (`PLAYTEST_BACKEND`) | `stock` \| `zdtd` | which server is under test |
+| `--readonly` | attach-only flag | the host must never be written to (production `7dtd-server-container`) |
+
+A managed stock run is always a Safehouse instance. This repo does not open a
+serverconfig, allocate a port, or exec a dedicated server: `sb up` / `sb stage`
+/ `sb render-config` / `sb stop` do that. Declarative suites under
+`suites/*.json` say what runs and where; C# `IScenarioProvider` / Catalog own
+the case `ref` implementations. Fresh save is a hard rule for a managed run
+(no reuse-save path); an attach run does not own the save it joins and must
+declare `fresh: false`.
 
 Canonical modding guide: [MODDING_BEST_PRACTICES.md](https://github.com/hordeforge/.github/blob/main/MODDING_BEST_PRACTICES.md)
 
 Workspace: [`hordeforge/.github` AGENTS.md](https://github.com/hordeforge/.github/blob/main/AGENTS.md).
 Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).
 Join plumbing: [`../7dtd-fastconnect/`](../7dtd-fastconnect/).
-Lab isolation: [`../7dtd-safehouse/`](../7dtd-safehouse/).
+Lab isolation: [`../7dtd-sandbox/`](../7dtd-sandbox/).
 Production host: [`../7dtd-server-container/`](../7dtd-server-container/).
 
 ## Owns
@@ -23,15 +36,19 @@ Production host: [`../7dtd-server-container/`](../7dtd-server-container/).
 - Target adapters (`scripts/playtest_targets.py`) and declarative suites
   (`suites/`, `schema/suite.schema.json`, `scripts/suite_loader.py`)
 - Stock-fidelity suite definitions (smoke, core, later combat/economy)
-- Generic live-test infra for sandbox or attach/live envs
+- The exclusivity lock (`scripts/playtest_lock.py`) and the run report
 
 ## Does not own
 
+- Instance isolation, ports, serverconfig or `serveradmin.xml` rendering, mod
+  staging, bring-up, teardown (**7dtd-sandbox** / Safehouse). There is no
+  serverconfig writer or dedicated-server exec in this repo, and no blanket
+  `pkill 7DaysToDieServer`: that pattern reaches every other sandbox instance
+  on the machine.
 - IP connect / intro skip (that is **7dtd-fastconnect**)
 - Server implementation (zdtd) or production deploy (**7dtd-server-container**)
-- Lab instance isolation / wipe / `sb` CLI (**7dtd-safehouse**)
 - Load volume bots (**7dtd-loadgen**; demand only, not the world under test)
-- Mod-local playtest cases (stay in the owning mod via `IScenarioProvider`)
+- Mod-local playtest cases (stay in the owning mod, see below)
 - Inventing world/chunk/sign/inventory S2C to keep tests green
 
 ## Rules
@@ -48,13 +65,27 @@ Production host: [`../7dtd-server-container/`](../7dtd-server-container/).
 8. Name for what it does (suite ids, case ids, env vars).
 9. **Exclusive live client** (see below). Only one orchestrated playtest (or
    other exclusive client drive) at a time on this machine.
-10. **Every run starts on a fresh save: a hard rule, no opt-out.** The
-    orchestrator wipes the named stock save (or the zdtd world) before each
-    run. A reused world is a reused set of registered blocks, item ids and
-    chunk state, so a dig/place suite then measures the previous run's
+10. **Every managed run starts on a fresh save: a hard rule, no opt-out.**
+    `sb wipe` resets the instance (stock) or `fresh_zdtd_world` the zdtd world
+    before each run. A reused world is a reused set of registered blocks, item
+    ids and chunk state, so a dig/place suite then measures the previous run's
     terrain or stale blocks rather than this run. Do not add a
     `--reuse-save`/`FRESH=0` path; `--fresh-save` exists only as a no-op
-    back-compat flag.
+    back-compat flag. The one exception is the rejoin flow's restart, which
+    verifies persistence and therefore keeps the save its setup phase wrote
+    (`start_server(wipe=False)`).
+11. **A declared case ref must resolve, and a declared suite must declare all
+    its cases.** The orchestrator hands `PLAYTEST_CASE_REFS` to the client and
+    `Runner` keeps only cases whose `catalog.SUITE.CASE` ref appears there, so
+    a case added to `Catalog.cs` and declared in no suite is inert rather than
+    a case riding along with someone else's suite.
+    `scripts/test_suite_refs.py` fails on both offline.
+12. **Never pkill a dedicated by pattern.** `GAME_PROC_PATTERNS` is client-only
+    on purpose. A managed dedicated is stopped with `sb stop <instance>`, which
+    matches that instance's own `SB_INSTANCE`; the pattern form takes down
+    every other sandbox instance on the machine, another agent's run included.
+13. **`--readonly` means it.** Against a production `7dtd-server-container`
+    host: no wipe, no mod staging, no config rewrite, no restart, no deploy.
 
 ## Playtest / live-client exclusivity
 
@@ -173,9 +204,21 @@ make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
 make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
 make playtest-review-video SUITE=<id> INTENT=<path>  # capture staged clips, then vision-review them through deadeye
-make playtest SUITE=core SERVER=stock
-make playtest SUITE=smoke TARGET=sandbox   # Safehouse lab (PLAYTEST_TARGET)
+make playtest SUITE=core SERVER=stock       # managed Safehouse instance
+make playtest SUITE=smoke PROVISION=attach READONLY=1  # live host, attach-only
 ```
+
+A mod repo runs its own cases without a wrapper script: keep the provider and
+the suite JSON beside the mod, then
+
+```bash
+uv run scripts/playtest_run.py --suite-file ../7dtd-fps-bots/playtest/suites/bot_engage.json
+```
+
+The suite's `mods` list names what gets staged (a short name resolves to a
+sibling repo's `dist/`, anything else is a path relative to the suite file).
+`load_external_suite` refuses a suite id that shadows a built-in
+stock-fidelity suite.
 
 External scenario providers whose cases emit host barriers pass
 `--host-fixtures` to `scripts/playtest_run.py`. Built-in fixture suites are
@@ -186,8 +229,12 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | Var | Meaning |
 |---|---|
 | `PLAYTEST_SUITE` | Canonical suite list / aliases (`smoke`, `core`, `demo`, …) |
-| `PLAYTEST_TARGET` | Where the suite runs: `stock`/`sandbox`/`attach`/`zdtd`/`live` (or `--target`) |
-| `PLAYTEST_SANDBOX_NAME` | Sandbox pair base name for `--target sandbox` (creates `srv-<name>` / `client-<name>`) |
+| `PLAYTEST_PROVISION` | Who owns the server process: `managed`/`attach` (or `--provision`) |
+| `PLAYTEST_BACKEND` | Which server is under test: `stock`/`zdtd` (or `--server`) |
+| `PLAYTEST_READONLY` | Attach-only: never write to this host (or `--readonly`) |
+| `PLAYTEST_SANDBOX_NAME` | Safehouse pair base name (creates `srv-<name>` / `client-<name>`) |
+| `PLAYTEST_SANDBOX_ROOT` | Safehouse checkout that owns the instances (or `--sandbox-root`) |
+| `PLAYTEST_CASE_REFS` | Set by the orchestrator from the suite: the only case refs the client runs |
 | `PLAYTEST_SUITE_FILE` | Optional declarative suite JSON path (or `--suite-file`) |
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
 | `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |
@@ -197,7 +244,7 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | `PLAYTEST_SESSION_ID` | Lock holder session id (or `--session`; auto-generated if empty) |
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
 | `PLAYTEST_LOCK_HEARTBEAT_SEC` | How often the orchestrator refreshes heartbeat (default 30) |
-| `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (unset: ephemeral per-run secret written to the generated server config; `--no-server` attach requires an explicit value) |
+| `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (unset: ephemeral per-run secret rendered into the instance config; an attach run requires an explicit value) |
 
 `residual` expands to `mp,soak` only. `make playtest-residual` is a **different**
 multi-target host gate (persist + mp + apm + soak_long). See README.
@@ -288,7 +335,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the sixteen offline gate files on
+`make test` runs lint + typecheck plus the seventeen offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -334,7 +381,15 @@ the run order that both `make test` and `make coverage` expand):
     apply / report fields for `stock|sandbox|attach|zdtd|live`, Safehouse
     path defaults, and missing-`sb` failure.
 15. declarative suite loader (`scripts/test_suite_loader.py`): `suites/*.json`
-    discover/load/report; reject unknown target, empty cases, `fresh: false`.
+    discover/load/report, and every contradiction refused: a managed run that
+    is not fresh, an attach run that claims to be, an attach run carrying a
+    `server` block or `mods` list it does not own, `readonly` outside attach,
+    an external suite shadowing a built-in id.
+16. declared-ref surface (`scripts/test_suite_refs.py`): every `ref` in
+    `suites/*.json` resolves to a real Catalog case, every declared suite
+    declares all its cases, the `catalog.SUITE.CASE` format is pinned on both
+    sides (loader and `Runner.CaseRef`), and every catalog suite is either
+    declared or listed in `UNDECLARED_SUITES`.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

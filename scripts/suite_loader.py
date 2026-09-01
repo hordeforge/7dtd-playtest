@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
 """Declarative playtest suite loader (JSON; no PyYAML dep).
 
-Suite documents live under ``suites/`` (built-in) or a path passed via
-``--suite-file`` / ``PLAYTEST_SUITE_FILE``. They declare *what* runs and
-*where*; C# ``IScenarioProvider`` / Catalog still own *how* cases drive
-and assert (``ref`` points at those implementations).
+A suite document declares *what* runs and *where*. C# ``IScenarioProvider`` /
+Catalog still own *how* a case drives and asserts: ``ref`` points at those
+implementations, and the orchestrator passes the declared refs to the client so
+a case the catalog owns but no suite declares does not run.
+
+Built-in stock-fidelity suites live under ``suites/``. A mod repo keeps its own
+suites beside its provider and passes the path with ``--suite-file``.
 
 Minimal document::
 
     {
       "id": "smoke",
-      "target": "sandbox",
+      "provision": "managed",
+      "backend": "stock",
       "fresh": true,
       "mods": ["playtest", "fastconnect"],
+      "server": {"GameWorld": "Navezgane", "MaxSpawnedZombies": "0"},
       "host": {"fixtures": false, "loadgen": false},
       "cases": [
-        {"id": "boot_to_world", "kind": "live", "ref": "stock.boot_to_world", "tags": ["smoke"]}
+        {"id": "join_ready", "kind": "live", "ref": "catalog.smoke.join_ready"}
       ]
     }
 
-Unknown fields are ignored. Missing required fields fail closed.
+``server`` is a flat map of stock serverconfig property names to values, handed
+straight to ``sb render-config``. It is the only place a suite states the world
+it needs, so an A/B of one config knob is two suites differing by one line.
+
+Unknown fields are ignored. Missing or contradictory fields fail closed.
 """
 
 from __future__ import annotations
@@ -29,9 +38,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Keep in sync with playtest_targets.TARGETS (avoid import cycle in gates).
-ALLOWED_TARGETS = ("stock", "sandbox", "attach", "zdtd", "live")
+# Keep in sync with playtest_targets (avoid an import cycle in the gates).
+ALLOWED_PROVISIONS = ("managed", "attach")
+ALLOWED_BACKENDS = ("stock", "zdtd")
 ALLOWED_KINDS = ("live", "staged", "defer")
+
+DEFAULT_MODS = ("playtest", "fastconnect")
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITES_DIR = ROOT / "suites"
@@ -55,9 +67,12 @@ class SuiteHost:
 @dataclass(frozen=True)
 class SuiteDoc:
     id: str
-    target: str
+    provision: str
+    backend: str
+    readonly: bool
     fresh: bool
     mods: tuple[str, ...]
+    server: tuple[tuple[str, str], ...]
     host: SuiteHost
     cases: tuple[SuiteCase, ...]
     source: Path | None = None
@@ -67,9 +82,17 @@ class SuiteDoc:
     def case_refs(self) -> tuple[str, ...]:
         return tuple(c.ref for c in self.cases)
 
+    @property
+    def case_ids(self) -> tuple[str, ...]:
+        return tuple(c.id for c in self.cases)
+
+    @property
+    def server_config(self) -> dict[str, str]:
+        return dict(self.server)
+
 
 class SuiteLoadError(ValueError):
-    """Malformed or incomplete suite document."""
+    """Malformed, incomplete or self-contradictory suite document."""
 
 
 def _require_str(obj: dict[str, Any], key: str, *, path: str) -> str:
@@ -79,20 +102,52 @@ def _require_str(obj: dict[str, Any], key: str, *, path: str) -> str:
     return raw.strip()
 
 
-def _optional_bool(obj: dict[str, Any], key: str, default: bool) -> bool:
+def _optional_str(obj: dict[str, Any], key: str, default: str, *, path: str) -> str:
+    raw = obj.get(key, default)
+    if not isinstance(raw, str) or not raw.strip():
+        raise SuiteLoadError(f"{path}: field {key!r} must be a non-empty string")
+    return raw.strip()
+
+
+def _optional_bool(obj: dict[str, Any], key: str, default: bool, *, path: str) -> bool:
     raw = obj.get(key, default)
     if not isinstance(raw, bool):
-        raise SuiteLoadError(f"field {key!r} must be a boolean")
+        raise SuiteLoadError(f"{path}: field {key!r} must be a boolean")
     return raw
 
 
 def _string_list(
-    obj: dict[str, Any], key: str, *, default: list[str] | None = None
+    obj: dict[str, Any], key: str, *, default: tuple[str, ...] = (), path: str = ""
 ) -> tuple[str, ...]:
-    raw = obj.get(key, default if default is not None else [])
+    raw = obj.get(key, list(default))
     if not isinstance(raw, list) or not all(isinstance(x, str) and x.strip() for x in raw):
-        raise SuiteLoadError(f"field {key!r} must be a list of non-empty strings")
+        raise SuiteLoadError(f"{path}: field {key!r} must be a list of non-empty strings")
     return tuple(x.strip() for x in raw)
+
+
+def _server_map(obj: dict[str, Any], *, path: str) -> tuple[tuple[str, str], ...]:
+    raw = obj.get("server", {})
+    if not isinstance(raw, dict):
+        raise SuiteLoadError(
+            f"{path}: server must be an object of serverconfig property names to values"
+        )
+    out: list[tuple[str, str]] = []
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            raise SuiteLoadError(f"{path}: server property names must be non-empty strings")
+        if isinstance(value, bool):
+            # Stock ParseBool accepts only true/false, never Python's True/False.
+            text = "true" if value else "false"
+        elif isinstance(value, (int, float)):
+            text = str(value)
+        elif isinstance(value, str):
+            text = value
+        else:
+            raise SuiteLoadError(
+                f"{path}: server property {key!r} must be a string, number or boolean"
+            )
+        out.append((key.strip(), text))
+    return tuple(out)
 
 
 def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> SuiteDoc:
@@ -101,24 +156,60 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
         raise SuiteLoadError("suite document must be a JSON object")
     path = str(source) if source else "<suite>"
     suite_id = _require_str(data, "id", path=path)
-    target = _require_str(data, "target", path=path).lower()
-    if target not in ALLOWED_TARGETS:
+
+    provision = _optional_str(data, "provision", "managed", path=path).lower()
+    if provision not in ALLOWED_PROVISIONS:
         raise SuiteLoadError(
-            f"{path}: target {target!r} not in {', '.join(ALLOWED_TARGETS)}"
+            f"{path}: provision {provision!r} not in {', '.join(ALLOWED_PROVISIONS)}"
         )
-    fresh = _optional_bool(data, "fresh", True)
-    if not fresh:
+    backend = _optional_str(data, "backend", "stock", path=path).lower()
+    if backend not in ALLOWED_BACKENDS:
         raise SuiteLoadError(
-            f"{path}: fresh must be true (playtest hard rule: no reused saves)"
+            f"{path}: backend {backend!r} not in {', '.join(ALLOWED_BACKENDS)}"
         )
-    mods = _string_list(data, "mods", default=["playtest", "fastconnect"])
+    readonly = _optional_bool(data, "readonly", False, path=path)
+    if readonly and provision != "attach":
+        raise SuiteLoadError(
+            f"{path}: readonly names a host playtest must not write to, so it "
+            "requires provision 'attach'"
+        )
+
+    fresh = _optional_bool(data, "fresh", provision == "managed", path=path)
+    if provision == "managed" and not fresh:
+        raise SuiteLoadError(
+            f"{path}: a managed run always starts on a fresh save (hard rule); "
+            "fresh must be true"
+        )
+    if provision == "attach" and fresh:
+        raise SuiteLoadError(
+            f"{path}: an attach run does not own the save it joins, so it cannot "
+            "claim fresh; set fresh false and wipe the host yourself"
+        )
+
+    server = _server_map(data, path=path)
+    mods = _string_list(
+        data, "mods", default=DEFAULT_MODS if provision == "managed" else (), path=path
+    )
+    if provision == "attach":
+        if server:
+            raise SuiteLoadError(
+                f"{path}: an attach run must not rewrite the config of a server "
+                "it does not own; drop the server block"
+            )
+        if mods:
+            raise SuiteLoadError(
+                f"{path}: an attach run must not stage mods into a server it does "
+                "not own; drop the mods list"
+            )
+
     host_raw = data.get("host", {})
     if not isinstance(host_raw, dict):
         raise SuiteLoadError(f"{path}: host must be an object")
     host = SuiteHost(
-        fixtures=_optional_bool(host_raw, "fixtures", False),
-        loadgen=_optional_bool(host_raw, "loadgen", False),
+        fixtures=_optional_bool(host_raw, "fixtures", False, path=path),
+        loadgen=_optional_bool(host_raw, "loadgen", False, path=path),
     )
+
     cases_raw = data.get("cases")
     if not isinstance(cases_raw, list) or not cases_raw:
         raise SuiteLoadError(f"{path}: cases must be a non-empty list")
@@ -137,25 +228,28 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
             raise SuiteLoadError(
                 f"{cpath}: kind {kind!r} not in {', '.join(ALLOWED_KINDS)}"
             )
-        ref = _require_str(row, "ref", path=cpath)
-        tags = _string_list(row, "tags", default=[])
-        barriers = _string_list(row, "barriers", default=[])
         cases.append(
-            SuiteCase(id=cid, kind=kind, ref=ref, tags=tags, barriers=barriers)
+            SuiteCase(
+                id=cid,
+                kind=kind,
+                ref=_require_str(row, "ref", path=cpath),
+                tags=_string_list(row, "tags", path=cpath),
+                barriers=_string_list(row, "barriers", path=cpath),
+            )
         )
-    notes_raw = data.get("notes", [])
-    notes: tuple[str, ...] = ()
-    if notes_raw:
-        notes = _string_list(data, "notes", default=[])
+
     return SuiteDoc(
         id=suite_id,
-        target=target,
+        provision=provision,
+        backend=backend,
+        readonly=readonly,
         fresh=fresh,
         mods=mods,
+        server=server,
         host=host,
         cases=tuple(cases),
         source=source,
-        notes=notes,
+        notes=_string_list(data, "notes", path=path),
     )
 
 
@@ -202,13 +296,53 @@ def load_suite_by_id(suite_id: str, suites_dir: Path | None = None) -> SuiteDoc 
     return discover_suites(suites_dir).get(suite_id.strip())
 
 
+def load_external_suite(path: Path) -> SuiteDoc:
+    """Load a mod repo's own suite file and refuse a stock-suite id collision.
+
+    A mod's suite may not claim a built-in id: the built-in is what a stock
+    fidelity claim means, and shadowing it would silently rescore it.
+    """
+    doc = load_suite_file(path)
+    builtin = discover_suites().get(doc.id)
+    if builtin is not None and builtin.source != doc.source:
+        raise SuiteLoadError(
+            f"{path}: suite id {doc.id!r} is a built-in stock-fidelity suite "
+            f"({builtin.source}); pick another id"
+        )
+    return doc
+
+
+def resolve_mods(doc: SuiteDoc, *, workspace: Path, repo: Path) -> list[Path]:
+    """Resolve the suite's mod names to built modlet directories.
+
+    A short name resolves to the sibling repo's ``dist/`` output; anything with
+    a separator is a path, taken relative to the suite file when relative.
+    """
+    known = {
+        "playtest": repo / "dist" / "7dtd-playtest",
+        "fastconnect": workspace / "7dtd-fastconnect" / "dist" / "7dtd-fastconnect",
+    }
+    base = doc.source.parent if doc.source is not None else workspace
+    out: list[Path] = []
+    for name in doc.mods:
+        if name in known:
+            out.append(known[name])
+            continue
+        candidate = Path(name)
+        out.append(candidate if candidate.is_absolute() else (base / candidate).resolve())
+    return out
+
+
 def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
     """JSON-serializable summary for the run report."""
     return {
         "id": doc.id,
-        "target": doc.target,
+        "provision": doc.provision,
+        "backend": doc.backend,
+        "readonly": doc.readonly,
         "fresh": doc.fresh,
         "mods": list(doc.mods),
+        "server": doc.server_config,
         "host": {"fixtures": doc.host.fixtures, "loadgen": doc.host.loadgen},
         "cases": [
             {

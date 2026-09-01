@@ -8,9 +8,13 @@ SUITE ?= demo
 # Where playtest-review-video puts the captured clip and its review evidence;
 # the SUITE names the fixed directory, so repeated runs replace it.
 OUT ?= $(ROOT)/.local/capture/$(SUITE)-review
-# Default target is stock dedicated (Navezgane). Override SERVER=zdtd for zig dedi.
+# Default backend is the stock dedicated. Override SERVER=zdtd for the zig dedi.
 SERVER ?= stock
-TARGET ?=
+# PROVISION=managed|attach (default managed: a Safehouse instance). READONLY=1
+# is attach-only and names a host playtest must never write to.
+PROVISION ?=
+READONLY ?=
+# World for a catalog-only suite; a declarative suite's own `server` block wins.
 WORLD_NAME ?= Navezgane
 GAME_NAME ?= PlaytestNav
 WORLD ?= $(ROOT)/../zdtd-server/worlds/playtest_auto
@@ -58,7 +62,7 @@ help:
 	@echo "  make build | install | install-pair | uninstall | clean"
 	@echo
 	@echo "Live suites (needs game client; see README):"
-	@echo "  make playtest SUITE=demo SERVER=stock|zdtd"
+	@echo "  make playtest SUITE=demo SERVER=stock|zdtd [PROVISION=attach READONLY=1]"
 	@echo "  make playtest-smoke | playtest-gate | playtest-demo | playtest-bench LAPS=3"
 	@echo "  make playtest-zdtd | playtest-compare | playtest-repeat LAPS=3"
 	@echo "  make playtest-residual           persist + mp + apm + soak_long"
@@ -143,6 +147,7 @@ GATES := \
 	test_playtest_run_units.py \
 	test_playtest_targets.py \
 	test_suite_loader.py \
+	test_suite_refs.py \
 	test_playtest_compare.py \
 	test_capture_video_surface.py \
 	test_video_review.py
@@ -209,7 +214,8 @@ playtest: install-pair
 	@mkdir -p "$(WORLD)"
 	PLAYTEST_LAPS="$(LAPS)" \
 	$(UV) "$(ROOT)/scripts/playtest_run.py" \
-		$(if $(TARGET),--target "$(TARGET)",) \
+		$(if $(PROVISION),--provision "$(PROVISION)",) \
+		$(if $(READONLY),--readonly,) \
 		--server "$(SERVER)" \
 		--suite "$(SUITE)" \
 		--world-name "$(WORLD_NAME)" \

@@ -7,7 +7,17 @@ Part of [HordeForge](https://github.com/hordeforge).
 ![license](https://img.shields.io/github/license/hordeforge/7dtd-playtest)
 ![release](https://img.shields.io/github/v/release/hordeforge/7dtd-playtest)
 
-Stock-client **gameplay automation** for 7 Days to Die servers (EAC off). Runs against real servers via `--target` / `PLAYTEST_TARGET`: `stock` (legacy dedicated bring-up), `sandbox` (Safehouse lab (`7dtd-safehouse`)), `attach` (already-running lab), `zdtd`, or `live` (attach-only to server-container; never deploy/restart). Declarative topology lives under `suites/*.json`; C# Catalog / `IScenarioProvider` still own case `ref` implementations. Legacy `--server stock|zdtd` and `--no-server` still work.
+Stock-client **gameplay automation** for 7 Days to Die servers (EAC off). It drives a real client against a real server and asserts what the server actually did.
+
+A run picks two independent axes:
+
+| Flag | Values | Meaning |
+|---|---|---|
+| `--provision` | `managed` (default), `attach` | Safehouse ([`7dtd-sandbox/`](../7dtd-sandbox/)) brings the server up on an isolated instance and tears it down, or it is already running and playtest touches no lifecycle. `--no-server` is the shorthand for attach |
+| `--server` | `stock` (default), `zdtd` | which server is under test |
+| `--readonly` | attach-only flag | the host must never be written to: a production [`7dtd-server-container`](../7dtd-server-container/) LAN server. No wipe, no staging, no config rewrite, no restart |
+
+A managed stock run is always a Safehouse instance, so nothing here starts a dedicated inside your Steam install, allocates a port, or writes a serverconfig. Suites under `suites/*.json` declare what runs, where, on which world, with which mods; the C# Catalog / `IScenarioProvider` own the case `ref` implementations, and a declared ref that has no implementation fails an offline gate.
 
 ## Quick start
 
@@ -27,10 +37,12 @@ simulation: `make dst`, documented in **[DST.md](DST.md)**.
 Join/auto-connect is **not** here: install [`../7dtd-fastconnect/`](../7dtd-fastconnect/)
 as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).
 
-Ownership split: **sandbox** isolates lab instances; **fastconnect** joins;
-**loadgen** stresses demand only; **playtest** declares/scores; mods own
-local cases via `IScenarioProvider`; **server-container** ships production
-(playtest may `--target live` attach, never deploy).
+Ownership split ([ADR 0001](https://github.com/hordeforge/.github/blob/main/docs/adr/0001-test-tiers-and-declarative-suites.md)):
+**sandbox** owns instances, ports, config rendering, mod staging and
+teardown; **fastconnect** joins; **loadgen** stresses demand only;
+**playtest** declares and scores; mods own their local cases and their own
+suite JSON; **server-container** ships production, which playtest reaches
+`--no-server --readonly` and never deploys.
 
 ## Requirements
 
@@ -158,10 +170,12 @@ in the log without rerunning with `--help`.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `PLAYTEST_TARGET` | empty | Where the suite runs: `stock`/`sandbox`/`attach`/`zdtd`/`live` (`--target`). Empty keeps legacy `--server`/`--no-server` |
-| `PLAYTEST_SANDBOX_NAME` | `playtest` | Sandbox pair base name for `--target sandbox` (`srv-<name>` / `client-<name>`) |
-| `PLAYTEST_SUITE_FILE` | empty | Optional declarative suite JSON (`--suite-file`) |
-| `PLAYTEST_SERVER` | `stock` | Legacy server backend, `stock` or `zdtd` (`--server`; prefer `--target`) |
+| `PLAYTEST_PROVISION` | `managed` | Who owns the server process: `managed` or `attach` (`--provision`). `--no-server` forces attach |
+| `PLAYTEST_BACKEND` | `stock` | Which server is under test: `stock` or `zdtd` (`--server`) |
+| `PLAYTEST_READONLY` | empty | Attach-only: never write to this host (`--readonly`) |
+| `PLAYTEST_SANDBOX_NAME` | `playtest` | Safehouse pair base name (`srv-<name>` / `client-<name>`) |
+| `PLAYTEST_SANDBOX_ROOT` | `../7dtd-sandbox` | Safehouse checkout that owns the instances (`--sandbox-root`) |
+| `PLAYTEST_SUITE_FILE` | empty | Suite JSON to run, including a mod repo's own (`--suite-file`) |
 | `ZDTD` | `../zdtd-server/zig-out/bin/zdtd` | zdtd server binary path (`--zdtd`) |
 | `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
 | `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |

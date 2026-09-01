@@ -1,8 +1,32 @@
 {
   "id": "smoke",
-  "target": "sandbox",
+  "provision": "managed",
+  "backend": "stock",
   "fresh": true,
-  "mods": ["playtest", "fastconnect"],
+  "mods": [
+    "playtest",
+    "fastconnect"
+  ],
+  "server": {
+    "GameWorld": "Navezgane",
+    "GameName": "PlaytestNav",
+    "WorldGenSeed": "playtest",
+    "WorldGenSize": "4096",
+    "ServerMaxPlayerCount": "8",
+    "EACEnabled": "false",
+    "ServerAllowCrossplay": "false",
+    "ServerDisabledNetworkProtocols": "SteamNetworking",
+    "ServerVisibility": "0",
+    "WebDashboardEnabled": "false",
+    "IgnoreEOSSanctions": "true",
+    "EnemySpawnMode": "false",
+    "MaxSpawnedZombies": "0",
+    "MaxSpawnedAnimals": "0",
+    "TelnetEnabled": "true",
+    "BuildCreate": "true",
+    "ServerPassword": "",
+    "PlayerKillingMode": "0"
+  },
   "host": {
     "fixtures": false,
     "loadgen": false
@@ -12,35 +36,55 @@
       "id": "join_ready",
       "kind": "live",
       "ref": "catalog.smoke.join_ready",
-      "tags": ["join", "demo", "smoke"]
+      "tags": [
+        "join",
+        "demo",
+        "smoke"
+      ]
     },
     {
       "id": "cgo_ready",
       "kind": "live",
       "ref": "catalog.smoke.cgo_ready",
-      "tags": ["join", "mesh", "demo", "smoke"]
+      "tags": [
+        "join",
+        "mesh",
+        "demo",
+        "smoke"
+      ]
     },
     {
       "id": "ground",
       "kind": "live",
       "ref": "catalog.smoke.ground",
-      "tags": ["world", "demo", "smoke"]
+      "tags": [
+        "world",
+        "demo",
+        "smoke"
+      ]
     },
     {
       "id": "stats",
       "kind": "live",
       "ref": "catalog.smoke.stats",
-      "tags": ["player", "demo", "smoke"]
+      "tags": [
+        "player",
+        "demo",
+        "smoke"
+      ]
     },
     {
       "id": "day_clock",
       "kind": "live",
       "ref": "catalog.smoke.day_clock",
-      "tags": ["world", "demo", "smoke"]
+      "tags": [
+        "world",
+        "demo",
+        "smoke"
+      ]
     }
   ],
   "notes": [
-    "Boot/join gate. Topology only; case refs resolve in Catalog.AddSmoke.",
-    "Default target sandbox is Safehouse lab isolation (local folder 7dtd-safehouse, repo 7dtd-sandbox)."
+    "Boot/join gate. Topology only; case refs resolve in Catalog.cs. `server` is the world this suite needs, rendered into the Safehouse instance by `sb render-config`."
   ]
 }

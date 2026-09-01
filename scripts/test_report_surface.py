@@ -2,8 +2,7 @@
 """Offline gate: orchestrator report/log surface stays injection- and crash-safe.
 
 write_junit renders client-log-derived case ids and details into JUnit XML
-consumed by CI UIs, write_stock_config renders operator values into the
-generated serverconfig.xml, parse_client_log eats arbitrary game log lines,
+consumed by CI UIs, parse_client_log eats arbitrary game log lines,
 and barrier_hits_prefix greps fixture barriers out of those logs (repeats are
 events, never duplicates to collapse). A hostile or corrupt log line must not
 break out of an XML attribute or crash either parser.
@@ -135,48 +134,6 @@ def test_barrier_hits_prefix_keeps_repeats_and_scope() -> None:
     assert playtest_log.barrier_hits_prefix(blob, "chat_echo:") == ["chat_echo:hello"]
     print("PASS barrier_prefix repeats preserved, foreign lines excluded")
 
-
-def test_write_stock_config_escapes_values() -> None:
-    src = (
-        "<ServerSettings>\n"
-        '  <property name="GameWorld" value="Navezgane"/>\n'
-        '  <property name="GameName" value="PlaytestNav"/>\n'
-        '  <property name="TelnetPassword" value="old"/>\n'
-        "</ServerSettings>\n"
-    )
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        src_cfg = tdp / "serverconfig.xml"
-        out_cfg = tdp / "out" / "serverconfig_playtest.xml"
-        src_cfg.write_text(src, encoding="utf-8")
-        playtest_run.write_stock_config(
-            src_cfg,
-            out_cfg,
-            tdp / "userdata",
-            world_name='Nav"x',
-            game_name='Play&<t>',
-            port=26900,
-            telnet_port=8081,
-            telnet_password='sec"ret&<pw>',
-        )
-        root = ElementTree.parse(out_cfg).getroot()
-        props = {p.get("name"): p.get("value") for p in root.iter("property")}
-        assert props["GameWorld"] == 'Nav"x', props
-        assert props["GameName"] == "Play&<t>", props
-        assert props["TelnetPassword"] == 'sec"ret&<pw>', props
-        assert 'value="Nav"' not in out_cfg.read_text(encoding="utf-8"), (
-            "raw quote survived into the generated config"
-        )
-    print("PASS stock_config_escape values stay inside their XML attributes")
-
-
-# Fuzz grammars for the two log-derived surfaces below. Deterministic seeds:
-# a failure prints its seed and the blob so the exact input can be pasted as
-# the next fixed regression case. The pools deliberately carry every crash and
-# injection class found so far (int(inf) OverflowError, null/array counts,
-# NUL and other XML-illegal controls, attribute breakout markup) plus random
-# junk, because a fuzzer proves presence of bugs; these assertions are what
-# turn a future parser regression into a red gate instead of a dead run.
 
 _EVENT_FRAGMENTS = [
     # Well-formed events the client actually emits.
@@ -913,7 +870,6 @@ def main() -> int:
     test_parse_client_log_survives_null_numbers()
     test_parse_client_log_survives_inf_and_type_garbage()
     test_barrier_hits_prefix_keeps_repeats_and_scope()
-    test_write_stock_config_escapes_values()
     test_write_junit_drops_xml_illegal_characters()
     test_fuzz_parse_client_log_survives_hostile_logs()
     test_fuzz_write_junit_roundtrips_hostile_strings()

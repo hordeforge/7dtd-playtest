@@ -161,8 +161,11 @@ PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 # clean, rejoin teardown, post-run finally): one table so a new runtime shape
 # cannot be added to one step and missed by the others. Site-specific extras
 # (truncated comm names, zdtd, loadgen) append to this list.
+# The client side only. A managed dedicated is a Safehouse instance and is
+# stopped by name (`sb stop`), which matches on that instance's own SB_INSTANCE
+# env: a blanket 7DaysToDieServer pkill from here would take down every other
+# sandbox instance on the machine, including another agent's run.
 GAME_PROC_PATTERNS = [
-    r"7DaysToDieServer\.x86_64",
     r"[/]7DaysToDie\.exe",
     r"wine64-preloader.*7DaysToDie",
     r"proton.*7DaysToDie",
@@ -239,8 +242,9 @@ def config_summary(args: argparse.Namespace) -> str:
     # function when no explicit credential was supplied.
     pw_state = "set" if (args.telnet_password or not args.no_server) else "unset"
     parts = [
-        f"target={getattr(args, 'target', '') or 'stock'}",
+        f"provision={getattr(args, 'provision', '') or 'managed'}",
         f"server={args.server}",
+        f"readonly={bool(getattr(args, 'readonly', False))}",
         f"suite={args.suite.strip()}",
         f"port={args.port}",
         f"admin_port={args.admin_port}",
@@ -369,37 +373,6 @@ STOCK_READY_TIMEOUT_SEC = 600.0
 ZDTD_READY_TIMEOUT_SEC = 60.0
 
 
-def wait_stock_dedicated_ready(proc: subprocess.Popen, unity_log: Path) -> bool:
-    """Wait for stock `StartGame done`; False when the dedicated exited first.
-
-    A backend that dies before becoming ready must fail the harness here on
-    every path that starts one: proceeding would only burn the wall clock on
-    a client that can never join.
-    """
-    if wait_file_contains(unity_log, "StartGame done", timeout=STOCK_READY_TIMEOUT_SEC):
-        log("stock dedicated ready (StartGame done)")
-        return True
-    if proc.poll() is not None:
-        err(f"stock dedicated exited early code={proc.returncode}")
-        try:
-            tail = unity_log.read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines()[-40:]
-        except OSError as ex:
-            # The exit-code verdict stands on its own; a log that cannot be
-            # re-read (rotation, EIO) must not become a raw traceback here,
-            # same boundary as the client-log grep at the final verdict.
-            warn(f"could not read server log tail {unity_log}: {ex}")
-        else:
-            err(
-                "tail server log:\n"
-                + "\n".join(scrub(line) for line in tail)
-            )
-        return False
-    warn("no StartGame done yet; server still running, proceeding")
-    return True
-
-
 def wait_zdtd_ready(proc: subprocess.Popen, server_log_path: Path) -> bool:
     """Wait for zdtd `tick=20Hz`; False when zdtd exited before ticking."""
     if wait_file_contains(server_log_path, "tick=20Hz", timeout=ZDTD_READY_TIMEOUT_SEC):
@@ -410,114 +383,6 @@ def wait_zdtd_ready(proc: subprocess.Popen, server_log_path: Path) -> bool:
         return False
     warn("no tick=20Hz; proceeding")
     return True
-
-
-def _literal_replacement(replacement: str) -> Callable[[re.Match[str]], str]:
-    """re.sub replacer that inserts ``replacement`` without backslash escapes."""
-
-    def _sub(_m: re.Match[str]) -> str:
-        return replacement
-
-    return _sub
-
-
-def write_stock_config(
-    src_cfg: Path,
-    out_cfg: Path,
-    userdata: Path,
-    *,
-    world_name: str,
-    game_name: str,
-    port: int,
-    telnet_port: int,
-    telnet_password: str,
-) -> None:
-    try:
-        text = src_cfg.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as ex:
-        # A user-edited template can be non-UTF-8 or unreadable; name it and
-        # the reason here instead of a bare decode/OSError traceback after
-        # the save wipe already ran.
-        raise RuntimeError(
-            f"cannot read serverconfig template {src_cfg}: {ex}"
-        ) from ex
-    ud = str(userdata.resolve())
-    # Values land inside double-quoted XML attributes; a quote or ampersand in
-    # any of them would corrupt the property or smuggle extra ones into the
-    # generated serverconfig. Lambda replacements keep re.sub from
-    # interpreting backslashes in the value.
-    ud_attr = xml_attr(ud)
-    # The stock serverconfig.xml ships UserDataFolder commented out
-    # (`<!-- <property name="UserDataFolder" .../> -->`). Rewriting the value
-    # inside that comment leaves the server saving under its default
-    # ~/.local/share/7DaysToDie, so --fresh-save wiped an empty tree while
-    # player inventory and world state carried over between runs. Drop the
-    # commented form first so an active property is always written.
-    text = re.sub(
-        r'<!--\s*<property\s+name="UserDataFolder"[^>]*/>\s*-->',
-        "",
-        text,
-    )
-    if 'name="UserDataFolder"' not in text:
-        text = text.replace(
-            "<ServerSettings>",
-            f'<ServerSettings>\n\t<property name="UserDataFolder" value="{ud_attr}"/>',
-        )
-    else:
-        text = re.sub(
-            r'name="UserDataFolder"\s*value="[^"]*"',
-            _literal_replacement(f'name="UserDataFolder" value="{ud_attr}"'),
-            text,
-        )
-    repls = {
-        "GameWorld": world_name,
-        "GameName": game_name,
-        "WorldGenSeed": "playtest",
-        "WorldGenSize": "4096",
-        "ServerPort": str(port),
-        "ServerMaxPlayerCount": "8",
-        "EACEnabled": "false",
-        "ServerAllowCrossplay": "false",
-        "ServerDisabledNetworkProtocols": "SteamNetworking",
-        "ServerVisibility": "0",
-        "WebDashboardEnabled": "false",
-        "IgnoreEOSSanctions": "true",
-        # No natural hordes during demo (fixtures spawn one zombie on barrier).
-        "EnemySpawnMode": "false",
-        "MaxSpawnedZombies": "0",
-        "MaxSpawnedAnimals": "0",
-        "TelnetEnabled": "true",
-        "TelnetPort": str(telnet_port),
-        # Same password TelnetAdmin authenticates with (--telnet-password /
-        # PLAYTEST_TELNET_PASSWORD). Writing a different literal here would
-        # make the orchestrator's telnet login fail on non-local auth.
-        "TelnetPassword": telnet_password,
-        "BuildCreate": "true",
-        "ServerPassword": "",
-        "PlayerKillingMode": "0",
-    }
-    for k, v in repls.items():
-        text = re.sub(
-            rf'name="{k}"\s*value="[^"]*"',
-            _literal_replacement(f'name="{k}" value="{xml_attr(v)}"'),
-            text,
-        )
-    try:
-        out_cfg.parent.mkdir(parents=True, exist_ok=True)
-        out_cfg.write_text(text, encoding="utf-8")
-    except OSError as ex:
-        # Named like the read failure above: this runs after --fresh-save
-        # already moved the save aside, so the operator needs the destination
-        # path and cause, not a bare OSError traceback from deep in main().
-        raise RuntimeError(
-            f"cannot write generated serverconfig {out_cfg}: {ex}"
-        ) from ex
-    # The generated config carries TelnetPassword; keep it user-only instead
-    # of inheriting a world-readable umask.
-    try:
-        os.chmod(out_cfg, 0o600)
-    except OSError as ex:
-        warn(f"could not restrict serverconfig permissions to 0600: {ex}")
 
 
 def _popen_to_logfile(
@@ -549,125 +414,6 @@ def _popen_to_logfile(
         raise
     proc._log_fh = fh  # type: ignore[attr-defined]
     return proc
-
-
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Publish ``data`` at ``path`` via temp+os.replace.
-
-    A failure mid-write then leaves the previous content intact instead of a
-    truncated file that later runs would treat as good.
-    """
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
-    try:
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except OSError:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        raise
-
-
-def _rewrite_platform_cfg(pcfg: Path) -> None:
-    """Back up once, then force the local-auth platform surface, atomically.
-
-    The backup is the only copy of the user's original config: writing it
-    in place means a disk-full mid-write silently destroys it (the next run
-    sees the backup exists and never retries), and a torn platform.cfg
-    breaks every later dedicated start.
-    """
-    bak = pcfg.with_name(pcfg.name + ".playtest-bak")
-    if not bak.is_file():
-        _atomic_write_bytes(bak, pcfg.read_bytes())
-    _atomic_write_bytes(
-        pcfg,
-        b"platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n",
-    )
-
-
-def start_stock_dedicated(
-    game_srv: Path,
-    userdata: Path,
-    server_log: Path,
-    *,
-    world_name: str,
-    game_name: str,
-    port: int,
-    telnet_port: int,
-    telnet_password: str,
-) -> tuple[subprocess.Popen, Path]:
-    """Start stock 7DaysToDieServer. Returns (proc, logfile path)."""
-    if not (game_srv / "7DaysToDieServer.x86_64").is_file():
-        raise FileNotFoundError(f"dedicated server binary missing under {game_srv}")
-
-    userdata.mkdir(parents=True, exist_ok=True)
-    (userdata / "Saves").mkdir(exist_ok=True)
-    (userdata / "Logs").mkdir(exist_ok=True)
-
-    # Local auth surface (same as loadgen): Steam + LAN only.
-    pcfg = game_srv / "platform.cfg"
-    if pcfg.is_file():
-        try:
-            _rewrite_platform_cfg(pcfg)
-        except OSError as ex:
-            # Not fatal: the dedicated still runs, but the auth surface may
-            # keep the user's defaults and reject LAN/local logins.
-            warn(f"platform.cfg rewrite failed ({ex}); auth surface may keep user defaults")
-
-    # Quarantine RealEarth if present (stock playtest).
-    re_mod = game_srv / "Mods" / "RealEarth"
-    if re_mod.is_dir():
-        disabled = game_srv / "Mods.disabled"
-        disabled.mkdir(exist_ok=True)
-        dest = disabled / "RealEarth"
-        if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
-        re_mod.rename(dest)
-        log("quarantined RealEarth → Mods.disabled")
-
-    cfg_src = LOADGEN / "scripts" / "serverconfig_loadgen.xml"
-    if not cfg_src.is_file():
-        cfg_src = game_srv / "serverconfig.xml"
-    if not cfg_src.is_file():
-        # Named failure instead of a read_text traceback after the save wipe:
-        # the operator needs to know both paths that were tried.
-        raise FileNotFoundError(
-            f"no serverconfig template: tried "
-            f"{LOADGEN / 'scripts' / 'serverconfig_loadgen.xml'} and "
-            f"{game_srv / 'serverconfig.xml'}"
-        )
-    cfg_out = userdata / "serverconfig_playtest.xml"
-    write_stock_config(
-        cfg_src,
-        cfg_out,
-        userdata,
-        world_name=world_name,
-        game_name=game_name,
-        port=port,
-        telnet_port=telnet_port,
-        telnet_password=telnet_password,
-    )
-    log(f"stock config → {cfg_out} world={world_name} port={port}")
-
-    server_log.parent.mkdir(parents=True, exist_ok=True)
-    # Unity -logfile path
-    unity_log = userdata / "Logs" / f"server_playtest_{world_name}.txt"
-    if unity_log.is_file():
-        unity_log.write_text("", encoding="utf-8")
-
-    cmd = [
-        str(game_srv / "7DaysToDieServer.x86_64"),
-        "-logfile",
-        str(unity_log),
-        "-quit",
-        "-batchmode",
-        "-nographics",
-        "-dedicated",
-        f"-configfile={cfg_out}",
-    ]
-    log("start stock dedicated: " + " ".join(cmd))
-    proc = _popen_to_logfile(cmd, server_log, cwd=str(game_srv))
-    return proc, unity_log
 
 
 def start_zdtd(
@@ -1763,51 +1509,6 @@ class FreshSaveError(RuntimeError):
     """The required clean starting state could not be established."""
 
 
-def fresh_save(userdata: Path, game_name: str, quarantine: Path) -> None:
-    """Move stock save folders aside into `quarantine` for a clean world.
-
-    Typical layout: UserData/Saves/<World>/<GameName>. Every world's copy of
-    the named game goes; sibling saves and stray files stay. Removal means
-    "recoverable until pruned", so a mispointed --userdata cannot destroy real
-    playthroughs irrecoverably.
-    """
-    saves = userdata / "Saves"
-    if not saves.is_dir():
-        return
-    try:
-        world_dirs = [d for d in saves.iterdir() if d.is_dir()]
-    except OSError as ex:
-        raise FreshSaveError(
-            f"fresh-save: could not scan {saves}; refusing to reuse an "
-            f"unknown prior save: {ex}"
-        ) from ex
-    entry = _quarantine_entry(quarantine, "stock-save")
-    removed = 0
-    failed = 0
-    for world_dir in world_dirs:
-        target = world_dir / game_name
-        if target.is_dir():
-            moved = (
-                entry is not None
-                and _quarantine_move(target, entry, f"{world_dir.name}--{game_name}")
-            )
-            if not moved:
-                # A surviving save would silently poison the run: dig/place
-                # would then test the previous run's terrain, not the server.
-                failed += 1
-                warn(f"fresh-save: could not remove {target}")
-                continue
-            removed += 1
-            log(f"fresh-save removed {target}")
-    if removed == 0 and failed == 0:
-        log(f"fresh-save: no existing save named {game_name}")
-    if failed:
-        raise FreshSaveError(
-            f"fresh-save: {failed} existing save(s) named {game_name} could not "
-            "be quarantined; refusing to run against stale state"
-        )
-
-
 def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
     """Move zdtd persisted state aside (`--world`) for a clean starting bag.
 
@@ -2261,10 +1962,10 @@ def main(argv: list[str] | None = None) -> int:
         epilog=(
             "examples:\n"
             "  playtest_run.py --suite smoke\n"
-            "  playtest_run.py --target sandbox --suite smoke\n"
+            "  playtest_run.py --suite smoke              # managed Safehouse instance\n"
             "  playtest_run.py --server zdtd --port 27025\n"
-            "  playtest_run.py --target attach --no-server --skip-clean\n"
-            "  playtest_run.py --target live --no-server  # server-container attach only\n"
+            "  playtest_run.py --no-server --skip-clean   # attach to a running server\n"
+            "  playtest_run.py --no-server --readonly     # server-container, attach only\n"
             "exit codes: 0 all cases pass, 1 case failures, 2 harness error\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2275,13 +1976,37 @@ def main(argv: list[str] | None = None) -> int:
         version=f"playtest_run.py {mod_version()}",
     )
     ap.add_argument(
-        "--target",
-        choices=playtest_targets.TARGETS,
-        default=os.environ.get("PLAYTEST_TARGET", ""),
+        "--provision",
+        choices=playtest_targets.PROVISIONS,
+        default=os.environ.get("PLAYTEST_PROVISION", ""),
         help=(
-            "where the suite runs: stock|sandbox|attach|zdtd|live "
-            "(env PLAYTEST_TARGET). Empty keeps legacy --server/--no-server. "
-            "live is attach-only to server-container; playtest never deploys it"
+            "who owns the server process (env PLAYTEST_PROVISION): managed "
+            "brings it up on a Safehouse instance and tears it down; attach "
+            "joins one that is already running and touches no lifecycle. "
+            "--no-server is the shorthand for attach"
+        ),
+    )
+    ap.add_argument(
+        "--readonly",
+        action="store_true",
+        default=os.environ.get("PLAYTEST_READONLY", "") not in ("", "0"),
+        help=(
+            "attach-only: the host must never be written to (a "
+            "7dtd-server-container production server). No wipe, no mod "
+            "staging, no config rewrite, no restart"
+        ),
+    )
+    ap.add_argument(
+        "--sandbox-root",
+        type=Path,
+        default=(
+            Path(os.environ["PLAYTEST_SANDBOX_ROOT"])
+            if os.environ.get("PLAYTEST_SANDBOX_ROOT")
+            else None
+        ),
+        help=(
+            "Safehouse checkout that owns the instances (env "
+            "PLAYTEST_SANDBOX_ROOT; default: 7dtd-sandbox beside this repo)"
         ),
     )
     ap.add_argument(
@@ -2575,29 +2300,55 @@ def main(argv: list[str] | None = None) -> int:
         if first_suite:
             suite_doc = suite_loader.load_suite_by_id(first_suite)
 
-    # Resolve --target / PLAYTEST_TARGET (legacy --server/--no-server still work).
-    target_raw = (args.target or "").strip() or None
-    if target_raw is None and suite_doc is not None:
-        target_raw = suite_doc.target
+    # Resolve provision/backend. An explicit flag beats the suite's declaration;
+    # the suite is what makes an undecorated `--suite core` reproducible.
+    provision_raw = (args.provision or "").strip() or None
+    readonly = bool(args.readonly)
+    backend_raw = args.server
+    if suite_doc is not None:
+        if provision_raw is None:
+            provision_raw = suite_doc.provision
+        if not os.environ.get("PLAYTEST_BACKEND") and "--server" not in (argv or sys.argv[1:]):
+            backend_raw = suite_doc.backend
+        readonly = readonly or suite_doc.readonly
     try:
         target_plan = playtest_targets.resolve_target(
-            target=target_raw,
-            server=args.server,
+            provision=provision_raw,
+            backend=backend_raw,
+            readonly=readonly,
             no_server=args.no_server,
             sandbox_name=args.sandbox_name,
+            sandbox_root=args.sandbox_root,
             workspace=WORKSPACE,
         )
     except ValueError as ex:
         ap.error(str(ex))
-    if target_plan.target == "live" and not args.no_server and target_raw == "live":
-        # live is attach-only: force --no-server so we never start/deploy.
-        args.no_server = True
-        target_plan = playtest_targets.resolve_target(
-            target="live",
-            server=args.server,
-            no_server=True,
-            sandbox_name=args.sandbox_name,
-            workspace=WORKSPACE,
+    if target_plan.is_sandbox:
+        # Safehouse allocates the instance's ports; an operator port would send
+        # the harness at a port the server never binds.
+        for flag, value, default in (
+            ("--port", args.port, None),
+            ("--admin-port", args.admin_port, 8081),
+        ):
+            if value != default:
+                ap.error(
+                    f"{flag} is not settable for a managed run: the Safehouse "
+                    f"instance allocates its own ports. Use --no-server to "
+                    f"attach to a server you started yourself."
+                )
+        try:
+            playtest_targets.check_sandbox_available(target_plan)
+        except playtest_targets.TargetError as ex:
+            ap.error(str(ex))
+    if (
+        suite_doc is not None
+        and suite_doc.provision == "managed"
+        and target_plan.is_attach
+    ):
+        warn(
+            f"suite {suite_doc.id} declares a managed run (its own world and "
+            "mods); attaching instead, so its server block and mods list are "
+            "not applied to the host you joined"
         )
     playtest_targets.apply_plan_to_args(args, target_plan)
     if suite_doc is not None and suite_doc.host.fixtures and not args.no_fixtures:
@@ -2612,25 +2363,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.port is None:
         if target_plan.port is not None:
             args.port = target_plan.port
+        elif target_plan.is_sandbox:
+            # Placeholder until `sb up` reports the instance's own block; the
+            # allocator, not this default, decides what the server binds.
+            args.port = 0
         else:
             args.port = 27025 if args.server == "zdtd" else 26900
     if args.server == "stock" and args.no_server and not args.telnet_password:
         ap.error("--no-server requires --telnet-password or PLAYTEST_TELNET_PASSWORD")
-    if (
-        target_plan.telnet_port is not None
-        and args.admin_port == 8081
-        and target_plan.target == "sandbox"
-    ):
+    if target_plan.telnet_port is not None and args.admin_port == 8081:
+        # The instance allocated its own telnet port; the lab default 8081 is
+        # not a choice the operator made.
         args.admin_port = target_plan.telnet_port
     if (
         not math.isfinite(args.loadgen_server_cvar_tolerance)
         or args.loadgen_server_cvar_tolerance < 0
     ):
         ap.error("--loadgen-server-cvar-tolerance must be a finite non-negative number")
-    try:
-        require_litenet_room(args.port)
-    except ValueError as ex:
-        ap.error(f"--port invalid: {ex}")
+    if not target_plan.is_sandbox:
+        # Safehouse allocates a contiguous 5-port block per instance, so a
+        # managed run has this room by construction; the allocated port is
+        # checked again once `sb up` reports it.
+        try:
+            require_litenet_room(args.port)
+        except ValueError as ex:
+            ap.error(f"--port invalid: {ex}")
     loadgen_observer_requested = bool(
         args.loadgen_observe_cvar
         or args.loadgen_observe_buff
@@ -2702,9 +2459,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if (
         args.server == "stock"
-        and not args.no_server
+        and args.no_server
         and not (args.game_srv / "7DaysToDieServer.x86_64").is_file()
     ):
+        # Attach still needs the tree for Data/Worlds lookups and log paths.
         err(f"missing stock dedicated under {args.game_srv}")
         return 2
     if not (CONNECT / "scripts" / "launch_client.sh").is_file():
@@ -2847,8 +2605,10 @@ def main(argv: list[str] | None = None) -> int:
             clean_processes(kill_wine=args.kill_wine)
 
         # After clean, refuse to double-bind if something else still owns ports
-        # (orphan outside our pkill patterns, or race with another host).
-        if not args.no_server:
+        # (orphan outside our pkill patterns, or race with another host). A
+        # managed run has no ports yet: the instance's block is allocated by
+        # `sb create-server`, and `sb up` refuses an instance already running.
+        if not args.no_server and not args._target_plan.is_sandbox:
             busy = [
                 p
                 for p in (args.port, args.admin_port)
@@ -2865,10 +2625,10 @@ def main(argv: list[str] | None = None) -> int:
         qroot = args.logdir / QUARANTINE_DIRNAME
         # Fresh save is a hard-rule default and cannot be turned off: every suite
         # starts on a clean world, so a place/dig suite measures fresh terrain and
-        # no leftover blocks rather than the previous run's state.
-        if args.server == "stock":
-            fresh_save(args.userdata, args.game_name, qroot)
-        else:
+        # no leftover blocks rather than the previous run's state. For a managed
+        # stock run that is `sb wipe` on the instance, inside start_server();
+        # only the zdtd world is this process's to clear.
+        if args.server == "zdtd" and not args.no_server:
             # args.world always carries a Path default; only zdtd reads it.
             fresh_zdtd_world(args.world, qroot)
 
@@ -2904,8 +2664,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         peer_scan = ClientLogScan()
 
-        # Telnet/admin surface, needed by start_stock_dedicated (config password)
-        # and every barrier handler below. Assigned once, before first use.
+        # Telnet/admin surface, used by every barrier handler below and written
+        # into the instance config for a managed run. Assigned once, before use.
         telnet_host = "127.0.0.1"
         telnet_port = args.admin_port
         telnet_password = resolve_telnet_password(
@@ -2959,70 +2719,77 @@ def main(argv: list[str] | None = None) -> int:
                 tn.close()
             return moved, connected
 
-        def start_server() -> bool:
-            """Start the selected backend (unless --no-server) and wait ready.
+        def start_server(*, wipe: bool = True) -> bool:
+            """Bring the target up (unless attached) and wait until it is ready.
 
             One path for the initial start and the rejoin restart so they
             cannot drift (same reason the ready-wait budgets are shared).
 
-            --target sandbox: lab dedicated via 7dtd-safehouse (sb run server).
-            --target live/attach: never starts a server (attach-only).
-            Legacy stock/zdtd: orchestrator still owns bring-up.
+            managed/stock: a Safehouse instance. `sb` owns the wipe, the mod
+            staging, the config, the ports and the process; this function only
+            reads back the contract it allocated. There is no path that starts
+            a dedicated inside the user's Steam install.
+            managed/zdtd:  the orchestrator owns the zdtd process.
+            attach:        never starts anything, readonly or not.
             """
             nonlocal server_proc, unity_log, server_exit_announced
-            plan = getattr(args, "_target_plan", None)
-            if args.no_server or (plan is not None and plan.is_attach):
+            plan = args._target_plan
+            if args.no_server or plan.is_attach:
                 return True
             server_exit_announced = False
-            if plan is not None and plan.target == "sandbox":
-                try:
-                    env_map = playtest_targets.ensure_sandbox_server(plan, wipe=True)
-                except RuntimeError as ex:
-                    err(f"sandbox target bring-up failed: {ex}")
+            if plan.is_sandbox:
+                suite_doc = args._suite_doc
+                config = dict(suite_doc.server_config) if suite_doc is not None else {}
+                # A declarative suite owns the world it needs. --world-name /
+                # --game-name fill in for a catalog-only suite that declares
+                # none, so they never silently override a suite's own choice.
+                config.setdefault("GameWorld", args.world_name)
+                config.setdefault("GameName", args.game_name)
+                # What the world actually was, recorded for the report: `sb`
+                # rebuilds the instance config from the base template plus
+                # exactly these declarations, so this list reproduces the run.
+                args._applied_server_config = {
+                    k: v for k, v in config.items() if k != "TelnetPassword"
+                }
+                # The orchestrator's own telnet surface is not the suite's to
+                # declare: it must match what TelnetAdmin authenticates with.
+                config["TelnetEnabled"] = "true"
+                config["TelnetPassword"] = telnet_password
+                mods = (
+                    suite_loader.resolve_mods(suite_doc, workspace=WORKSPACE, repo=ROOT)
+                    if suite_doc is not None
+                    else []
+                )
+                missing = [m for m in mods if not (m / "ModInfo.xml").is_file()]
+                if missing:
+                    err(
+                        "suite declares mods that are not built: "
+                        + ", ".join(str(m) for m in missing)
+                    )
                     return False
-                if env_map.get("SERVER_PORT"):
-                    with contextlib.suppress(ValueError):
-                        args.port = int(env_map["SERVER_PORT"])
-                if env_map.get("SERVER_TELNET_PORT"):
-                    with contextlib.suppress(ValueError):
-                        args.admin_port = int(env_map["SERVER_TELNET_PORT"])
-                if env_map.get("SERVER_GAME"):
-                    args.game_srv = Path(env_map["SERVER_GAME"])
-                if env_map.get("SERVER_USERDATA"):
-                    args.userdata = Path(env_map["SERVER_USERDATA"])
-                slog = env_map.get("SERVER_LOG")
-                ready_log = Path(slog) if slog else server_log
-                # Sandbox launches detached via sb; we do not own the Popen
-                # handle. Mark no_server so mid-run exit polling does not
-                # false-alarm on a missing proc, then wait for the game port.
+                try:
+                    env_map = playtest_targets.ensure_sandbox_server(
+                        plan, wipe=wipe, mods=mods, config=config
+                    )
+                except playtest_targets.TargetError as ex:
+                    err(f"sandbox bring-up failed: {ex}")
+                    return False
+                playtest_targets.overlay_instance_env(args, env_map)
+                try:
+                    require_litenet_room(args.port)
+                except ValueError as ex:
+                    err(f"instance {plan.sandbox_server} allocated an unusable port: {ex}")
+                    return False
+                # `sb up` returned only once the game port was listening, and
+                # the process is its own session: this run does not hold the
+                # Popen handle, so mid-run exit polling must not expect one.
                 args.no_server = True
                 log(
-                    f"sandbox server started: instance={plan.sandbox_server} "
-                    f"port={args.port} log={ready_log}"
+                    f"sandbox server up: instance={plan.sandbox_server} "
+                    f"port={args.port} telnet={args.admin_port} "
+                    f"log={env_map.get('SERVER_LOG', server_log)}"
                 )
-                deadline = time.monotonic() + 180.0
-                while time.monotonic() < deadline:
-                    if playtest_lock.tcp_port_in_use(args.port):
-                        log(f"sandbox server port {args.port} is listening")
-                        return True
-                    time.sleep(1.0)
-                err(
-                    f"sandbox server did not bind TCP {args.port} within 180s "
-                    f"(log={ready_log})"
-                )
-                return False
-            if args.server == "stock":
-                server_proc, unity_log = start_stock_dedicated(
-                    args.game_srv,
-                    args.userdata,
-                    server_log,
-                    world_name=args.world_name,
-                    game_name=args.game_name,
-                    port=args.port,
-                    telnet_port=args.admin_port,
-                    telnet_password=telnet_password,
-                )
-                return wait_stock_dedicated_ready(server_proc, unity_log)
+                return True
             server_proc = start_zdtd(
                 args.zdtd,
                 args.world,
@@ -3095,6 +2862,11 @@ def main(argv: list[str] | None = None) -> int:
         client_extra_env: dict[str, str] = {}
         if args.trace_entity:
             client_extra_env["PLAYTEST_TRACE_ENTITY"] = "1"
+        # The declared case refs are what the suite says runs. The client keeps
+        # only cases whose ref appears here, so a case added to the C# catalog
+        # but not declared in the suite does not silently ride along.
+        if suite_doc is not None:
+            client_extra_env["PLAYTEST_CASE_REFS"] = ",".join(suite_doc.case_refs)
         # Same , ; space delimiters as the client's Catalog.ExpandSuites (see
         # suite_wants_host_fixtures): "smoke apm" must arm the dump env exactly
         # like "smoke,apm", or the in-client apm case waits on a path this
@@ -3277,6 +3049,7 @@ def main(argv: list[str] | None = None) -> int:
                 client_proc = None
                 stop_proc(server_proc)
                 server_proc = None
+                playtest_targets.stop_sandbox_server(args._target_plan)
                 pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
                 summary = {
                     "pass": setup_pass,
@@ -3337,18 +3110,15 @@ def main(argv: list[str] | None = None) -> int:
             client_proc = None
             stop_proc(server_proc)
             server_proc = None
-            # Prefer graceful exit first; escalate only if still alive.
-            pkill_patterns(
-                [
-                    r"7DaysToDieServer\.x86_64",
-                ],
-                sig="-15",
-            )
+            # Stop the dedicated by instance, never by pattern: the rejoin
+            # restart must not reach another sandbox instance's server.
+            playtest_targets.stop_sandbox_server(args._target_plan)
             time.sleep(3)
             pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
             time.sleep(5)
-            # Restart dedicated on same save (no fresh_save).
-            if not start_server():
+            # Rejoin verifies persistence: restart on the save the setup
+            # generation just wrote, so no wipe here.
+            if not start_server(wipe=False):
                 return 2
             truncate_file(args.client_log, "client log")
             # Fresh readers + fresh counter pair for the verify generation: the
@@ -3798,17 +3568,17 @@ def main(argv: list[str] | None = None) -> int:
         plan = getattr(args, "_target_plan", None)
         suite_doc = getattr(args, "_suite_doc", None)
         payload = {
-            "target": getattr(args, "target", None)
-            or (plan.target if plan is not None else "stock"),
+            "target": plan.label if plan is not None else "managed/stock",
             "server": args.server,
             "suite": args.suite,
-            "world_name": args.world_name
-            if args.server == "stock"
-            else str(args.world),
+            "world_name": args.world_name if args.server == "stock" else str(args.world),
             "port": args.port,
             "target_plan": (
                 playtest_targets.target_report_fields(plan) if plan is not None else None
             ),
+            # The serverconfig properties this run applied, minus the per-run
+            # telnet secret. A report without them cannot be reproduced.
+            "server_config": getattr(args, "_applied_server_config", {}),
             "suite_doc": (
                 suite_loader.suite_to_report(suite_doc) if suite_doc is not None else None
             ),
@@ -4007,6 +3777,11 @@ def main(argv: list[str] | None = None) -> int:
             stop_proc(peer_client_proc)
             stop_proc(loadgen_proc)
             stop_proc(server_proc)
+            # A managed dedicated belongs to its Safehouse instance; stopping it
+            # by name is what keeps the teardown off other instances.
+            teardown_plan = getattr(args, "_target_plan", None)
+            if teardown_plan is not None and not teardown_plan.readonly:
+                playtest_targets.stop_sandbox_server(teardown_plan)
             # Poll loops reap mute helpers each iteration, but teardown paths
             # (rejoin abort, exception unwind, post-DONE) skip them: without
             # this reap an exited helper lingers as a zombie until interpreter
@@ -4019,6 +3794,7 @@ def main(argv: list[str] | None = None) -> int:
                     *GAME_PROC_PATTERNS,
                     r"zig-out/bin/zdtd",
                     r"7dtd-loadgen",
+                    # A zdtd run's own dedicated helper, never a sandbox instance.
                 ],
                 sig="-9",
             )
