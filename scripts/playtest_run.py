@@ -534,8 +534,17 @@ def start_client(
     client_launch_log.parent.mkdir(parents=True, exist_ok=True)
     role = "scenario" if run_suite else "stock-peer"
     log(f"start client role={role} suite={suite or '(none)'} connect={env['7DTD_CONNECT']}")
+    # launch_client.sh forwards its own arguments to the game. A sandbox client
+    # is a test fixture: it must never take the display fullscreen, and several
+    # have to be visible at once, so the instance's window contract
+    # (SB_SCREEN_ARGS from `sb env`, windowed 1280x720 by default) is passed
+    # here rather than left to whatever the Proton prefix last saved.
+    launch_args = (env.get("SB_SCREEN_ARGS") or "").split()
     proc = _popen_to_logfile(
-        ["bash", str(launch)], client_launch_log, cwd=str(CONNECT), env=env
+        ["bash", str(launch), *launch_args],
+        client_launch_log,
+        cwd=str(CONNECT),
+        env=env,
     )
     # Belt-and-suspenders: connect mutes itself; also start poll from orch.
     mute_client_audio_async()
@@ -2500,6 +2509,7 @@ def main(argv: list[str] | None = None) -> int:
     # consulted, and need not even be the same build (a Linux native install
     # has no 7DaysToDie.exe for Proton to launch at all).
     game_dir: Path | None
+    client_mods: list[Path] = []
     if target_plan.is_sandbox:
         client_mods = (
             suite_loader.resolve_mods(
@@ -2515,21 +2525,18 @@ def main(argv: list[str] | None = None) -> int:
                 + ", ".join(str(m) for m in missing_client_mods)
             )
             return 2
-        try:
-            client_env = playtest_targets.ensure_sandbox_client(
-                target_plan, wipe=True, mods=client_mods
-            )
-        except playtest_targets.TargetError as ex:
-            err(f"sandbox client bring-up failed: {ex}")
-            return 2
-        game_dir = Path(client_env["GAME"])
-        args.client_compat = Path(client_env["COMPAT"])
+        # Paths only, no bring-up: the instance is created after the lock is
+        # held, because creating it seeds a Proton prefix and a run that is not
+        # allowed to start must not touch the instance it was going to use.
+        paths = playtest_targets.sandbox_client_paths(target_plan)
+        game_dir = paths["game"]
+        args.client_compat = paths["compat"]
         client_instance_env = {
-            "GAME": client_env["GAME"],
-            "COMPAT": client_env["COMPAT"],
+            "GAME": str(paths["game"]),
+            "COMPAT": str(paths["compat"]),
             "7DTD_PLAYER_NAME": target_plan.sandbox_client or "",
+            "SB_SCREEN_ARGS": playtest_targets.sandbox_screen_args(target_plan),
         }
-        log(f"sandbox client ready: instance={target_plan.sandbox_client} game={game_dir}")
     else:
         client_instance_env = {}
         game_dir = client_game_dir()
@@ -2541,15 +2548,19 @@ def main(argv: list[str] | None = None) -> int:
             "prefix is not beside it."
         )
         return 2
-    if not game_dir.is_dir():
-        err(
-            f"missing client install at {game_dir} (from GAME). launch_client.sh reads "
-            "GAME, not SEVEN_DAYS_TO_DIE_DIR; point it at the client install."
-        )
-        return 2
-    if not (game_dir / CLIENT_EXECUTABLE).is_file():
-        err(f"{game_dir} holds no {CLIENT_EXECUTABLE}; GAME must name the client install")
-        return 2
+    if not target_plan.is_sandbox:
+        # A managed run's client instance is created below, once the lock is
+        # held; `sb create` reports a missing or incomplete base far better
+        # than a path check can here.
+        if not game_dir.is_dir():
+            err(
+                f"missing client install at {game_dir} (from GAME). launch_client.sh reads "
+                "GAME, not SEVEN_DAYS_TO_DIE_DIR; point it at the client install."
+            )
+            return 2
+        if not (game_dir / CLIENT_EXECUTABLE).is_file():
+            err(f"{game_dir} holds no {CLIENT_EXECUTABLE}; GAME must name the client install")
+            return 2
     # The log to parse belongs to the prefix of *that* install. Defaulting it
     # from a fixed library instead means a caller on any other layout parses a
     # file the launcher never writes, and reads an empty run as a failed one.
@@ -2646,6 +2657,22 @@ def main(argv: list[str] | None = None) -> int:
             f"playtest lock acquired session={lock_session} file={lock_path} "
             f"(exclusive client)"
         )
+
+        # Now that this run owns the client, build it. Creating or wiping an
+        # instance seeds a Proton prefix, so a run that was going to be refused
+        # must not have touched it.
+        if target_plan.is_sandbox:
+            try:
+                playtest_targets.ensure_sandbox_client(
+                    target_plan, wipe=True, mods=client_mods
+                )
+            except playtest_targets.TargetError as ex:
+                err(f"sandbox client bring-up failed: {ex}")
+                return 2
+            log(
+                f"sandbox client ready: instance={target_plan.sandbox_client} "
+                f"game={game_dir}"
+            )
         lock_heartbeat = playtest_lock.HeartbeatThread(
             lock_session,
             path=lock_path,

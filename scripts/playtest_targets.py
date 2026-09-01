@@ -294,6 +294,44 @@ def ensure_sandbox_server(
     return env_map
 
 
+def sandbox_client_paths(plan: TargetPlan) -> dict[str, Path]:
+    """Where the client instance will live, derived from its name alone.
+
+    No disk access and no side effect, so a run can validate paths and pick its
+    lock file before it is allowed to create anything. The instance layout is
+    Safehouse's contract: <root>/instances/<name>/{game,compatdata}.
+    """
+    if not plan.is_sandbox or plan.sandbox_root is None or plan.sandbox_client is None:
+        return {}
+    inst = plan.sandbox_root / "instances" / plan.sandbox_client
+    return {"instance": inst, "game": inst / "game", "compat": inst / "compatdata"}
+
+
+# Windowed 1280x720 unless the operator overrides SB_RES / SB_FULLSCREEN for
+# the `sb env` call. Kept as a fallback string so a run still launches windowed
+# when `sb env` cannot be read; Safehouse's sandbox_screen_args is the source.
+DEFAULT_SCREEN_ARGS = "-screen-fullscreen 0 -screen-width 1280 -screen-height 720"
+
+
+def sandbox_screen_args(plan: TargetPlan) -> str:
+    """The instance's window contract, as `sb env` reports it.
+
+    A sandbox client must never take the display fullscreen: it is a test
+    fixture, and several of them have to be visible at once. The command line
+    wins over whatever the Proton prefix last saved, so these are passed at
+    every launch rather than seeded once.
+    """
+    if not plan.is_sandbox or plan.sandbox_root is None or plan.sandbox_client is None:
+        return DEFAULT_SCREEN_ARGS
+    if not sb_path(plan.sandbox_root).is_file():
+        return DEFAULT_SCREEN_ARGS
+    try:
+        proc = _run_sb(plan, ["env", plan.sandbox_client], check=False)
+    except TargetError:
+        return DEFAULT_SCREEN_ARGS
+    return parse_sb_env_output(proc.stdout).get("SB_SCREEN_ARGS") or DEFAULT_SCREEN_ARGS
+
+
 def ensure_sandbox_client(
     plan: TargetPlan,
     *,
