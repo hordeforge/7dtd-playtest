@@ -184,6 +184,7 @@ def test_client_probe_is_scoped_to_one_prefix(tmp: Path) -> None:
     as another and the first run to start locks the machine.
     """
     proc = tmp / "proc-scoped"
+    proc.mkdir(parents=True, exist_ok=True)
     mine = tmp / "instances" / "client-mine" / "compatdata"
     theirs = tmp / "instances" / "client-theirs" / "compatdata"
     mine.mkdir(parents=True)
@@ -194,11 +195,12 @@ def test_client_probe_is_scoped_to_one_prefix(tmp: Path) -> None:
         "no processes means no client",
     )
 
-    pid = proc / "4242"
-    pid.mkdir(parents=True)
-    (pid / "comm").write_text("wine64-preloader\n", encoding="utf-8")
-    (pid / "cmdline").write_text("wine64-preloader\0Z:\\game\\7DaysToDie.exe\0")
-    (pid / "environ").write_text(
+    proc.mkdir(parents=True, exist_ok=True)
+    _fake_process(
+        proc, "4242", "/usr/bin/wine64-preloader",
+        "wine64-preloader\0Z:\\game\\7DaysToDie.exe\0",
+    )
+    (proc / "4242" / "environ").write_text(
         f"USER=maci\0STEAM_COMPAT_DATA_PATH={theirs.resolve()}\0", encoding="utf-8"
     )
     _assert(
@@ -208,6 +210,19 @@ def test_client_probe_is_scoped_to_one_prefix(tmp: Path) -> None:
     _assert(
         pl.client_running_for_compat(theirs, proc_root=proc),
         "the instance's own client must be found",
+    )
+
+    # In the prefix is not the same as being the client. Seeding an instance
+    # runs `proton run reg.exe` and a wineserver lingers after any prefix use;
+    # both carry STEAM_COMPAT_DATA_PATH and neither is a run. Counting them
+    # refused a run against the very instance it had just prepared.
+    _fake_process(proc, "4243", "/usr/bin/wineserver", "wineserver\0-p\0")
+    (proc / "4243" / "environ").write_text(
+        f"STEAM_COMPAT_DATA_PATH={mine.resolve()}\0", encoding="utf-8"
+    )
+    _assert(
+        not pl.client_running_for_compat(mine, proc_root=proc),
+        "a wineserver in the prefix must not count as a running client",
     )
     print("PASS client_probe_is_scoped_to_one_prefix")
 

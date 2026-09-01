@@ -549,7 +549,17 @@ def client_running_for_compat(compat: Path, *, proc_root: Path = PROC_ROOT) -> b
     """
     wanted = f"STEAM_COMPAT_DATA_PATH={Path(compat).resolve()}"
     for pid_dir in _runtime_pids(proc_root):
-        if wanted in _process_environ(pid_dir).split("\0"):
+        if wanted not in _process_environ(pid_dir).split("\0"):
+            continue
+        # In the prefix is not the same as being the client. Seeding an
+        # instance runs `proton run reg.exe`, and a wineserver lingers after
+        # any prefix use; both carry this variable and neither is a run. Ask
+        # the same two questions client_running asks.
+        if _process_executable_name(pid_dir) in set(STOCK_CLIENT_EXECUTABLES):
+            return True
+        if _process_executable_name(pid_dir) in WINE_PRELOADERS and GAME_CLIENT_ARG_RE.search(
+            _process_cmdline(pid_dir)
+        ):
             return True
     return False
 
