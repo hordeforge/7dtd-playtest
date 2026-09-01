@@ -22,6 +22,28 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-01
+
+The orchestrator stops being a second sandbox. Provisioning splits into the two
+axes it was conflating, and declarative suites become the input that drives a
+run rather than a mirror of the C# catalog. See
+[ADR 0001](https://github.com/hordeforge/.github/blob/main/docs/adr/0001-test-tiers-and-declarative-suites.md).
+
+**Breaking:** `--target` / `PLAYTEST_TARGET` are gone. `--target sandbox` and
+`--target stock` are both `--provision managed` (always a Safehouse instance
+now); `--target attach` is `--no-server` or `--provision attach`; `--target
+live` is `--no-server --readonly`; `--target zdtd` is `--server zdtd`. The
+Makefile's `TARGET=` became `PROVISION=` / `READONLY=`. `--server stock|zdtd`
+and `--no-server` are unchanged, so external callers passing those keep
+working.
+
+**Breaking:** `--port` and `--admin-port` are refused on a managed run.
+Safehouse allocates the instance's 5-port block; an operator port would send
+the harness at a port the server never binds. Use `--no-server` to attach to a
+server you started yourself.
+
+**Requires** `7dtd-sandbox` >= 0.1.0 beside this repo (or `--sandbox-root` /
+`PLAYTEST_SANDBOX_ROOT`) for any managed stock run.
 
 ### Added
 
@@ -587,6 +609,7 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.9.0
 [0.7.2]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.7.1
