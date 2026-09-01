@@ -31,9 +31,10 @@ Release model (inferred practice, now pinned by `make test`):
   even be the same build: a Linux native install has no `7DaysToDie.exe` for
   Proton to launch, which is what a live run hit.
 - Suites declare mods per side: `mods` for the client instance, `server_mods`
-  for the server. The scenario runner and the join helper are client mods, and
-  a client Harmony DLL loaded by a dedicated throws at load; a mod declaring
-  blocks or items belongs in both lists.
+  for the server. Both default to the same set, which is this workspace's
+  documented practice (7dtd-asset-pipeline's acceptance script: "the modlet
+  itself must also sit in the dedicated server's Mods folder"). A suite that
+  genuinely wants an asymmetric pair sets `server_mods` explicitly.
 
 ### Changed
 

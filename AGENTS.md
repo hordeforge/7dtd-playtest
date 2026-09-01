@@ -21,9 +21,10 @@ do that. The client is the instance's own Windows depot under Proton, not the
 operator's Steam install, which may be a different build entirely.
 
 A suite declares its mods per side: `mods` for the client instance,
-`server_mods` for the server. Both default to what each side actually needs
-(the scenario runner and the join helper are client mods; a client Harmony DLL
-loaded by a dedicated throws at load). Declarative suites under
+`server_mods` for the server. Both default to the same set, which is this
+workspace's documented practice ("the modlet itself must also sit in the
+dedicated server's Mods folder"). Set `server_mods` explicitly for an
+asymmetric pair. Declarative suites under
 `suites/*.json` say what runs and where; C# `IScenarioProvider` / Catalog own
 the case `ref` implementations. Fresh save is a hard rule for a managed run
 (no reuse-save path); an attach run does not own the save it joins and must

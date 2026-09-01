@@ -44,13 +44,15 @@ ALLOWED_PROVISIONS = ("managed", "attach")
 ALLOWED_BACKENDS = ("stock", "zdtd")
 ALLOWED_KINDS = ("live", "staged", "defer")
 
-# The client instance runs the scenario mod and the join helper. The server
-# instance gets nothing by default: both of these are client mods, and a client
-# Harmony DLL loaded by a dedicated is a load-time throw, not a no-op. A suite
-# whose mod declares blocks or items names it in `server_mods` too, because in
-# multiplayer the client's definitions arrive from the server.
+# Both sides run the same mods by default, which is this workspace's documented
+# practice (7dtd-asset-pipeline's acceptance script: "the modlet itself must
+# also sit in the dedicated server's Mods folder"). A C# mod on only one side of
+# a pair desynchronises the connection: the client fails to deserialize the
+# server's world package on channel 1 and the server kicks it, minutes in, with
+# nothing naming the cause. A suite that genuinely wants an asymmetric pair sets
+# `server_mods` explicitly.
 DEFAULT_MODS = ("playtest", "fastconnect")
-DEFAULT_SERVER_MODS: tuple[str, ...] = ()
+DEFAULT_SERVER_MODS = DEFAULT_MODS
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITES_DIR = ROOT / "suites"
