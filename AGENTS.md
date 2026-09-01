@@ -13,9 +13,17 @@ Two axes, not one fused target:
 | `--server` (`PLAYTEST_BACKEND`) | `stock` \| `zdtd` | which server is under test |
 | `--readonly` | attach-only flag | the host must never be written to (production `7dtd-server-container`) |
 
-A managed stock run is always a Safehouse instance. This repo does not open a
-serverconfig, allocate a port, or exec a dedicated server: `sb up` / `sb stage`
-/ `sb render-config` / `sb stop` do that. Declarative suites under
+A managed stock run is always a Safehouse **pair**: the server instance
+`srv-<name>` and the client instance `client-<name>`. Both come from `sb`, so
+this repo does not open a serverconfig, allocate a port, exec a dedicated or
+reach into a game install: `sb up` / `sb stage` / `sb render-config` / `sb stop`
+do that. The client is the instance's own Windows depot under Proton, not the
+operator's Steam install, which may be a different build entirely.
+
+A suite declares its mods per side: `mods` for the client instance,
+`server_mods` for the server. Both default to what each side actually needs
+(the scenario runner and the join helper are client mods; a client Harmony DLL
+loaded by a dedicated throws at load). Declarative suites under
 `suites/*.json` say what runs and where; C# `IScenarioProvider` / Catalog own
 the case `ref` implementations. Fresh save is a hard rule for a managed run
 (no reuse-save path); an attach run does not own the save it joins and must
@@ -89,14 +97,40 @@ Production host: [`../7dtd-server-container/`](../7dtd-server-container/).
 
 ## Playtest / live-client exclusivity
 
-There is one shared stock **client** and, for host orchestration, typically
-one **stock dedicated** (default port 26900) or **zdtd** server. Agents and
-hosts must not start a second playtest while another holds that runtime.
+**The lock covers one client, not the machine.** It is scoped to the client a
+run actually drives, so several sandbox runs can share a host.
 
-`make playtest` / `scripts/playtest_run.py` **do start a dedicated server**
-unless `--no-server`. That is inside the same exclusivity lock as the client:
-two concurrent orchestrators mean duplicate servers, port fights, and
-`clean_processes` killing the other run.
+- A **managed** run drives its own Safehouse client instance: its own game
+  tree, Proton prefix, window and port block. Its lock file is
+  `playtest_running-<client-instance>` and its live probe matches that
+  prefix's `STEAM_COMPAT_DATA_PATH`. Two runs on different instances share
+  nothing and both proceed; two on the same instance collide.
+- A run on the **operator's Steam client** keeps the machine-wide lock, because
+  that client is genuinely shared: one install, one display.
+- `PLAYTEST_LOCK_FILE` still overrides everything, so a shared-machine
+  convention that points several stacks at one file keeps working.
+
+Nothing on the managed path kills by pattern. `clean_processes` and the
+teardown sweep would take down a concurrent run's client and dedicated, so a
+managed run stops its own pair with `sb stop <instance>` instead.
+
+A managed stock run's dedicated is *not* in the lock. It belongs to a Safehouse
+instance that holds a unique name-derived port block and refuses a second start
+of itself (`sb up`), and teardown is `sb stop <instance>` rather than a pattern
+pkill. Two server-only runs on disjoint instances are meant to be able to
+proceed, and the lock no longer stands in the way of that; what still
+serialises them is the one client, whenever a run drives one.
+
+`zdtd` is the exception. The orchestrator still starts it itself on a port the
+caller chose, so a managed zdtd run gates on `client_or_zdtd_running` rather
+than the client alone.
+
+| Probe | What it means | In the lock gate |
+|---|---|---|
+| `client_running_for_compat` | a client is up against *this* Proton prefix | a managed run |
+| `client_running` | any stock/Proton client is up | a run on the shared Steam client |
+| `zdtd_running` | a zdtd server is up | added for a managed zdtd run |
+| `dedicated_running` | a stock dedicated is up, on any instance | never (diagnostics only) |
 
 ### Lock file
 
@@ -140,11 +174,15 @@ When free: `running=no` (omit session / timestamps).
   also **no** live client process. If a client is still up, do not clear the
   lock; stop and record the mismatch (`stale_but_live`).
 
-Inspect: `cat` the lock file, or from the repo root
-`PYTHONPATH=scripts python3 -c "import playtest_lock as p; print(p.read_lock())"`.
-Wait until a new session could acquire (missing heartbeat is stale):
-`python3 scripts/playtest_lock.py wait`. Do not parse `running=` /
-`heartbeat=` in a consumer.
+Inspect: `cat` the lock file (the format above is the contract), or ask the
+shipped CLI, never a `python -c` one-liner:
+
+```bash
+python3 scripts/playtest_lock.py live   # exit 1 = the shared client is up
+python3 scripts/playtest_lock.py wait   # block until a new session could acquire
+```
+
+Do not parse `running=` / `heartbeat=` in a consumer.
 
 ### Acquire / release / process check
 
@@ -152,10 +190,11 @@ Wait until a new session could acquire (missing heartbeat is stale):
    work: acquire the lock with your session id.
 2. If `running=yes` for another **fresh** session → **do not start**. Read
    `session=` and `heartbeat=` for the holder. Exit non-zero (harness code **2**).
-3. If a live **runtime** process is present and you do not already hold the
-   lock → **do not start**, even when the file says free or looks stale:
-   - client: `7DaysToDie.exe` / Proton wrappers
-   - server: `7DaysToDieServer.x86_64` (stock dedicated) or `zdtd`
+3. If a live **client** is present and you do not already hold the lock → **do
+   not start**, even when the file says free or looks stale (`7DaysToDie.exe` /
+   Proton wrappers). A stock dedicated does not block you: it belongs to an
+   instance with its own ports. A `zdtd` does block a managed zdtd run, which
+   starts one on a caller-chosen port.
 4. Only the lock holder may clean leftover game processes before launch
    (`playtest_run.py` acquires first, then cleans client **and** dedicated).
 5. On finish or failure after acquire: release (`running=no`) if you still own
@@ -176,6 +215,9 @@ Wait until a new session could acquire (missing heartbeat is stale):
   `stale_but_live` mismatch. Either hold the lock from a process that outlives
   the run (`playtest_run.py` does), or refresh `heartbeat` explicitly from each
   step of a manual session.
+
+`playtest_lock.py live` exits 1 when the shared client is up, 0 when it is
+free; a dedicated is not consulted.
 
 `scripts/playtest_run.py` / `make playtest*` enforce acquire/heartbeat/release.
 Manual client starts still require agents to hold the same file and refresh
@@ -234,6 +276,7 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | `PLAYTEST_READONLY` | Attach-only: never write to this host (or `--readonly`) |
 | `PLAYTEST_SANDBOX_NAME` | Safehouse pair base name (creates `srv-<name>` / `client-<name>`) |
 | `PLAYTEST_SANDBOX_ROOT` | Safehouse checkout that owns the instances (or `--sandbox-root`) |
+| `PLAYTEST_LOCK_FILE` | Override the lock path; without it a managed run locks per client instance |
 | `PLAYTEST_CASE_REFS` | Set by the orchestrator from the suite: the only case refs the client runs |
 | `PLAYTEST_SUITE_FILE` | Optional declarative suite JSON path (or `--suite-file`) |
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |

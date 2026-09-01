@@ -1911,6 +1911,26 @@ def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> s
     return secrets.token_urlsafe(15)
 
 
+def _live_probe_for(
+    args: argparse.Namespace, plan: playtest_targets.TargetPlan
+) -> Callable[[], bool]:
+    """The runtime whose presence must refuse this run.
+
+    A managed sandbox run is exclusive over *its* client instance only: its
+    prefix, its window, its port block. Another instance's client is not its
+    business, which is what lets several sandbox runs share a machine. A run on
+    the operator's single Steam client is exclusive over the machine, because
+    that client is genuinely shared. zdtd is added wherever the orchestrator
+    still starts one itself on a caller-chosen port.
+    """
+    if plan.is_sandbox:
+        compat = args.client_compat
+        return lambda: playtest_lock.client_running_for_compat(compat)
+    if plan.start_server and plan.backend == "zdtd":
+        return playtest_lock.client_or_zdtd_running
+    return playtest_lock.client_running
+
+
 def acquire_exclusive_lock(
     session: str,
     path: Path,
@@ -2474,7 +2494,45 @@ def main(argv: list[str] | None = None) -> int:
     # the run is over, so a caller who forgot to export GAME saw a client that
     # simply never appeared and a harness that spent its whole timeout budget
     # waiting for a log the launcher never opened.
-    game_dir = client_game_dir()
+    # A managed run drives the instance's own client: the Windows depot under
+    # Proton, Steam-free, wiped to the same starting prefix each run, carrying
+    # exactly the mods the suite declared. The operator's Steam install is not
+    # consulted, and need not even be the same build (a Linux native install
+    # has no 7DaysToDie.exe for Proton to launch at all).
+    game_dir: Path | None
+    if target_plan.is_sandbox:
+        client_mods = (
+            suite_loader.resolve_mods(
+                suite_doc, workspace=WORKSPACE, repo=ROOT, side="client"
+            )
+            if suite_doc is not None
+            else []
+        )
+        missing_client_mods = [m for m in client_mods if not (m / "ModInfo.xml").is_file()]
+        if missing_client_mods:
+            err(
+                "suite declares client mods that are not built: "
+                + ", ".join(str(m) for m in missing_client_mods)
+            )
+            return 2
+        try:
+            client_env = playtest_targets.ensure_sandbox_client(
+                target_plan, wipe=True, mods=client_mods
+            )
+        except playtest_targets.TargetError as ex:
+            err(f"sandbox client bring-up failed: {ex}")
+            return 2
+        game_dir = Path(client_env["GAME"])
+        args.client_compat = Path(client_env["COMPAT"])
+        client_instance_env = {
+            "GAME": client_env["GAME"],
+            "COMPAT": client_env["COMPAT"],
+            "7DTD_PLAYER_NAME": target_plan.sandbox_client or "",
+        }
+        log(f"sandbox client ready: instance={target_plan.sandbox_client} game={game_dir}")
+    else:
+        client_instance_env = {}
+        game_dir = client_game_dir()
     if game_dir is None:
         err(
             f"no client install found: no Steam library holds a {CLIENT_EXECUTABLE}. "
@@ -2496,7 +2554,12 @@ def main(argv: list[str] | None = None) -> int:
     # from a fixed library instead means a caller on any other layout parses a
     # file the launcher never writes, and reads an empty run as a failed one.
     if args.client_log is None:
-        args.client_log = client_log_for_compat(client_compat_for_game(game_dir))
+        compat = (
+            args.client_compat
+            if target_plan.is_sandbox
+            else client_compat_for_game(game_dir)
+        )
+        args.client_log = client_log_for_compat(compat)
     log(f"client install {game_dir}")
     log(f"client log {args.client_log}")
     if peer_client_name and not args.peer_client_compat.is_dir():
@@ -2520,7 +2583,13 @@ def main(argv: list[str] | None = None) -> int:
     # start_server() so each new server process gets exactly one verdict.
     server_exit_announced = False
     lock_session = (args.session or "").strip() or playtest_lock.new_session_id("playtest")
-    lock_path = playtest_lock.default_lock_path()
+    # Scoped to the client this run drives: a managed run owns a Safehouse
+    # client instance with its own prefix and window, so several sandbox runs
+    # can share a machine. A run on the operator's single Steam client keeps
+    # the machine-wide lock, because that client really is shared.
+    lock_path = playtest_lock.default_lock_path(
+        target_plan.sandbox_client if target_plan.is_sandbox else None
+    )
     lock_held = False
     lock_heartbeat: playtest_lock.HeartbeatThread | None = None
 
@@ -2549,7 +2618,13 @@ def main(argv: list[str] | None = None) -> int:
                 lock_session,
                 lock_path,
                 mark_held=_mark_held,
-                live_probe=None if not args.no_server else playtest_lock.client_running,
+                # The lock is client exclusivity: one stock client, one
+                # display, one GPU. A managed stock run's dedicated belongs to
+                # its Safehouse instance, which holds a unique port block and
+                # refuses a second start of itself, so another instance's
+                # server must not block this run. Only zdtd is still started
+                # here on a caller-chosen port, so only that adds to the gate.
+                live_probe=_live_probe_for(args, target_plan),
             )
         except playtest_lock.PlaytestLockError as ex:
             holder = ex.held_by or "unknown"
@@ -2569,7 +2644,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         log(
             f"playtest lock acquired session={lock_session} file={lock_path} "
-            f"(exclusive client+server runtime)"
+            f"(exclusive client)"
         )
         lock_heartbeat = playtest_lock.HeartbeatThread(
             lock_session,
@@ -2602,7 +2677,16 @@ def main(argv: list[str] | None = None) -> int:
             return True
 
         if not args.skip_clean:
-            clean_processes(kill_wine=args.kill_wine)
+            if target_plan.is_sandbox:
+                # Never by pattern on the managed path: another sandbox run's
+                # client and dedicated look identical to a pkill and would go
+                # down with ours. `sb stop` matches the instance's own
+                # STEAM_COMPAT_DATA_PATH / SB_INSTANCE.
+                log("stopping prior processes of this instance pair")
+                playtest_targets.stop_sandbox_client(target_plan)
+                playtest_targets.stop_sandbox_server(target_plan)
+            else:
+                clean_processes(kill_wine=args.kill_wine)
 
         # After clean, refuse to double-bind if something else still owns ports
         # (orphan outside our pkill patterns, or race with another host). A
@@ -2756,7 +2840,9 @@ def main(argv: list[str] | None = None) -> int:
                 config["TelnetEnabled"] = "true"
                 config["TelnetPassword"] = telnet_password
                 mods = (
-                    suite_loader.resolve_mods(suite_doc, workspace=WORKSPACE, repo=ROOT)
+                    suite_loader.resolve_mods(
+                        suite_doc, workspace=WORKSPACE, repo=ROOT, side="server"
+                    )
                     if suite_doc is not None
                     else []
                 )
@@ -2859,7 +2945,7 @@ def main(argv: list[str] | None = None) -> int:
         vehicle_seen: dict[str, int] = {}
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
         apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
-        client_extra_env: dict[str, str] = {}
+        client_extra_env: dict[str, str] = dict(client_instance_env)
         if args.trace_entity:
             client_extra_env["PLAYTEST_TRACE_ENTITY"] = "1"
         # The declared case refs are what the suite says runs. The client keeps
@@ -3781,6 +3867,7 @@ def main(argv: list[str] | None = None) -> int:
             # by name is what keeps the teardown off other instances.
             teardown_plan = getattr(args, "_target_plan", None)
             if teardown_plan is not None and not teardown_plan.readonly:
+                playtest_targets.stop_sandbox_client(teardown_plan)
                 playtest_targets.stop_sandbox_server(teardown_plan)
             # Poll loops reap mute helpers each iteration, but teardown paths
             # (rejoin abort, exception unwind, post-DONE) skip them: without
@@ -3788,14 +3875,15 @@ def main(argv: list[str] | None = None) -> int:
             # exit. Helpers still alive here are detached and self-exit within
             # their poll window, reparented to init once this process ends.
             reap_finished_helpers()
-            # Soft clean after: leave Steam alone
+            # Soft clean after: leave Steam alone. A managed run has already
+            # stopped its own instances by name above; the pattern sweep is for
+            # the shared-client and zdtd paths only, and would otherwise reach
+            # a concurrent sandbox run's client.
+            sweep_patterns = [r"zig-out/bin/zdtd", r"7dtd-loadgen"]
+            if teardown_plan is None or not teardown_plan.is_sandbox:
+                sweep_patterns = [*GAME_PROC_PATTERNS, *sweep_patterns]
             pkill_patterns(
-                [
-                    *GAME_PROC_PATTERNS,
-                    r"zig-out/bin/zdtd",
-                    r"7dtd-loadgen",
-                    # A zdtd run's own dedicated helper, never a sandbox instance.
-                ],
+                sweep_patterns,
                 sig="-9",
             )
             try:

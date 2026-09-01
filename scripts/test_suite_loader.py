@@ -73,6 +73,7 @@ def test_defaults_are_managed_stock_fresh() -> None:
     assert doc.fresh is True
     assert doc.readonly is False
     assert doc.mods == sl.DEFAULT_MODS
+    assert doc.server_mods == (), "the server gets no client mods by default"
 
 
 def test_attach_is_never_fresh_and_writes_nothing() -> None:
@@ -89,6 +90,7 @@ def test_attach_is_never_fresh_and_writes_nothing() -> None:
         "does not own",
     )
     expect_error({**MANAGED, "provision": "attach", "mods": ["playtest"]}, "does not own")
+    expect_error({**MANAGED, "provision": "attach", "server_mods": ["x"]}, "does not own")
 
 
 def test_managed_must_be_fresh() -> None:
@@ -169,13 +171,23 @@ def test_resolve_mods_short_names_and_paths() -> None:
         assert mods[0] == Path("/repo/dist/7dtd-playtest")
         assert mods[1] == Path("/ws/7dtd-fastconnect/dist/7dtd-fastconnect")
         assert mods[2] == (tmp.parent / "dist" / "MyMod").resolve()
+        # The two sides resolve independently.
+        server = write(tmp, {**MANAGED, "mods": [], "server_mods": ["playtest"]}, "s2.json")
+        sdoc = sl.load_suite_file(server)
+        assert sl.resolve_mods(sdoc, workspace=Path("/ws"), repo=Path("/repo")) == []
+        assert sl.resolve_mods(
+            sdoc, workspace=Path("/ws"), repo=Path("/repo"), side="server"
+        ) == [Path("/repo/dist/7dtd-playtest")]
 
 
 def test_suite_to_report_shape() -> None:
     doc = sl.load_suite_by_id("smoke", SUITES)
     assert doc is not None
     report = sl.suite_to_report(doc)
-    for key in ("id", "provision", "backend", "readonly", "fresh", "mods", "server", "cases"):
+    for key in (
+        "id", "provision", "backend", "readonly", "fresh", "mods", "server_mods",
+        "server", "cases",
+    ):
         assert key in report, key
     server = report["server"]
     cases = report["cases"]

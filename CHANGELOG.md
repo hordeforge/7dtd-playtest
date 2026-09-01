@@ -22,6 +22,38 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Added
+
+- A managed run drives a Safehouse **pair**: `srv-<name>` and `client-<name>`.
+  The client is the instance's own Windows depot under Proton, wiped to the
+  same starting prefix each run and carrying exactly the mods the suite
+  declared. The operator's Steam install is no longer consulted, and need not
+  even be the same build: a Linux native install has no `7DaysToDie.exe` for
+  Proton to launch, which is what a live run hit.
+- Suites declare mods per side: `mods` for the client instance, `server_mods`
+  for the server. The scenario runner and the join helper are client mods, and
+  a client Harmony DLL loaded by a dedicated throws at load; a mod declaring
+  blocks or items belongs in both lists.
+
+### Changed
+
+- **Several sandbox runs can now share a machine.** The lock is scoped to the
+  client a run drives, not the host: a managed run locks
+  `playtest_running-<client-instance>` and probes that prefix's own
+  `STEAM_COMPAT_DATA_PATH`, so runs on different instances share nothing and
+  both proceed. A run on the operator's Steam client keeps the machine-wide
+  lock, because that client really is shared. `PLAYTEST_LOCK_FILE` still
+  overrides everything.
+- Nothing on the managed path kills by pattern. `clean_processes` and the
+  teardown sweep would take down a concurrent run's client and dedicated, so a
+  managed run stops its own pair with `sb stop <instance>`.
+- `default_live_runtime_running` is gone. It refused a run whenever any
+  dedicated was up anywhere, which under per-instance port blocks blocks
+  nobody. The probes are now `client_running_for_compat` (a managed run),
+  `client_running` (the shared Steam client), `zdtd_running` (added wherever
+  the orchestrator still starts a zdtd on a caller-chosen port) and
+  `dedicated_running` (diagnostics only, never a lock input).
+
 ## [0.9.0] - 2026-09-01
 
 The orchestrator stops being a second sandbox. Provisioning splits into the two

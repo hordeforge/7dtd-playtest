@@ -7,6 +7,7 @@
     "playtest",
     "fastconnect"
   ],
+  "server_mods": [],
   "server": {
     "GameWorld": "Navezgane",
     "GameName": "PlaytestNav",
