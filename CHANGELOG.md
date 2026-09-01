@@ -25,16 +25,56 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
-- Target adapters and declarative suites: `--target` /
-  `PLAYTEST_TARGET` (`stock` | `sandbox` | `attach` | `zdtd` | `live`),
-  `--sandbox-name` / `PLAYTEST_SANDBOX_NAME`, `--suite-file` /
-  `PLAYTEST_SUITE_FILE`, `scripts/playtest_targets.py`,
-  `scripts/suite_loader.py`, `suites/*.json`, and
-  `schema/suite.schema.json`. `live` is attach-only to
-  server-container (never deploy/restart). Offline gates:
-  `test_playtest_targets.py`, `test_suite_loader.py`.
-  Lab isolation path is `7dtd-safehouse` (Safehouse); Quarantine
-  remains the wasm host brand.
+- Two provisioning axes replace the five-value `--target`: `--provision`
+  (`managed` | `attach`, env `PLAYTEST_PROVISION`), `--server`
+  (`stock` | `zdtd`, env `PLAYTEST_BACKEND`), and an attach-only
+  `--readonly` for a production host that must never be written to. A
+  managed stock run is always a Safehouse instance. See
+  [ADR 0001](https://github.com/hordeforge/.github/blob/main/docs/adr/0001-test-tiers-and-declarative-suites.md).
+- Declarative suites are the input, not a mirror. A suite document declares
+  `provision`, `backend`, `readonly`, `fresh`, the `mods` to stage, and a
+  flat `server` map of serverconfig properties handed to `sb render-config`,
+  so an A/B of one setting is two suite files differing by one line. The
+  orchestrator passes the declared case refs to the client as
+  `PLAYTEST_CASE_REFS`, and `Runner` runs only cases whose
+  `catalog.SUITE.CASE` ref appears there.
+- `--sandbox-root` / `PLAYTEST_SANDBOX_ROOT`: the Safehouse checkout that owns
+  the instances, so a caller with a non-standard layout (and the offline gates)
+  can point at one instead of assuming a sibling directory.
+- The run report records the serverconfig properties actually applied (minus
+  the per-run telnet secret), so a report names the world it measured.
+- `scripts/test_suite_refs.py`: offline gate pinning that every declared ref
+  resolves to a real Catalog case, that a declared suite declares every case
+  its Add method builds, that the ref format matches `Runner.CaseRef`, and
+  that every catalog suite is either declared or listed as not yet declared.
+- Mod repos run their own cases with
+  `playtest_run.py --suite-file <mod>/playtest/suites/<id>.json`; no wrapper
+  script per repo. `load_external_suite` refuses a suite id that shadows a
+  built-in stock-fidelity suite.
+
+### Changed
+
+- Bring-up, isolation, ports, config rendering, mod staging and teardown
+  moved to Safehouse (`sb up` / `stage` / `render-config` / `wipe` / `stop`).
+  Removed from the orchestrator: `write_stock_config`,
+  `start_stock_dedicated`, `_rewrite_platform_cfg` (which rewrote
+  `platform.cfg` inside the user's Steam install), `_atomic_write_bytes`,
+  `_literal_replacement`, `fresh_save` and `wait_stock_dedicated_ready`. The
+  orchestrator no longer reads
+  `7dtd-loadgen/scripts/serverconfig_loadgen.xml`.
+- `GAME_PROC_PATTERNS` is client-only. A managed dedicated is stopped with
+  `sb stop <instance>`, which matches that instance's own `SB_INSTANCE`; the
+  old blanket `pkill 7DaysToDieServer.x86_64` reached every other sandbox
+  instance on the machine.
+- `--port` and `--admin-port` are refused on a managed run: Safehouse
+  allocates the instance's 5-port block, so an operator port would send the
+  harness at a port the server never binds.
+- `fresh` is checked rather than asserted: a managed run must be fresh, an
+  attach run must declare `fresh: false` because it does not own the save it
+  joins, and `readonly` requires attach. A live suite is now representable.
+- Two offline gates no longer read the host process table
+  (`live_probe=lambda: False`); they failed whenever any dedicated happened
+  to be running on the machine.
 
 - `parachute` suite: end-to-end check of the 7dtd-wasm bridge running the
   unmodified zdtd parachute module. The client wears the glider item

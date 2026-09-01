@@ -38,6 +38,17 @@ namespace ZdtdPlaytest
         /// <summary>One-shot guard so a throwing LocomotionDrive.Tick warns once, not per frame.</summary>
         static bool _locomotionFaultLogged;
         static int _benchmarkLaps = 1;
+        /// <summary>
+        /// Case refs the host's declarative suite declared (PLAYTEST_CASE_REFS).
+        /// Empty means no declarative suite: the catalog's own queue runs as-is.
+        /// A case whose ref is not declared does not run, so adding a case to
+        /// Catalog.cs without declaring it in suites/*.json is inert rather
+        /// than a case that silently rides along with someone else's suite.
+        /// </summary>
+        static readonly HashSet<string> _declaredRefs =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static readonly HashSet<string> _matchedRefs =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>When player is null/dead mid-suite, count unscaled time to avoid hang.</summary>
         static float _playerMissingSince = -1f;
 
@@ -65,6 +76,18 @@ namespace ZdtdPlaytest
             string legacy = EnvFirst("PLAYTEST", "ZDTD_PLAYTEST");
             string laps = EnvFirst("PLAYTEST_LAPS", "ZDTD_PLAYTEST_LAPS");
             string traceEntity = EnvFirst("PLAYTEST_TRACE_ENTITY", "ZDTD_PLAYTEST_TRACE_ENTITY");
+            _declaredRefs.Clear();
+            _matchedRefs.Clear();
+            string declared = EnvFirst("PLAYTEST_CASE_REFS");
+            if (!string.IsNullOrEmpty(declared))
+            {
+                foreach (var r in declared.Split(new[] { ',', ';', ' ' },
+                             StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = r.Trim();
+                    if (trimmed.Length > 0) _declaredRefs.Add(trimmed);
+                }
+            }
             TraceEntity = traceEntity == "1"
                 || string.Equals(traceEntity, "true", StringComparison.OrdinalIgnoreCase);
             if (!string.IsNullOrEmpty(laps) && int.TryParse(laps, out int n) && n > 0)
@@ -135,6 +158,7 @@ namespace ZdtdPlaytest
                 {
                     int before = _queue.Count;
                     Catalog.AppendSuite(_queue, s, lap);
+                    KeepDeclared(before);
                     if (_queue.Count > before) produced.Add(s);
                 }
             }
@@ -149,7 +173,46 @@ namespace ZdtdPlaytest
                 Report.Info("unknown or empty suite: " + s);
                 Report.Result(s, "(unknown)", "fail", 0f, "unknown or empty suite");
             }
-            Report.Info("queue cases=" + _queue.Count);
+
+            // A declared ref with no implementation is a harness failure for the
+            // same reason a typo'd suite id is: the run must not read as green
+            // for a case that never existed.
+            foreach (var r in _declaredRefs)
+            {
+                if (_matchedRefs.Contains(r)) continue;
+                Report.Info("declared case ref has no implementation: " + r);
+                Report.Result("suite", r, "fail", 0f, "declared case ref has no implementation");
+            }
+            Report.Info("queue cases=" + _queue.Count
+                + (_declaredRefs.Count > 0 ? " declared=" + _declaredRefs.Count : ""));
+        }
+
+        /// <summary>
+        /// Case ref as the declarative suite names it: <c>catalog.SUITE.CASE</c>,
+        /// with the benchmark lap suffix stripped so lap 2 of a case is the same
+        /// implementation as lap 1.
+        /// </summary>
+        static string CaseRef(CaseDef c)
+        {
+            string suite = c == null ? "" : (c.Suite ?? "");
+            int at = suite.IndexOf('@');
+            if (at >= 0) suite = suite.Substring(0, at);
+            return "catalog." + suite + "." + (c == null ? "" : c.Id);
+        }
+
+        /// <summary>
+        /// Drop cases appended since <paramref name="from"/> that the host's
+        /// suite did not declare. No declared refs means no filtering.
+        /// </summary>
+        static void KeepDeclared(int from)
+        {
+            if (_declaredRefs.Count == 0) return;
+            for (int i = _queue.Count - 1; i >= from; i--)
+            {
+                string r = CaseRef(_queue[i]);
+                if (_declaredRefs.Contains(r)) { _matchedRefs.Add(r); continue; }
+                _queue.RemoveAt(i);
+            }
         }
 
         public static void Tick()

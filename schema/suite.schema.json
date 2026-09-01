@@ -4,7 +4,7 @@
   "title": "PlaytestSuite",
   "description": "Declarative playtest suite: what runs and where. C# IScenarioProvider/Catalog owns how (ref).",
   "type": "object",
-  "required": ["id", "target", "fresh", "cases"],
+  "required": ["id", "cases"],
   "additionalProperties": true,
   "properties": {
     "id": {
@@ -12,18 +12,37 @@
       "minLength": 1,
       "description": "Suite id matched by PLAYTEST_SUITE / --suite"
     },
-    "target": {
+    "provision": {
       "type": "string",
-      "enum": ["stock", "sandbox", "attach", "zdtd", "live"],
-      "description": "Where the suite runs (see playtest_targets.py)"
+      "enum": ["managed", "attach"],
+      "default": "managed",
+      "description": "managed: Safehouse brings the server up and tears it down. attach: it is already running and playtest touches no lifecycle, config, mods or save."
+    },
+    "backend": {
+      "type": "string",
+      "enum": ["stock", "zdtd"],
+      "default": "stock",
+      "description": "Which server is under test (see playtest_targets.py)"
+    },
+    "readonly": {
+      "type": "boolean",
+      "default": false,
+      "description": "Attach-only: a host playtest must never write to (7dtd-server-container production)"
     },
     "fresh": {
       "type": "boolean",
-      "const": true,
-      "description": "Hard rule: every run starts on a fresh save"
+      "description": "Managed runs are always fresh (must be true). Attach runs do not own the save they join (must be false)."
+    },
+    "server": {
+      "type": "object",
+      "description": "Stock serverconfig properties for this suite, handed to `sb render-config`. Managed only.",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
     },
     "mods": {
       "type": "array",
+      "description": "Modlets staged into the instance. A short name resolves to a sibling repo's dist/; anything else is a path relative to the suite file. Managed only.",
       "items": { "type": "string", "minLength": 1 },
       "default": ["playtest", "fastconnect"]
     },
@@ -48,7 +67,7 @@
           "ref": {
             "type": "string",
             "minLength": 1,
-            "description": "Catalog or IScenarioProvider case implementation id"
+            "description": "Catalog or IScenarioProvider case implementation id. A ref with no implementation fails the offline surface gate."
           },
           "tags": {
             "type": "array",

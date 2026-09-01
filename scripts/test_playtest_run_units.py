@@ -29,7 +29,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
-from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
@@ -327,101 +326,6 @@ def test_loadgen_rebuilds_when_source_is_newer() -> None:
     source = PLAYTEST_RUN.read_text(encoding="utf-8")
     assert "exe.stat().st_mtime >= source_mtime" in source
     assert 'log("loadgen source is newer than its executable; rebuilding")' in source
-
-
-def test_fresh_save_removes_only_named_game_saves() -> None:
-    """Layout UserData/Saves/<World>/<GameName>: every world's copy of the
-    named game must go; sibling saves, stray files, and other worlds stay."""
-    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
-        ud = Path(td) / "userdata"
-        qroot = Path(td) / "logdir" / "quarantine"
-        saves = ud / "Saves"
-        removed_markers: list[Path] = []
-        kept = []
-        for world in ("Navezgane", "CustomWorld"):
-            game = saves / world / "PlaytestNav"
-            game.mkdir(parents=True)
-            (game / "region").mkdir()
-            (game / "main.ttw").write_text("save", encoding="utf-8")
-            removed_markers.append(game)
-        sibling_game = saves / "Navezgane" / "SomeOtherGame"
-        sibling_game.mkdir(parents=True)
-        stray_file = saves / "Navezgane" / "stray.txt"
-        stray_file.write_text("keep", encoding="utf-8")
-        kept += [sibling_game, stray_file]
-
-        playtest_run.fresh_save(ud, "PlaytestNav", qroot)
-
-        for target in removed_markers:
-            assert not target.exists(), f"named save must be wiped: {target}"
-        for survivor in kept:
-            assert survivor.is_file() or survivor.is_dir(), (
-                f"fresh-save deleted something outside the named game: {survivor}"
-            )
-        assert saves.is_dir(), "Saves root itself must survive"
-        print("PASS fresh_save_named_only worlds' named saves gone, siblings kept")
-
-
-def test_fresh_save_without_saves_dir_is_noop() -> None:
-    """No Saves directory (first run, wrong userdata): do nothing, do not raise,
-    do not create anything."""
-    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
-        ud = Path(td) / "userdata"
-        ud.mkdir()
-        (ud / "not_a_dir").write_text("keep", encoding="utf-8")
-
-        playtest_run.fresh_save(ud, "PlaytestNav", Path(td) / "q")
-
-        assert ud.is_dir() and (ud / "not_a_dir").is_file(), (
-            "no-op fresh-save must leave userdata untouched"
-        )
-        print("PASS fresh_save_no_saves_dir noop without creating anything")
-
-
-def test_fresh_save_quarantines_named_saves_recoverably() -> None:
-    """Removed saves land under <quarantine> intact: soft-delete window, so a
-    mispointed --userdata costs a copy-back instead of unrecoverable loss."""
-    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
-        ud = Path(td) / "userdata"
-        qroot = Path(td) / "logdir" / "quarantine"
-        game = ud / "Saves" / "Navezgane" / "PlaytestNav"
-        game.mkdir(parents=True)
-        (game / "main.ttw").write_text("save-bytes", encoding="utf-8")
-
-        playtest_run.fresh_save(ud, "PlaytestNav", qroot)
-
-        assert not game.exists(), "save must leave the live Saves tree"
-        entries = [p for p in qroot.iterdir() if p.is_dir()]
-        assert len(entries) == 1, f"want one quarantine entry, got {entries}"
-        rescued = entries[0] / "Navezgane--PlaytestNav" / "PlaytestNav" / "main.ttw"
-        assert rescued.is_file() and rescued.read_text(encoding="utf-8") == (
-            "save-bytes"
-        ), "quarantined save must keep its content for copy-back"
-        print("PASS fresh_save_quarantine removed save recoverable from quarantine")
-
-
-def test_fresh_save_unusable_quarantine_aborts_before_stale_run() -> None:
-    """If quarantine cannot take the save, the run aborts rather than
-    measuring stale terrain as a clean world."""
-    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
-        ud = Path(td) / "userdata"
-        qroot_file = Path(td) / "not-a-dir"
-        qroot_file.write_text("blocker", encoding="utf-8")
-        game = ud / "Saves" / "Navezgane" / "PlaytestNav"
-        game.mkdir(parents=True)
-        (game / "main.ttw").write_text("precious", encoding="utf-8")
-
-        try:
-            playtest_run.fresh_save(ud, "PlaytestNav", qroot_file)
-        except playtest_run.FreshSaveError as ex:
-            assert "refusing to run against stale state" in str(ex)
-        else:
-            raise AssertionError("unusable quarantine must abort the fresh run")
-
-        assert game.is_dir() and (game / "main.ttw").is_file(), (
-            "unusable quarantine must keep the save in place"
-        )
-        print("PASS fresh_save_quarantine_unavailable data kept, run aborted")
 
 
 def test_fresh_zdtd_world_moves_state_and_overlays_recoverably() -> None:
@@ -969,26 +873,44 @@ def test_litenet_port_room_guard() -> None:
 
 
 def test_main_default_port_reaches_preflight_refusal() -> None:
-    """Omitting --port must resolve the backend default before the
-    require_litenet_room guard compares it: make playtest leaves PORT= empty,
-    so every default-port invocation reached main() and died on a None > int
-    TypeError instead of running its preflight refusals. The patched install
-    paths make main() return 2 at the missing-dedicated check, before any
-    lock acquisition or process work."""
+    """Omitting --port must reach the preflight refusals, not a TypeError.
+
+    `make playtest` leaves PORT= empty, so every default-port invocation goes
+    through main() with args.port unset. It used to die on a None > int
+    comparison before running any preflight. Both provisioning paths are
+    covered: a managed run carries a placeholder until `sb up` reports the
+    instance's block, and an attach run still resolves the backend default.
+
+    The Safehouse root is a stub tree, so this stays an offline gate rather
+    than one that only passes on a machine with the sibling checkout.
+    """
     with tempfile.TemporaryDirectory(prefix="playtest-default-port-") as td:
         root = Path(td)
+        sb = root / "sandbox" / "scripts" / "sb"
+        sb.parent.mkdir(parents=True)
+        sb.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        sb.chmod(0o755)
         orig_game_srv = playtest_run.DEFAULT_GAME_SRV
         orig_connect = playtest_run.CONNECT
         playtest_run.DEFAULT_GAME_SRV = root / "no-dedicated"
         playtest_run.CONNECT = root / "no-connect"
         try:
-            rc = playtest_run.main(
-                ["--server", "stock", "--logdir", str(root / "log"), "--timeout", "900"]
-            )
+            for extra in (["--server", "stock"], ["--no-server", "--telnet-password", "x"]):
+                rc = playtest_run.main(
+                    [
+                        *extra,
+                        "--sandbox-root",
+                        str(root / "sandbox"),
+                        "--logdir",
+                        str(root / "log"),
+                        "--timeout",
+                        "900",
+                    ]
+                )
+                assert rc == 2, f"{extra}: {rc}"
         finally:
             playtest_run.DEFAULT_GAME_SRV = orig_game_srv
             playtest_run.CONNECT = orig_connect
-    assert rc == 2, rc
     print("PASS default_port_preflight omitted --port reaches preflight refusal")
 
 
@@ -997,6 +919,8 @@ def test_config_summary_redacts_telnet_password() -> None:
     telnet password value, so run logs stay shareable."""
     args = argparse.Namespace(
         server="stock",
+        provision="managed",
+        readonly=False,
         suite=" smoke ",
         port=26900,
         admin_port=8081,
@@ -1017,6 +941,7 @@ def test_config_summary_redacts_telnet_password() -> None:
     assert "telnet_password=set" in line, line
     assert "suite=smoke" in line and "port=26900" in line and "server=stock" in line, line
     assert "fresh_save=True" in line, line
+    assert "provision=managed" in line and "readonly=False" in line, line
 
     # Direct callers can represent an invalid attach configuration, but it
     # remains visibly unset and main() rejects it before any runtime work.
@@ -1432,36 +1357,6 @@ def test_resolve_telnet_password_paths() -> None:
     print("PASS telnet_password_resolution operator/attach/generated split")
 
 
-def test_write_stock_config_restricts_file_mode() -> None:
-    """The generated serverconfig carries TelnetPassword: it must not inherit
-    a world-readable umask."""
-    src = (
-        "<ServerSettings>\n"
-        '  <property name="TelnetPassword" value="old"/>\n'
-        "</ServerSettings>\n"
-    )
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        src_cfg = tdp / "serverconfig.xml"
-        out_cfg = tdp / "out" / "serverconfig_playtest.xml"
-        src_cfg.write_text(src, encoding="utf-8")
-        errbuf = io.StringIO()
-        with contextlib.redirect_stderr(errbuf):
-            playtest_run.write_stock_config(
-                src_cfg,
-                out_cfg,
-                tdp / "userdata",
-                world_name="Navezgane",
-                game_name="PlaytestNav",
-                port=26900,
-                telnet_port=8081,
-                telnet_password="pw",
-            )
-        mode = out_cfg.stat().st_mode & 0o777
-        assert mode == 0o600, f"generated serverconfig mode {oct(mode)}, want 0o600"
-    print("PASS stock_config_permissions generated config is user-only")
-
-
 def test_client_install_is_discovered_from_steam_libraries() -> None:
     """A library on another disk is read out of Steam's own catalogue.
 
@@ -1519,181 +1414,6 @@ def test_client_compat_follows_the_install_library() -> None:
     assert playtest_run.client_compat_for_game(game, env={"COMPAT": str(override)}) == override
     print("PASS client_compat_follows_library prefix derived from the library")
 
-def test_write_stock_config_activates_commented_userdata_folder() -> None:
-    """Stock ships UserDataFolder commented out. Rewriting the value inside
-    that comment leaves the server saving under its default tree, so
-    --fresh-save wiped nothing and state carried over between runs (the
-    regression documented at the write_stock_config call site). Both shapes
-    must yield an ACTIVE property pointing at the resolved --userdata."""
-    ud = "userdata"
-
-    commented_only = (
-        "<ServerSettings>\n"
-        '  <!-- <property name="UserDataFolder" value="/default/7DaysToDie"/> -->\n'
-        '  <property name="GameWorld" value="Navezgane"/>\n'
-        "</ServerSettings>\n"
-    )
-    active_stale = (
-        "<ServerSettings>\n"
-        '  <property name="UserDataFolder" value="/stale/path"/>\n'
-        '  <property name="GameWorld" value="Navezgane"/>\n'
-        "</ServerSettings>\n"
-    )
-    with tempfile.TemporaryDirectory() as td_str:
-        for label, src in (
-            ("commented-out", commented_only),
-            ("active-stale", active_stale),
-        ):
-            side = Path(td_str) / label
-            side.mkdir()
-            src_cfg = side / "serverconfig.xml"
-            src_cfg.write_text(src, encoding="utf-8")
-            out_cfg = side / "out" / "serverconfig_playtest.xml"
-            userdata = side / ud
-            playtest_run.write_stock_config(
-                src_cfg,
-                out_cfg,
-                userdata,
-                world_name="Navezgane",
-                game_name="PlaytestNav",
-                port=26900,
-                telnet_port=8081,
-                telnet_password="pw",
-            )
-            want_ud = str(userdata.resolve())
-            root = ElementTree.parse(out_cfg).getroot()
-            props = {p.get("name"): p.get("value") for p in root.iter("property")}
-            assert props.get("UserDataFolder") == want_ud, (
-                f"{label}: UserDataFolder must be active and point at "
-                f"{want_ud}, got {props.get('UserDataFolder')!r}"
-            )
-            assert '<!-- <property name="UserDataFolder"' not in out_cfg.read_text(
-                encoding="utf-8"
-            ), f"{label}: commented form survived next to the active property"
-    print("PASS stock_config_userdata_folder commented form activated, stale value rewritten")
-
-
-def test_write_stock_config_unreadable_template_names_the_file() -> None:
-    """A template that exists but cannot be decoded (UTF-16 editor save) or
-    read (permissions) must raise a named error carrying the path and cause,
-    not a bare UnicodeDecodeError/OSError traceback after --fresh-save."""
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        src_cfg = tdp / "serverconfig.xml"
-        # UTF-16-encoded bytes are not valid UTF-8: read_text raises
-        # UnicodeDecodeError, the realistic user-edit failure shape.
-        src_cfg.write_bytes(
-            "<ServerSettings/>\n".encode("utf-16")
-        )
-        try:
-            playtest_run.write_stock_config(
-                src_cfg,
-                tdp / "out" / "serverconfig_playtest.xml",
-                tdp / "userdata",
-                world_name="Navezgane",
-                game_name="PlaytestNav",
-                port=26900,
-                telnet_port=8081,
-                telnet_password="pw",
-            )
-        except RuntimeError as ex:
-            assert str(src_cfg) in str(ex), f"path missing from error: {ex}"
-            assert "cannot read serverconfig template" in str(ex)
-        except Exception as ex:
-            raise AssertionError(f"wrong error type: {type(ex).__name__}: {ex}") from ex
-        else:
-            raise AssertionError("undecodable template accepted silently")
-
-
-def test_write_stock_config_unwritable_output_names_the_file() -> None:
-    """An output path that cannot be created (parent exists as a file) must
-    raise a named RuntimeError carrying the destination and cause, not a bare
-    OSError traceback: this fires after --fresh-save already moved the save
-    aside, mirroring the read-side guard right above it."""
-    src = (
-        "<ServerSettings>\n"
-        '  <property name="TelnetPassword" value="old"/>\n'
-        "</ServerSettings>\n"
-    )
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        src_cfg = tdp / "serverconfig.xml"
-        src_cfg.write_text(src, encoding="utf-8")
-        blocker = tdp / "out"
-        blocker.write_text("a file where the output dir must go", encoding="utf-8")
-        out_cfg = blocker / "serverconfig_playtest.xml"
-        try:
-            playtest_run.write_stock_config(
-                src_cfg,
-                out_cfg,
-                tdp / "userdata",
-                world_name="Navezgane",
-                game_name="PlaytestNav",
-                port=26900,
-                telnet_port=8081,
-                telnet_password="pw",
-            )
-        except RuntimeError as ex:
-            assert str(out_cfg) in str(ex), f"destination missing from error: {ex}"
-            assert "cannot write generated serverconfig" in str(ex)
-        except Exception as ex:
-            raise AssertionError(f"wrong error type: {type(ex).__name__}: {ex}") from ex
-        else:
-            raise AssertionError("unwritable generated config accepted silently")
-    print(
-        "PASS stock_config_unwritable_output named RuntimeError carries destination"
-    )
-
-
-def test_wait_stock_ready_early_exit_survives_unreadable_log() -> None:
-    """When the dedicated exits before StartGame done, the diagnostic tail of
-    its unity log is best-effort: a readable log must be echoed scrubbed,
-    and an unreadable one (rotation, EIO, permissions) must warn and still
-    return False instead of raising out of main()'s startup path."""
-    class DeadProc:
-        returncode = 137
-
-        def poll(self) -> int:
-            return 137
-
-    orig_timeout = playtest_run.STOCK_READY_TIMEOUT_SEC
-    playtest_run.STOCK_READY_TIMEOUT_SEC = 0.05
-    try:
-        with tempfile.TemporaryDirectory() as td:
-            tdp = Path(td)
-            unity_log = tdp / "server_playtest.txt"
-
-            # Readable log: tail reaches stderr, verdict is False.
-            unity_log.write_text(
-                "line one\nERROR: world load failed\nline three\n",
-                encoding="utf-8",
-            )
-            errbuf = io.StringIO()
-            with contextlib.redirect_stderr(errbuf):
-                ready = playtest_run.wait_stock_dedicated_ready(DeadProc(), unity_log)  # type: ignore[arg-type]
-            assert ready is False, "exited-early dedicated must not read as ready"
-            errs = errbuf.getvalue()
-            assert "exited early code=137" in errs, errs
-            assert "tail server log" in errs and "world load failed" in errs, errs
-
-            # Unreadable log: warn + same False verdict, no exception.
-            if os.geteuid() != 0:
-                unity_log.chmod(0o000)
-                try:
-                    errbuf = io.StringIO()
-                    with contextlib.redirect_stderr(errbuf):
-                        ready = playtest_run.wait_stock_dedicated_ready(DeadProc(), unity_log)  # type: ignore[arg-type]
-                    assert ready is False
-                    assert "could not read server log tail" in errbuf.getvalue(), (
-                        errbuf.getvalue()
-                    )
-                finally:
-                    unity_log.chmod(0o644)
-    finally:
-        playtest_run.STOCK_READY_TIMEOUT_SEC = orig_timeout
-    print("PASS stock_ready_unreadable_log tail read is best-effort, verdict stands")
-
-
 def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
     """A signal-driven SystemExit escaping after the claim was published must
     not leave it standing: main() has not set lock_held yet, so its finally
@@ -1715,7 +1435,11 @@ def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
             max_age_sec: float | None = None,
             env: pl.LockEnv | None = None,
         ) -> pl.LockState:
-            state = real_acquire(session, path=path, live_probe=live_probe)
+            # This gate is about the orphan claim, not live-runtime detection
+            # (which has its own tests). Reading the real host process table
+            # made an offline gate fail whenever any dedicated happened to be
+            # running on the machine.
+            state = real_acquire(session, path=path, live_probe=lambda: False)
             if not (state.running and state.session == session):
                 raise AssertionError(f"fake acquire failed to publish: {state}")
             # Model the signal landing after publication but before main()
@@ -1771,8 +1495,11 @@ def test_acquire_exclusive_lock_marks_held_inside_guarded_region() -> None:
         lock = Path(td) / "playtest_running"
         sid = "grok-20260810-231500-a1b2c3d4e5f6"
         marks: list[int] = []
+        # Offline gate: pin the mark_held wiring, not live-runtime detection.
+        # The default probe reads the host process table, which made this fail
+        # whenever any dedicated happened to be running on the machine.
         playtest_run.acquire_exclusive_lock(
-            sid, lock, mark_held=lambda: marks.append(1)
+            sid, lock, mark_held=lambda: marks.append(1), live_probe=lambda: False
         )
         assert marks == [1], f"successful publish must mark held once: {marks}"
         state = pl.read_lock(lock)
@@ -1790,7 +1517,7 @@ def test_acquire_exclusive_lock_marks_held_inside_guarded_region() -> None:
         marks = []
         try:
             playtest_run.acquire_exclusive_lock(
-                other, lock, mark_held=lambda: marks.append(1)
+                other, lock, mark_held=lambda: marks.append(1), live_probe=lambda: False
             )
             raise AssertionError("foreign acquire must refuse")
         except pl.PlaytestLockError:
@@ -1901,39 +1628,6 @@ def test_lock_lost_abort_wired_into_poll_loops() -> None:
     print("PASS lock_lost_abort wired into both poll loops")
 
 
-def test_rewrite_platform_cfg_backs_up_once_and_forces_surface() -> None:
-    """start_stock_dedicated rewrites the user's platform.cfg in place: the
-    backup must carry the original bytes and be written exactly once (it is
-    the only copy of the user's config), the live file must end at the forced
-    local-auth surface, and the atomic publish must leave no temp droppings."""
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        pcfg = tdp / "platform.cfg"
-        original = b"platform=EAC\ncrossplatform=EOS\n"
-        pcfg.write_bytes(original)
-
-        playtest_run._rewrite_platform_cfg(pcfg)
-
-        bak = pcfg.with_name(pcfg.name + ".playtest-bak")
-        assert bak.is_file(), "first rewrite must create the backup"
-        assert bak.read_bytes() == original, "backup must hold the untouched original"
-        forced = b"platform=Steam\ncrossplatform=None\nserverplatforms=Steam,LAN,Local,\n"
-        assert pcfg.read_bytes() == forced, f"forced surface drifted: {pcfg.read_bytes()!r}"
-
-        # Backup-once: a second run (already-forced live content) must never
-        # overwrite the only copy of the user's original.
-        playtest_run._rewrite_platform_cfg(pcfg)
-        assert bak.read_bytes() == original, "backup was overwritten on the second run"
-        assert pcfg.read_bytes() == forced
-
-        leftovers = sorted(
-            p.name for p in tdp.iterdir()
-            if p.name not in {pcfg.name, bak.name}
-        )
-        assert not leftovers, f"temp files leaked by the atomic write: {leftovers}"
-    print("PASS platform_cfg_rewrite backup once, forced surface, no temp files")
-
-
 def test_client_mute_env_contract() -> None:
     """CLIENT_MUTE defaults on and only the documented off-spellings disable
     it; PLAYTEST_MUTE / SEVEN_DAYS_TO_DIE_CLIENT_MUTE are fallbacks in order.
@@ -2033,13 +1727,6 @@ def main() -> int:
         ),
         ("loadgen_observer_wiring", test_loadgen_observer_wiring_is_generic),
         ("loadgen_stale_rebuild", test_loadgen_rebuilds_when_source_is_newer),
-        ("fresh_save_named_only", test_fresh_save_removes_only_named_game_saves),
-        ("fresh_save_no_saves_dir", test_fresh_save_without_saves_dir_is_noop),
-        ("fresh_save_quarantine", test_fresh_save_quarantines_named_saves_recoverably),
-        (
-            "fresh_save_quarantine_unavailable",
-            test_fresh_save_unusable_quarantine_aborts_before_stale_run,
-        ),
         ("fresh_zdtd_world", test_fresh_zdtd_world_moves_state_and_overlays_recoverably),
         ("prune_quarantine", test_prune_quarantine_keeps_newest_entries),
         (
@@ -2086,10 +1773,6 @@ def main() -> int:
             "spawn_trust_only_live_sessions",
             test_spawn_near_players_trusts_only_live_sessions,
         ),
-        (
-            "stock_ready_unreadable_log",
-            test_wait_stock_ready_early_exit_survives_unreadable_log,
-        ),
         ("barrier_param_validation", test_safe_barrier_param_rejects_command_shapes),
         (
             "barrier_param_wiring",
@@ -2105,19 +1788,6 @@ def main() -> int:
             test_result_row_echoes_all_routed_through_helper,
         ),
         ("telnet_password_resolution", test_resolve_telnet_password_paths),
-        ("stock_config_permissions", test_write_stock_config_restricts_file_mode),
-        (
-            "stock_config_userdata_folder",
-            test_write_stock_config_activates_commented_userdata_folder,
-        ),
-        (
-            "stock_config_unreadable_template",
-            test_write_stock_config_unreadable_template_names_the_file,
-        ),
-        (
-            "stock_config_unwritable_output",
-            test_write_stock_config_unwritable_output_names_the_file,
-        ),
         (
             "acquire_exclusive_lock_undo",
             test_acquire_exclusive_lock_undoes_published_claim_on_interrupt,
@@ -2145,10 +1815,6 @@ def main() -> int:
         (
             "lock_lost_abort_wiring",
             test_lock_lost_abort_wired_into_poll_loops,
-        ),
-        (
-            "platform_cfg_rewrite",
-            test_rewrite_platform_cfg_backs_up_once_and_forces_surface,
         ),
         ("client_mute_env_contract", test_client_mute_env_contract),
         (
