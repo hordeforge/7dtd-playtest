@@ -86,12 +86,142 @@ def test_live_client_blocks_free_lock(tmp: Path) -> None:
     )
 
 
+def test_lock_gate_is_the_client_not_a_server(tmp: Path) -> None:
+    """The lock covers what is scarce: one client, one display, one GPU.
+
+    A managed stock run's dedicated belongs to its Safehouse instance, which
+    holds a unique port block and refuses a second start of itself, so another
+    instance's server must not block this run. Two server-only suites on
+    disjoint instances are meant to run at once.
+    """
+    live_dedicated = tmp / "dedicated-only"
+    _assert(
+        pl.acquire(
+            "a-20260901-000000-aaaaaaaaaaaa",
+            path=live_dedicated,
+            live_probe=lambda: False,
+        ).running,
+        "a run acquires while only a dedicated is up",
+    )
+    pl.release("a-20260901-000000-aaaaaaaaaaaa", path=live_dedicated)
+
+    # The client is still exclusive: a live client refuses a fresh claim.
+    blocked = tmp / "client-up"
+    try:
+        pl.acquire(
+            "b-20260901-000000-bbbbbbbbbbbb",
+            path=blocked,
+            live_probe=lambda: True,
+        )
+    except pl.PlaytestLockError as ex:
+        _assert(ex.reason == "live_runtime", f"want live_runtime, got {ex.reason}")
+    else:
+        raise AssertionError("a live client must refuse a fresh claim")
+
+    # zdtd is still started by the orchestrator on a caller-chosen port, so its
+    # gate is the union; the stock dedicated has no such gate.
+    _assert(
+        pl.client_or_zdtd_running.__doc__ is not None,
+        "client_or_zdtd_running must document why zdtd is different",
+    )
+    print("PASS lock_gate_is_the_client_not_a_server")
+
+
+def test_parallel_sandboxes_do_not_share_a_lock(tmp: Path) -> None:
+    """Two sandbox runs on different client instances must both proceed.
+
+    Disjoint instances mean disjoint game trees, Proton prefixes, port blocks
+    and windows, so nothing is actually shared and a machine-wide lock would
+    serialise runs for no reason. Same instance still collides.
+    """
+    a = pl.default_lock_path("client-alpha")
+    b = pl.default_lock_path("client-beta")
+    _assert(a != b, f"two instances must not share a lock file: {a}")
+    _assert(a == pl.default_lock_path("client-alpha"), "lock path must be stable")
+    _assert(
+        pl.default_lock_path(None) not in (a, b),
+        "the shared-client lock must be distinct from any instance's",
+    )
+    _assert("/" not in a.name, f"instance name must not escape the file name: {a.name}")
+    tricky = pl.default_lock_path("../../etc/passwd")
+    _assert(
+        tricky.parent == pl.default_lock_path(None).parent,
+        f"a hostile instance name must stay in the lock dir: {tricky}",
+    )
+
+    # PLAYTEST_LOCK_FILE still wins, so a shared-machine convention that points
+    # several stacks at one file keeps working.
+    shared = tmp / "shared-lock"
+    os.environ["PLAYTEST_LOCK_FILE"] = str(shared)
+    try:
+        _assert(
+            pl.default_lock_path("client-alpha") == shared,
+            "PLAYTEST_LOCK_FILE must override instance scoping",
+        )
+    finally:
+        del os.environ["PLAYTEST_LOCK_FILE"]
+
+    # Two runs on different instances hold their own locks at the same time.
+    sa, sb_ = "a-20260901-000000-aaaaaaaaaaaa", "b-20260901-000000-bbbbbbbbbbbb"
+    pa, pb = tmp / "lock-alpha", tmp / "lock-beta"
+    _assert(pl.acquire(sa, path=pa, live_probe=lambda: False).running, "alpha acquires")
+    _assert(pl.acquire(sb_, path=pb, live_probe=lambda: False).running, "beta acquires")
+    try:
+        pl.acquire("c-20260901-000000-cccccccccccc", path=pa, live_probe=lambda: False)
+    except pl.PlaytestLockError as ex:
+        _assert(ex.reason == "foreign_holder", f"want foreign_holder, got {ex.reason}")
+    else:
+        raise AssertionError("a third run must not take alpha's held lock")
+    pl.release(sa, path=pa)
+    pl.release(sb_, path=pb)
+    print("PASS parallel_sandboxes_do_not_share_a_lock")
+
+
+def test_client_probe_is_scoped_to_one_prefix(tmp: Path) -> None:
+    """A client is matched by its own STEAM_COMPAT_DATA_PATH.
+
+    The same discriminator `sb stop` uses. Without it one sandbox client reads
+    as another and the first run to start locks the machine.
+    """
+    proc = tmp / "proc-scoped"
+    mine = tmp / "instances" / "client-mine" / "compatdata"
+    theirs = tmp / "instances" / "client-theirs" / "compatdata"
+    mine.mkdir(parents=True)
+    theirs.mkdir(parents=True)
+
+    _assert(
+        not pl.client_running_for_compat(mine, proc_root=proc),
+        "no processes means no client",
+    )
+
+    pid = proc / "4242"
+    pid.mkdir(parents=True)
+    (pid / "comm").write_text("wine64-preloader\n", encoding="utf-8")
+    (pid / "cmdline").write_text("wine64-preloader\0Z:\\game\\7DaysToDie.exe\0")
+    (pid / "environ").write_text(
+        f"USER=maci\0STEAM_COMPAT_DATA_PATH={theirs.resolve()}\0", encoding="utf-8"
+    )
+    _assert(
+        not pl.client_running_for_compat(mine, proc_root=proc),
+        "another instance's client must not count as ours",
+    )
+    _assert(
+        pl.client_running_for_compat(theirs, proc_root=proc),
+        "the instance's own client must be found",
+    )
+    print("PASS client_probe_is_scoped_to_one_prefix")
+
+
 def test_runtime_patterns_include_server() -> None:
     _assert(
-        "7DaysToDieServer.x86_64" in pl.STOCK_SERVER_EXECUTABLES,
-        "stock dedicated in runtime probe",
+        "7DaysToDieServer.x86_64" in pl.STOCK_DEDICATED_EXECUTABLES,
+        "stock dedicated recognised",
     )
-    _assert("zdtd" in pl.STOCK_SERVER_EXECUTABLES, "zdtd in runtime probe")
+    _assert("zdtd" in pl.ZDTD_EXECUTABLES, "zdtd recognised")
+    _assert(
+        "7DaysToDieServer.x86_64" not in pl.ZDTD_EXECUTABLES,
+        "the dedicated and zdtd tables are separate; only zdtd gates the lock",
+    )
     _assert(
         "7DaysToDie.exe" in pl.STOCK_CLIENT_EXECUTABLES,
         "client in runtime probe",
@@ -125,8 +255,12 @@ def test_runtime_detection_checks_executables_not_shell_text(tmp: Path) -> None:
         "bash\0echo 7DaysToDieServer.x86_64 zig-out/bin/zdtd 7DaysToDie.exe\0",
     )
     _assert(
-        not pl._any_executable_running(pl.STOCK_SERVER_EXECUTABLES, proc_root=proc),
-        "shell text must not count as a server",
+        not pl.dedicated_running(proc_root=proc),
+        "shell text must not count as a dedicated",
+    )
+    _assert(
+        not pl.zdtd_running(proc_root=proc),
+        "shell text must not count as a zdtd",
     )
     _assert(
         not pl._any_preloader_running_game(proc_root=proc),
@@ -142,8 +276,12 @@ def test_runtime_detection_checks_executables_not_shell_text(tmp: Path) -> None:
         "wine64-preloader\0Z:\\\\game\\\\7DaysToDie.exe\0",
     )
     _assert(
-        pl._any_executable_running(pl.STOCK_SERVER_EXECUTABLES, proc_root=proc),
-        "real dedicated or zdtd executable must count",
+        pl.dedicated_running(proc_root=proc),
+        "real dedicated executable must be detectable",
+    )
+    _assert(
+        pl.zdtd_running(proc_root=proc),
+        "real zdtd executable must be detectable",
     )
     _assert(
         pl._any_preloader_running_game(proc_root=proc),
@@ -324,7 +462,7 @@ def test_wait_until_can_start(tmp: Path) -> None:
     _assert(sleeps != [], "slept while blocked")
     _assert(clock[0] >= 25, f"clock reached timeout, got {clock[0]}")
 
-    if not pl.default_live_runtime_running():
+    if not pl.client_running():
         proc = subprocess.run(
             [
                 sys.executable,
@@ -349,8 +487,9 @@ def test_wait_until_can_start(tmp: Path) -> None:
         )
 
     # The capture scripts consume only the exit code, so it must track the
-    # probe exactly: 1 with a runtime up, 0 without.
-    expected_live_rc = 1 if pl.default_live_runtime_running() else 0
+    # probe exactly: 1 with the shared client up, 0 without. A dedicated server
+    # is deliberately not consulted; it belongs to a Safehouse instance.
+    expected_live_rc = 1 if pl.client_running() else 0
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS / "playtest_lock.py"), "live"],
         check=False,
@@ -748,6 +887,18 @@ def main() -> int:
                 lambda: test_live_client_blocks_free_lock(tmp / "live"),
             ),
             ("runtime_patterns_include_server", test_runtime_patterns_include_server),
+            (
+                "lock_gate_is_the_client_not_a_server",
+                lambda: test_lock_gate_is_the_client_not_a_server(tmp / "gate"),
+            ),
+            (
+                "parallel_sandboxes_do_not_share_a_lock",
+                lambda: test_parallel_sandboxes_do_not_share_a_lock(tmp / "parallel"),
+            ),
+            (
+                "client_probe_is_scoped_to_one_prefix",
+                lambda: test_client_probe_is_scoped_to_one_prefix(tmp / "scoped"),
+            ),
             (
                 "runtime_detection_checks_executables_not_shell_text",
                 lambda: test_runtime_detection_checks_executables_not_shell_text(

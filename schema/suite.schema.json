@@ -42,9 +42,15 @@
     },
     "mods": {
       "type": "array",
-      "description": "Modlets staged into the instance. A short name resolves to a sibling repo's dist/; anything else is a path relative to the suite file. Managed only.",
+      "description": "Modlets staged into the CLIENT instance. A short name resolves to a sibling repo's dist/; anything else is a path relative to the suite file. Managed only.",
       "items": { "type": "string", "minLength": 1 },
       "default": ["playtest", "fastconnect"]
+    },
+    "server_mods": {
+      "type": "array",
+      "description": "Modlets staged into the SERVER instance. Empty by default: the scenario runner and the join helper are client mods, and a client Harmony DLL loaded by a dedicated throws at load. A mod declaring blocks or items belongs in both lists, since a multiplayer client receives those definitions from the server. Managed only.",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
     },
     "host": {
       "type": "object",

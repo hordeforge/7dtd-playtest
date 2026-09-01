@@ -17,6 +17,7 @@ Minimal document::
       "backend": "stock",
       "fresh": true,
       "mods": ["playtest", "fastconnect"],
+      "server_mods": [],
       "server": {"GameWorld": "Navezgane", "MaxSpawnedZombies": "0"},
       "host": {"fixtures": false, "loadgen": false},
       "cases": [
@@ -43,7 +44,13 @@ ALLOWED_PROVISIONS = ("managed", "attach")
 ALLOWED_BACKENDS = ("stock", "zdtd")
 ALLOWED_KINDS = ("live", "staged", "defer")
 
+# The client instance runs the scenario mod and the join helper. The server
+# instance gets nothing by default: both of these are client mods, and a client
+# Harmony DLL loaded by a dedicated is a load-time throw, not a no-op. A suite
+# whose mod declares blocks or items names it in `server_mods` too, because in
+# multiplayer the client's definitions arrive from the server.
 DEFAULT_MODS = ("playtest", "fastconnect")
+DEFAULT_SERVER_MODS: tuple[str, ...] = ()
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITES_DIR = ROOT / "suites"
@@ -72,6 +79,7 @@ class SuiteDoc:
     readonly: bool
     fresh: bool
     mods: tuple[str, ...]
+    server_mods: tuple[str, ...]
     server: tuple[tuple[str, str], ...]
     host: SuiteHost
     cases: tuple[SuiteCase, ...]
@@ -187,8 +195,12 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
         )
 
     server = _server_map(data, path=path)
+    managed = provision == "managed"
     mods = _string_list(
-        data, "mods", default=DEFAULT_MODS if provision == "managed" else (), path=path
+        data, "mods", default=DEFAULT_MODS if managed else (), path=path
+    )
+    server_mods = _string_list(
+        data, "server_mods", default=DEFAULT_SERVER_MODS if managed else (), path=path
     )
     if provision == "attach":
         if server:
@@ -196,10 +208,10 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
                 f"{path}: an attach run must not rewrite the config of a server "
                 "it does not own; drop the server block"
             )
-        if mods:
+        if mods or server_mods:
             raise SuiteLoadError(
-                f"{path}: an attach run must not stage mods into a server it does "
-                "not own; drop the mods list"
+                f"{path}: an attach run must not stage mods into instances it does "
+                "not own; drop the mods and server_mods lists"
             )
 
     host_raw = data.get("host", {})
@@ -245,6 +257,7 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
         readonly=readonly,
         fresh=fresh,
         mods=mods,
+        server_mods=server_mods,
         server=server,
         host=host,
         cases=tuple(cases),
@@ -312,19 +325,23 @@ def load_external_suite(path: Path) -> SuiteDoc:
     return doc
 
 
-def resolve_mods(doc: SuiteDoc, *, workspace: Path, repo: Path) -> list[Path]:
-    """Resolve the suite's mod names to built modlet directories.
+def resolve_mods(
+    doc: SuiteDoc, *, workspace: Path, repo: Path, side: str = "client"
+) -> list[Path]:
+    """Resolve one side's mod names to built modlet directories.
 
     A short name resolves to the sibling repo's ``dist/`` output; anything with
     a separator is a path, taken relative to the suite file when relative.
     """
+    if side not in ("client", "server"):
+        raise ValueError(f"side must be client or server, not {side!r}")
     known = {
         "playtest": repo / "dist" / "7dtd-playtest",
         "fastconnect": workspace / "7dtd-fastconnect" / "dist" / "7dtd-fastconnect",
     }
     base = doc.source.parent if doc.source is not None else workspace
     out: list[Path] = []
-    for name in doc.mods:
+    for name in (doc.mods if side == "client" else doc.server_mods):
         if name in known:
             out.append(known[name])
             continue
@@ -342,6 +359,7 @@ def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
         "readonly": doc.readonly,
         "fresh": doc.fresh,
         "mods": list(doc.mods),
+        "server_mods": list(doc.server_mods),
         "server": doc.server_config,
         "host": {"fixtures": doc.host.fixtures, "loadgen": doc.host.loadgen},
         "cases": [

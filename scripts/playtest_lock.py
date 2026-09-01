@@ -52,7 +52,8 @@ DEFAULT_HEARTBEAT_INTERVAL_SEC = 30
 
 PROC_ROOT = Path("/proc")
 STOCK_CLIENT_EXECUTABLES = ("7DaysToDie.exe", "DaysToDie.exe")
-STOCK_SERVER_EXECUTABLES = ("7DaysToDieServer.x86_64", "zdtd")
+STOCK_DEDICATED_EXECUTABLES = ("7DaysToDieServer.x86_64",)
+ZDTD_EXECUTABLES = ("zdtd",)
 WINE_PRELOADERS = ("wine-preloader", "wine64-preloader")
 GAME_CLIENT_ARG_RE = re.compile(r"(?:^|[/\\\\])7DaysToDie\.exe(?:\0|$)", re.IGNORECASE)
 
@@ -242,11 +243,27 @@ class LockState:
 
 
 
-def default_lock_path() -> Path:
+def default_lock_path(instance: str | None = None) -> Path:
+    """Lock file for the client this run drives.
+
+    The lock exists because a client is exclusive, so it is scoped to the
+    client that is exclusive. A Safehouse client instance has its own game
+    tree, Proton prefix and window, so two runs on different instances share
+    nothing and both may proceed; two runs on the same instance must not.
+    Without an instance (the operator's single Steam client) the scope is the
+    machine, as before.
+
+    ``PLAYTEST_LOCK_FILE`` still overrides everything, so a shared-machine
+    convention that points several stacks at one file keeps working.
+    """
     env = os.environ.get("PLAYTEST_LOCK_FILE", "").strip()
     if env:
         return Path(env).expanduser()
-    return Path.home() / DEFAULT_LOCK_REL
+    base = Path.home() / DEFAULT_LOCK_REL
+    if not instance:
+        return base
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", instance)
+    return base.with_name(f"{base.name}-{safe}")
 
 
 def _warn_invalid_env(name: str, raw: str, fallback: float) -> None:
@@ -514,32 +531,68 @@ def _any_preloader_running_game(
     return False
 
 
-def client_running(*, proc_root: Path = PROC_ROOT) -> bool:
-    """True when a stock/Proton client is present (client-only probe).
+def _process_environ(pid_dir: Path) -> str:
+    """NUL-separated environment of one process, "" when unreadable."""
+    try:
+        return (pid_dir / "environ").read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return ""
 
-    Used by ``--no-server`` attach runs: an already-running dedicated server
-    is the point of attaching, so only a stray client should block a second
-    orchestrator from starting.
+
+def client_running_for_compat(compat: Path, *, proc_root: Path = PROC_ROOT) -> bool:
+    """True when a client is running against this Proton prefix specifically.
+
+    Matches on ``STEAM_COMPAT_DATA_PATH``, the same discriminator `sb stop`
+    uses, so one sandbox client never reads as another. This is what lets
+    several sandbox runs share a machine: disjoint instances, disjoint port
+    blocks, disjoint prefixes, disjoint locks.
+    """
+    wanted = f"STEAM_COMPAT_DATA_PATH={Path(compat).resolve()}"
+    for pid_dir in _runtime_pids(proc_root):
+        if wanted in _process_environ(pid_dir).split("\0"):
+            return True
+    return False
+
+
+def client_running(*, proc_root: Path = PROC_ROOT) -> bool:
+    """True when a stock/Proton client is present.
+
+    This is what the lock is for. There is one stock client, one display and
+    one GPU on a machine, so two orchestrated runs cannot share it; a dedicated
+    server is not scarce in the same way. Inspect the executable each process
+    is running, so a shell, terminal history or agent prompt that merely
+    mentions these names cannot satisfy the check.
     """
     return _any_executable_running(
         STOCK_CLIENT_EXECUTABLES, proc_root=proc_root
     ) or _any_preloader_running_game(proc_root=proc_root)
 
 
-def server_running(*, proc_root: Path = PROC_ROOT) -> bool:
-    """True when a dedicated/zdtd server is present."""
-    return _any_executable_running(STOCK_SERVER_EXECUTABLES, proc_root=proc_root)
+def dedicated_running(*, proc_root: Path = PROC_ROOT) -> bool:
+    """True when a stock dedicated server is present, on any instance.
 
-
-def default_live_runtime_running() -> bool:
-    """True when a stock/Proton client or dedicated/zdtd server is present.
-
-    Inspect the executable each process is running. A shell, terminal history,
-    or agent prompt may mention these names, but cannot satisfy this check.
-    Used as the default acquire gate: playtest_run starts both, and a second
-    run must not double-bind ports or kill the first holder's processes.
+    Not a lock input. A managed run's dedicated belongs to its Safehouse
+    instance, which owns a unique port block and refuses a second start of
+    itself (`sb up`), so someone else's dedicated is no reason to refuse a run.
+    Kept for diagnostics and for callers that genuinely need the fact.
     """
-    return client_running() or server_running()
+    return _any_executable_running(STOCK_DEDICATED_EXECUTABLES, proc_root=proc_root)
+
+
+def zdtd_running(*, proc_root: Path = PROC_ROOT) -> bool:
+    """True when a zdtd server is present.
+
+    Unlike the stock dedicated, zdtd is still started by the orchestrator on a
+    port the caller chose, so a second zdtd run would double-bind it. A managed
+    zdtd run therefore adds this to its lock gate; nothing else does.
+    """
+    return _any_executable_running(ZDTD_EXECUTABLES, proc_root=proc_root)
+
+
+def client_or_zdtd_running() -> bool:
+    """Lock gate for a managed zdtd run: the shared client, or a zdtd holding
+    the port this run is about to bind."""
+    return client_running() or zdtd_running()
 
 
 def tcp_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -571,7 +624,7 @@ def can_start(
     e = _env(env)
     path = _lock_path(path, e)
     # Default: client OR dedicated/zdtd (full playtest runtime).
-    probe = live_probe if live_probe is not None else default_live_runtime_running
+    probe = live_probe if live_probe is not None else client_running
     state = read_lock(path, env=e)
     if state.running and state.session and state.session != session:
         # A foreign claim only frees up once stale AND no runtime is alive.
@@ -627,7 +680,7 @@ def acquire(
     session = _require_session(session)
     e = _env(env)
     path = _lock_path(path, e)
-    probe = live_probe if live_probe is not None else default_live_runtime_running
+    probe = live_probe if live_probe is not None else client_running
     result: dict[str, LockState | None] = {"state": None}
 
     def _body() -> None:
@@ -923,9 +976,11 @@ def main(argv: list[str] | None = None) -> int:
 
     ``wait`` polls :func:`wait_until_can_start` and exits 0 when a new
     session could acquire, 1 on timeout, 2 on bad usage.
-    ``live`` probes :func:`default_live_runtime_running` and exits 0 when no
-    runtime is up, 1 when one is, 2 when the probe itself fails; the exit
-    code is the whole interface, so it prints nothing.
+    ``live`` probes :func:`client_running` and exits 0 when the shared client
+    is free, 1 when it is up, 2 when the probe itself fails; the exit code is
+    the whole interface, so it prints nothing. A dedicated server is not
+    consulted: it belongs to a Safehouse instance with its own port block, so
+    it blocks nobody.
     """
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
@@ -937,9 +992,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args[0] == "live":
         try:
-            live = default_live_runtime_running()
+            live = client_running()
         except Exception as ex:
-            sys.stderr.write(f"cannot inspect live runtimes: {ex}\n")
+            sys.stderr.write(f"cannot inspect the live client: {ex}\n")
             return 2
         return 1 if live else 0
     if args[0] != "wait":

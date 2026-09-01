@@ -294,6 +294,53 @@ def ensure_sandbox_server(
     return env_map
 
 
+def ensure_sandbox_client(
+    plan: TargetPlan,
+    *,
+    wipe: bool = True,
+    mods: list[Path] | None = None,
+) -> dict[str, str]:
+    """Create, wipe, stage and resolve the Safehouse client instance.
+
+    A managed run drives the instance's own client, not the operator's Steam
+    install: the instance is the Windows depot under Proton with no Steam auth,
+    its mods are the ones the suite declared, and `sb wipe` gives every run the
+    same starting prefix. The Steam install may be a different build entirely
+    (the Linux native client has no 7DaysToDie.exe for Proton to launch).
+
+    Returns the `sb env` contract (GAME, COMPAT, PROTON, LOGFILE).
+    """
+    if not plan.is_sandbox:
+        return {}
+    if plan.sandbox_root is None or plan.sandbox_client is None:
+        raise TargetError("managed stock plan is missing sandbox_root/client name")
+    check_sandbox_available(plan)
+
+    name = plan.sandbox_client
+    if not (plan.sandbox_root / "instances" / name).is_dir():
+        _run_sb(plan, ["create", name])
+    elif wipe:
+        _run_sb(plan, ["wipe", name])
+    if mods:
+        _run_sb(plan, ["stage", name, *[str(m) for m in mods]])
+
+    proc = _run_sb(plan, ["env", name])
+    env_map = parse_sb_env_output(proc.stdout)
+    if not env_map.get("GAME"):
+        raise TargetError(f"sandbox client {name} has no GAME in `sb env` output")
+    return env_map
+
+
+def stop_sandbox_client(plan: TargetPlan) -> None:
+    """Best-effort ``sb stop`` for the sandbox client instance."""
+    if not plan.is_sandbox or plan.sandbox_root is None or plan.sandbox_client is None:
+        return
+    if not sb_path(plan.sandbox_root).is_file():
+        return
+    with contextlib.suppress(TargetError):
+        _run_sb(plan, ["stop", plan.sandbox_client], check=False)
+
+
 def stop_sandbox_server(plan: TargetPlan) -> None:
     """Best-effort ``sb stop`` for the sandbox server instance."""
     if not plan.is_sandbox or plan.sandbox_root is None or plan.sandbox_server is None:
