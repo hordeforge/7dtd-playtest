@@ -73,7 +73,10 @@ def test_defaults_are_managed_stock_fresh() -> None:
     assert doc.fresh is True
     assert doc.readonly is False
     assert doc.mods == sl.DEFAULT_MODS
-    assert doc.server_mods == (), "the server gets no client mods by default"
+    assert doc.server_mods == sl.DEFAULT_MODS, (
+        "both sides run the same mods by default; a C# mod on one side only "
+        "desynchronises the connection"
+    )
 
 
 def test_attach_is_never_fresh_and_writes_nothing() -> None:
