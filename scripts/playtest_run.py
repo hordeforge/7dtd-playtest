@@ -74,6 +74,17 @@ STEAM_ROOTS = (
 )
 
 
+def peer_client_game(compat: Path) -> Path | None:
+    """The game tree beside a peer's Proton prefix, when there is one.
+
+    A Safehouse instance is <instance>/{game,compatdata}, so a peer pointed at
+    an instance prefix has its own tree one level up. Returns None for a prefix
+    that is not laid out that way, leaving the caller to decide.
+    """
+    candidate = compat.parent / "game"
+    return candidate if (candidate / CLIENT_EXECUTABLE).is_file() else None
+
+
 def client_log_for_compat(compat: Path) -> Path:
     """Stock launch_client.sh's game log location for one Proton profile."""
     return (
@@ -165,6 +176,17 @@ PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 # stopped by name (`sb stop`), which matches on that instance's own SB_INSTANCE
 # env: a blanket 7DaysToDieServer pkill from here would take down every other
 # sandbox instance on the machine, including another agent's run.
+# The peer waits for this in the primary's log before connecting: the engine
+# rejects same-IP connects less than 500 ms apart, and two clients booting from
+# identical instances reach the menu together no matter how the launches were
+# staggered.
+# Client-side, because this is read out of the primary's own log.
+# PlayerSpawnedInWorld is the server's word for the same moment and never
+# appears here, so waiting on it timed out every run and the peer launched
+# into the rate limit anyway.
+PEER_STAGGER_MARKER = "Respawning: EnterMultiplayer"
+PEER_STAGGER_TIMEOUT_SEC = 180.0
+
 GAME_PROC_PATTERNS = [
     r"[/]7DaysToDie\.exe",
     r"wine64-preloader.*7DaysToDie",
@@ -3012,16 +3034,51 @@ def main(argv: list[str] | None = None) -> int:
                 extra_env=client_extra_env or None,
             )
             if peer_client_name:
-                # V3.1 LiteNetLibAuthWrapperServer rejects same-IP connection
-                # attempts less than 500 ms apart. Both local stock clients
-                # use 127.0.0.1, so launching them back-to-back deterministically
-                # strands the peer at ConnectionRejected/RateLimit. Keep a
-                # full-second margin over the installed engine's limit.
+                # The engine rejects same-IP connection attempts less than
+                # 500 ms apart, and both local clients use 127.0.0.1. Staggering
+                # the *launches* does not stagger the *connects*: two clients
+                # booting from identical instances take the same ~15 s to reach
+                # the menu, so a one-second head start evaporated and the peer
+                # was rejected with ConnectionRejected while the suite still
+                # passed on the primary alone.
+                #
+                # Wait for the primary to actually be in the world instead. The
+                # sleep remains as the floor for the case where the marker never
+                # arrives, so a peer still launches rather than stranding the run.
+                if wait_file_contains(
+                    args.client_log, PEER_STAGGER_MARKER, PEER_STAGGER_TIMEOUT_SEC
+                ):
+                    log(f"primary in world; launching peer {peer_client_name}")
+                else:
+                    warn(
+                        f"primary did not reach {PEER_STAGGER_MARKER!r} within "
+                        f"{PEER_STAGGER_TIMEOUT_SEC:g}s; launching the peer anyway, "
+                        "which may hit the same-IP connect rate limit"
+                    )
                 time.sleep(1.0)
+                # The peer gets its instance's GAME too, not just its prefix.
+                # launch_client.sh defaults GAME to the operator's Steam
+                # install, so a peer given only COMPAT ran the wrong tree
+                # against a sandbox prefix: on a host whose Steam copy is the
+                # Linux build there is no 7DaysToDie.exe for Proton at all, and
+                # the peer silently never joined while the suite still passed
+                # on the primary client alone.
                 peer_env = {
                     "COMPAT": str(args.peer_client_compat),
                     "7DTD_PLAYER_NAME": peer_client_name,
                 }
+                peer_game = peer_client_game(args.peer_client_compat)
+                if peer_game is not None:
+                    peer_env["GAME"] = str(peer_game)
+                    peer_env["SB_SCREEN_ARGS"] = client_extra_env.get(
+                        "SB_SCREEN_ARGS", ""
+                    )
+                else:
+                    warn(
+                        f"peer compat {args.peer_client_compat} has no sibling "
+                        "game/7DaysToDie.exe; the peer will use whatever GAME "
+                        "the environment holds and may never join"
+                    )
                 peer_client_proc = start_client(
                     args.port,
                     peer_client_suite,
