@@ -9,6 +9,6 @@ namespace ZdtdPlaytest
     {
         public const string Name = "7dtd-playtest";
         public const string HarmonyId = "com.zdtd.playtest";
-        public const string Version = "0.9.0";
+        public const string Version = "0.10.0";
     }
 }

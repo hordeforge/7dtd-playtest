@@ -22,6 +22,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-02
+
+Sandbox pairs: a managed run now drives both halves from Safehouse instances,
+several runs share a machine, and the stock-peer path was repaired.
+
+**Requires** `7dtd-sandbox` >= 0.2.0.
+
 ### Fixed
 
 - **A stock peer ran the wrong game tree.** `launch_client.sh` defaults `GAME`
@@ -45,8 +52,12 @@ Release model (inferred practice, now pinned by `make test`):
 - One server with several clients is **not yet proven**. With both fixes the
   peer starts correctly and is spaced past the rate limit, but a suite that
   does not wait for it (`smoke` finishes its five cases immediately) tears the
-  run down before the peer finishes booting. Use a suite that waits for the
-  peer; `mp` exists for this and has not been run against a sandbox pair.
+  run down before the peer finishes booting.
+- The `mp` suite, which exists for exactly this, was run against a sandbox pair
+  and failed differently: `timeout after 1292s waiting for DONE`, with the
+  *primary* client never reaching `Respawning: EnterMultiplayer` at all while
+  the peer did auto-join. That is a suite-semantics problem rather than the
+  peer plumbing this release fixed, and it is unexplored.
 
 ### Added
 
@@ -668,7 +679,8 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.10.0
 [0.9.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.9.0
 [0.7.2]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.7.1
