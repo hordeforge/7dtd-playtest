@@ -22,6 +22,32 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stock peer ran the wrong game tree.** `launch_client.sh` defaults `GAME`
+  to the operator's Steam install, and the peer was given only `COMPAT`, so it
+  ran that install against a sandbox Proton prefix. On a host whose Steam copy
+  is the Linux build there is no `7DaysToDie.exe` for Proton at all: the peer
+  silently never started, while the suite still passed on the primary client
+  alone. `peer_client_game` derives the tree beside the peer's prefix, and the
+  peer gets the same windowed-720p arguments as the primary.
+- **The peer raced the engine's connect rate limit.** Same-IP connects less
+  than 500 ms apart are rejected, and staggering the *launches* by a second did
+  not stagger the *connects*: two clients booting from identical instances
+  reach the menu together, so the peer was rejected with `ConnectionRejected`.
+  It now waits for the primary to be in the world
+  (`Respawning: EnterMultiplayer`, a client-side marker; the server's
+  `PlayerSpawnedInWorld` never appears in a client log and waiting on it timed
+  out every run), with the one-second sleep kept as a floor.
+
+### Known limitation
+
+- One server with several clients is **not yet proven**. With both fixes the
+  peer starts correctly and is spaced past the rate limit, but a suite that
+  does not wait for it (`smoke` finishes its five cases immediately) tears the
+  run down before the peer finishes booting. Use a suite that waits for the
+  peer; `mp` exists for this and has not been run against a sandbox pair.
+
 ### Added
 
 - A managed run drives a Safehouse **pair**: `srv-<name>` and `client-<name>`.

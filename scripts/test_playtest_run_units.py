@@ -914,6 +914,34 @@ def test_main_default_port_reaches_preflight_refusal() -> None:
     print("PASS default_port_preflight omitted --port reaches preflight refusal")
 
 
+def test_peer_client_game_follows_its_instance() -> None:
+    """A peer must run its own instance's tree, not the operator's install.
+
+    launch_client.sh defaults GAME to the Steam install, so a peer given only
+    COMPAT ran the wrong tree against a sandbox prefix. On a host whose Steam
+    copy is the Linux build there is no 7DaysToDie.exe for Proton at all: the
+    peer silently never joined, while the suite still passed on the primary
+    client alone.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-peer-") as td:
+        inst = Path(td) / "instances" / "client-peer"
+        (inst / "game").mkdir(parents=True)
+        (inst / "compatdata").mkdir(parents=True)
+
+        # No executable yet: not a usable tree, so the caller is told rather
+        # than silently handed a directory the launcher cannot run.
+        assert playtest_run.peer_client_game(inst / "compatdata") is None
+
+        (inst / "game" / playtest_run.CLIENT_EXECUTABLE).write_text("", encoding="utf-8")
+        assert playtest_run.peer_client_game(inst / "compatdata") == inst / "game"
+
+        # A prefix that is not laid out as a Safehouse instance yields nothing.
+        loose = Path(td) / "loose-prefix"
+        loose.mkdir()
+        assert playtest_run.peer_client_game(loose) is None
+    print("PASS peer_client_game peer runs its own instance tree")
+
+
 def test_config_summary_redacts_telnet_password() -> None:
     """The startup config line lists the effective options but never the
     telnet password value, so run logs stay shareable."""
@@ -1759,6 +1787,7 @@ def main() -> int:
         ("tcp_port_range", test_tcp_port_type_range),
         ("litenet_port_room", test_litenet_port_room_guard),
         ("default_port_preflight", test_main_default_port_reaches_preflight_refusal),
+        ("peer_client_game", test_peer_client_game_follows_its_instance),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
         (

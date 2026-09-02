@@ -29,12 +29,28 @@ def test_peer_gets_distinct_stock_local_identity() -> None:
 
 
 def test_peer_spacing_past_engine_rate_limit() -> None:
-    """Same-IP stock clients must be spaced past the LiteNetLib rate limit."""
-    assert "LiteNetLibAuthWrapperServer" in RUNNER
+    """Same-IP stock clients must be spaced past the engine's rate limit.
+
+    Staggering the launches is not enough: the engine rejects same-IP connects
+    less than 500 ms apart, and two clients booting from identical instances
+    reach the menu together however the launches were spaced. A one-second head
+    start evaporated and the peer was rejected with ConnectionRejected, while
+    the suite still passed on the primary alone. The peer therefore waits for
+    the primary to be in the world, with the sleep kept as a floor for the case
+    where that marker never arrives.
+    """
+    assert "rejects same-IP connection attempts" in RUNNER
+    assert "PEER_STAGGER_MARKER" in RUNNER
+    # Client-side: this is read out of the primary's own log, and the server's
+    # word for the same moment (PlayerSpawnedInWorld) never appears there, so
+    # waiting on it timed out every run.
+    assert 'PEER_STAGGER_MARKER = "Respawning: EnterMultiplayer"' in RUNNER
+    assert "wait_file_contains(" in RUNNER
     assert "time.sleep(1.0)" in RUNNER
-    assert RUNNER.index("time.sleep(1.0)") < RUNNER.index(
-        '"7DTD_PLAYER_NAME": peer_client_name'
-    )
+    # Both the wait and the floor precede the peer launch.
+    peer_launch = RUNNER.index('"7DTD_PLAYER_NAME": peer_client_name')
+    assert RUNNER.index("PEER_STAGGER_TIMEOUT_SEC\n") < peer_launch
+    assert RUNNER.index("time.sleep(1.0)") < peer_launch
 
 
 def test_peer_can_run_explicit_provider_setup_suite() -> None:
