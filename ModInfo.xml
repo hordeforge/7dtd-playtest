@@ -4,6 +4,6 @@
   <DisplayName value="7DTD Playtest" />
   <Description value="Client: autonomous gameplay scenarios against real servers (EAC off). Drive + assert only; no invented world state." />
   <Author value="HordeForge" />
-  <Version value="0.9.0" />
+  <Version value="0.10.0" />
   <Website value="https://github.com/hordeforge/7dtd-playtest" />
 </xml>
