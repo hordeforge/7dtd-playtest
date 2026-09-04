@@ -1,0 +1,76 @@
+{
+  "id": "parachute",
+  "provision": "managed",
+  "backend": "stock",
+  "fresh": true,
+  "mods": [
+    "playtest",
+    "fastconnect",
+    "../../7dtd-wasm/evidence/playtest-1/parachute-items",
+    "../../7dtd-wasm/evidence/playtest-1/parachute-client/dist"
+  ],
+  "server_mods": [
+    "../../7dtd-wasm/dist/Mods/1_HordeForge_WasmHost",
+    "../../7dtd-wasm/evidence/playtest-1/parachute-items",
+    "../../7dtd-wasm/evidence/playtest-1/wasm-bridge"
+  ],
+  "server": {
+    "GameWorld": "Navezgane",
+    "GameName": "PlaytestParachute",
+    "WorldGenSeed": "playtest",
+    "WorldGenSize": "4096",
+    "ServerMaxPlayerCount": "4",
+    "EACEnabled": "false",
+    "ServerAllowCrossplay": "false",
+    "ServerDisabledNetworkProtocols": "SteamNetworking",
+    "ServerVisibility": "0",
+    "WebDashboardEnabled": "false",
+    "IgnoreEOSSanctions": "true",
+    "EnemySpawnMode": "false",
+    "MaxSpawnedZombies": "0",
+    "MaxSpawnedAnimals": "0",
+    "ZombieMove": "0",
+    "DayNightLength": "60",
+    "DayLightLength": "40",
+    "TelnetEnabled": "true",
+    "BuildCreate": "true",
+    "ServerPassword": "",
+    "PlayerKillingMode": "0"
+  },
+  "host": {
+    "fixtures": false,
+    "loadgen": false
+  },
+  "cases": [
+    {
+      "id": "parachute_equip",
+      "kind": "live",
+      "ref": "catalog.parachute.parachute_equip",
+      "tags": [
+        "parachute",
+        "equip"
+      ]
+    },
+    {
+      "id": "parachute_fall_announce",
+      "kind": "live",
+      "ref": "catalog.parachute.parachute_fall_announce",
+      "tags": [
+        "parachute",
+        "fall"
+      ]
+    },
+    {
+      "id": "parachute_land_safe",
+      "kind": "live",
+      "ref": "catalog.parachute.parachute_land_safe",
+      "tags": [
+        "parachute",
+        "land"
+      ]
+    }
+  ],
+  "notes": [
+    "Parachute glide on a managed stock pair: the unmodified zdtd parachute wasm runs in the 7dtd-wasm bridge on the server, the items/buffs modlet on both sides, the slow-fall/no-damage client mod on the client. `wasm-bridge` is a synthetic server mod dir (bridge DLLs plus the parachute-only Mods/Wasm tree) assembled by the 7dtd-wasm evidence staging, not a dist artifact."
+  ]
+}

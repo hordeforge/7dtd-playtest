@@ -362,6 +362,54 @@ namespace ZdtdPlaytest
                 return hit;
             }, assert: ctx => ChatProbe.Contains("deployed their parachute"),
                 timeout: 30f, fail: "no parachute deploy announce after lift"));
+
+            // After the deploy announce the player glides down at the sink
+            // rate and lands safe: no death, no broken/sprained leg. The
+            // client slow-fall patch and the no-damage patch are what make
+            // a 200-block fall survivable; without them this fails.
+            q.Add(Live(suite, "parachute_land_safe", new[] { "parachute", "land" }, ctx =>
+            {
+                ctx.FloatA = ctx.Player != null ? ctx.Player.GetPosition().y : 0f;
+                ctx.IntA = ctx.Player != null ? ctx.Player.Health : 0;
+                ctx.Detail = "y=" + ctx.FloatA + " hp=" + ctx.IntA;
+            }, wait: ctx =>
+            {
+                EntityPlayerLocal p0 = ctx.Player;
+                if (p0 == null)
+                {
+                    return false;
+                }
+                Vector3 p = p0.GetPosition();
+                bool buffGone = false;
+                try
+                {
+                    EntityBuffs b = p0.Buffs;
+                    buffGone = b == null || !b.HasBuff("buffParachuteGlide");
+                }
+                catch { /* */ }
+                // Landed: back near the lift base (within 15 blocks above
+                // it, falling 200) and the server-side glide cleared.
+                bool landed = p.y < ctx.FloatA - 150f && buffGone;
+                ctx.Detail = "y=" + p.y + " base=" + ctx.FloatA + " buffGone=" + buffGone;
+                return landed;
+            }, assert: ctx =>
+            {
+                EntityPlayerLocal p0 = ctx.Player;
+                if (p0 == null || p0.IsDead())
+                {
+                    return false;
+                }
+                try
+                {
+                    EntityBuffs b = p0.Buffs;
+                    if (b != null && (b.HasBuff("buffLegBroken") || b.HasBuff("buffLegSprained")))
+                    {
+                        return false;
+                    }
+                }
+                catch { /* */ }
+                return true;
+            }, timeout: 120f, fail: "no safe glide landing after deploy"));
         }
 
         // ── core (play loop) ─────────────────────────────────────────────
