@@ -2945,10 +2945,12 @@ def main(argv: list[str] | None = None) -> int:
                 except ValueError as ex:
                     err(f"instance {plan.sandbox_server} allocated an unusable port: {ex}")
                     return False
-                # `sb up` returned only once the game port was listening, and
-                # the process is its own session: this run does not hold the
-                # Popen handle, so mid-run exit polling must not expect one.
-                args.no_server = True
+                # `sb up` returned only once the game port was listening.
+                # The process is its own session, so this run holds no Popen
+                # handle; note_backend_exit already no-ops when server_proc
+                # is None. Do not set args.no_server: that flag means attach,
+                # and the rejoin restart calls start_server(wipe=False) which
+                # would then skip bringing the instance back up.
                 log(
                     f"sandbox server up: instance={plan.sandbox_server} "
                     f"port={args.port} telnet={args.admin_port} "

@@ -30,6 +30,12 @@ Release model (inferred practice, now pinned by `make test`):
   as unimplemented (`unknown or empty suite`). Each client now gets the
   refs for the suite it is armed with, loading `{id}.json` beside
   `--suite-file` when the ids differ.
+- **Rejoin did not restart the Safehouse dedicated.** The first
+  `start_server` set `args.no_server = True` so mid-run polling would not
+  expect a Popen handle. The rejoin `start_server(wipe=False)` then
+  returned immediately, the dedicated stayed down, and the verify client
+  got `Connection Failed`. Sandbox has no Popen either way;
+  `note_backend_exit` already no-ops on a null handle.
 
 ## [0.10.0] - 2026-09-02
 

@@ -1798,6 +1798,14 @@ def test_playtest_case_refs_env_rejoin_uses_sibling_file() -> None:
     print("PASS rejoin_case_refs_use_armed_suite")
 
 
+def test_start_server_does_not_flip_no_server() -> None:
+    src = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert "args.no_server = True" not in src, (
+        "setting no_server after sandbox up makes rejoin start_server a no-op"
+    )
+    print("PASS start_server_does_not_flip_no_server")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -1911,6 +1919,10 @@ def main() -> int:
         (
             "rejoin_case_refs_use_armed_suite",
             test_playtest_case_refs_env_rejoin_uses_sibling_file,
+        ),
+        (
+            "start_server_does_not_flip_no_server",
+            test_start_server_does_not_flip_no_server,
         ),
     ):
         try:
