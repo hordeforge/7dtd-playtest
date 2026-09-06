@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import contextlib
 import io
 import os
@@ -1740,6 +1741,63 @@ def test_write_zdtd_apm_dump_fails_closed_without_markers() -> None:
     print("PASS apm_dump_fail_closed markers required, sentinel on miss")
 
 
+def test_playtest_case_refs_env_rejoin_uses_sibling_file() -> None:
+    import suite_loader
+
+    with tempfile.TemporaryDirectory(prefix="playtest-caserefs-") as td:
+        root = Path(td)
+        verify = {
+            "id": "feat-restart",
+            "provision": "managed",
+            "backend": "stock",
+            "fresh": True,
+            "mods": ["playtest", "fastconnect"],
+            "server_mods": ["playtest"],
+            "server": {"GameWorld": "Navezgane"},
+            "host": {"fixtures": True, "loadgen": False},
+            "cases": [
+                {
+                    "id": "rejoin",
+                    "kind": "live",
+                    "ref": "catalog.feat-restart.rejoin",
+                }
+            ],
+        }
+        setup = dict(verify)
+        setup["id"] = "feat-restart-setup"
+        setup["cases"] = [
+            {
+                "id": "setup",
+                "kind": "live",
+                "ref": "catalog.feat-restart-setup.setup",
+            }
+        ]
+        verify_path = root / "feat-restart.json"
+        verify_path.write_text(json.dumps(verify), encoding="utf-8")
+        (root / "feat-restart-setup.json").write_text(
+            json.dumps(setup), encoding="utf-8"
+        )
+        doc = suite_loader.load_suite_file(verify_path)
+        extra = {"FOO": "1"}
+        setup_env = playtest_run.playtest_case_refs_env(
+            extra, "feat-restart-setup", doc, verify_path
+        )
+        assert setup_env["PLAYTEST_CASE_REFS"] == "catalog.feat-restart-setup.setup"
+        assert setup_env["FOO"] == "1"
+        verify_env = playtest_run.playtest_case_refs_env(
+            extra, "feat-restart", doc, verify_path
+        )
+        assert verify_env["PLAYTEST_CASE_REFS"] == "catalog.feat-restart.rejoin"
+        leaked = playtest_run.playtest_case_refs_env(
+            {"PLAYTEST_CASE_REFS": ",".join(doc.case_refs)},
+            "feat-restart-setup",
+            doc,
+            None,
+        )
+        assert "PLAYTEST_CASE_REFS" not in leaked
+    print("PASS rejoin_case_refs_use_armed_suite")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -1849,6 +1907,10 @@ def main() -> int:
         (
             "apm_dump_fail_closed",
             test_write_zdtd_apm_dump_fails_closed_without_markers,
+        ),
+        (
+            "rejoin_case_refs_use_armed_suite",
+            test_playtest_case_refs_env_rejoin_uses_sibling_file,
         ),
     ):
         try:

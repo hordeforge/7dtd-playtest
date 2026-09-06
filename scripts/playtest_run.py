@@ -522,6 +522,36 @@ def mute_client_audio_async() -> None:
         warn(f"client mute: failed to start helper: {ex}")
 
 
+def playtest_case_refs_env(
+    extra_env: dict[str, str],
+    suite_id: str,
+    suite_doc: suite_loader.SuiteDoc | None,
+    suite_file: Path | None,
+) -> dict[str, str]:
+    """PLAYTEST_CASE_REFS for the suite this client is actually armed with.
+
+    --suite-file describes one suite. A rejoin setup client is armed with a
+    different id; applying the verify suite's refs there drops the setup
+    cases and then fails the leftover refs as unimplemented.
+    """
+    out = dict(extra_env)
+    refs: tuple[str, ...] = ()
+    if suite_doc is not None and suite_doc.id == suite_id:
+        refs = suite_doc.case_refs
+    elif suite_file is not None:
+        sibling = suite_file.parent / (suite_id + ".json")
+        if sibling.is_file():
+            try:
+                refs = suite_loader.load_suite_file(sibling).case_refs
+            except suite_loader.SuiteLoadError:
+                refs = ()
+    if refs:
+        out["PLAYTEST_CASE_REFS"] = ",".join(refs)
+    else:
+        out.pop("PLAYTEST_CASE_REFS", None)
+    return out
+
+
 def start_client(
     port: int,
     suite: str,
@@ -2997,11 +3027,6 @@ def main(argv: list[str] | None = None) -> int:
         client_extra_env: dict[str, str] = dict(client_instance_env)
         if args.trace_entity:
             client_extra_env["PLAYTEST_TRACE_ENTITY"] = "1"
-        # The declared case refs are what the suite says runs. The client keeps
-        # only cases whose ref appears here, so a case added to the C# catalog
-        # but not declared in the suite does not silently ride along.
-        if suite_doc is not None:
-            client_extra_env["PLAYTEST_CASE_REFS"] = ",".join(suite_doc.case_refs)
         # Same , ; space delimiters as the client's Catalog.ExpandSuites (see
         # suite_wants_host_fixtures): "smoke apm" must arm the dump env exactly
         # like "smoke,apm", or the in-client apm case waits on a path this
@@ -3031,7 +3056,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.port,
                 args.suite,
                 client_launch_log,
-                extra_env=client_extra_env or None,
+                extra_env=playtest_case_refs_env(
+                    client_extra_env, args.suite, suite_doc, args.suite_file
+                )
+                or None,
             )
             if peer_client_name:
                 # The engine rejects same-IP connection attempts less than
@@ -3105,7 +3133,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.port,
                 rejoin_setup_suite,
                 client_launch_log,
-                extra_env=client_extra_env,
+                extra_env=playtest_case_refs_env(
+                    client_extra_env,
+                    rejoin_setup_suite,
+                    suite_doc,
+                    args.suite_file,
+                ),
             )
             # Phase budgets stay inside the documented harness wall clock
             # (--timeout bounds the whole run): each rejoin phase is bounded
@@ -3300,7 +3333,12 @@ def main(argv: list[str] | None = None) -> int:
             client_scan = ClientLogScan()
             barrier_counts, barrier_seen = new_barrier_tables()
             client_proc = start_client(
-                args.port, args.suite, client_launch_log, extra_env=client_extra_env
+                args.port,
+                args.suite,
+                client_launch_log,
+                extra_env=playtest_case_refs_env(
+                    client_extra_env, args.suite, suite_doc, args.suite_file
+                ),
             )
             ready_seen = False
             rejoin_teleport_done = args.rejoin_teleport is None
