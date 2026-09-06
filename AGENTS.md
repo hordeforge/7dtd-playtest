@@ -278,7 +278,7 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | `PLAYTEST_SANDBOX_NAME` | Safehouse pair base name (creates `srv-<name>` / `client-<name>`) |
 | `PLAYTEST_SANDBOX_ROOT` | Safehouse checkout that owns the instances (or `--sandbox-root`) |
 | `PLAYTEST_LOCK_FILE` | Override the lock path; without it a managed run locks per client instance |
-| `PLAYTEST_CASE_REFS` | Set by the orchestrator from the suite: the only case refs the client runs |
+| `PLAYTEST_CASE_REFS` | Set by the orchestrator for the suite id that client is armed with (rejoin setup loads `{id}.json` beside `--suite-file` when the ids differ) |
 | `PLAYTEST_SUITE_FILE` | Optional declarative suite JSON path (or `--suite-file`) |
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias of `PLAYTEST_SUITE` (older Atomic hosts) |
 | `PLAYTEST=1` / `ZDTD_PLAYTEST=1` | Legacy: arms `demo` |

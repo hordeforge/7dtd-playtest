@@ -22,6 +22,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rejoin setup used the verify suite's `PLAYTEST_CASE_REFS`.** A provider
+  `--rejoin-setup-suite` is a different catalog id than `--suite`. The
+  setup client then filtered out its own cases and failed the verify refs
+  as unimplemented (`unknown or empty suite`). Each client now gets the
+  refs for the suite it is armed with, loading `{id}.json` beside
+  `--suite-file` when the ids differ.
+
 ## [0.10.0] - 2026-09-02
 
 Sandbox pairs: a managed run now drives both halves from Safehouse instances,
