@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import argparse
 import ast
-import json
 import contextlib
 import io
+import json
 import os
 import pathlib
 import re

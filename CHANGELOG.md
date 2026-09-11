@@ -22,6 +22,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-11
+
+### Added
+
+- A managed **parachute** suite (`suites/parachute.json`) with a safe-landing
+  case, so the zdtd parachute module is driven end to end by a stock client.
+
 ### Fixed
 
 - **Rejoin setup used the verify suite's `PLAYTEST_CASE_REFS`.** A provider
@@ -694,7 +701,8 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/hordeforge/7dtd-playtest/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.10.0
 [0.9.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.9.0
 [0.7.2]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...v0.7.2
