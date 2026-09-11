@@ -300,7 +300,7 @@ view. Requires `BotMod` in the dedicated server's `Mods/`.
 
 End-to-end check of the WebAssembly mod host running the sibling zdtd
 parachute module unmodified: the client wears the glider item (sense v4
-`wearing_glider`), lifts itself 60 blocks (client-side `SetPosition`; the
+`wearing_glider`), lifts itself 200 blocks (client-side `SetPosition`; the
 stock server's `teleportplayer` does not move remote-player entities, so
 the fall is client-owned physics), and the mod arms the glide exemption and
 announces through the stock chat broadcast, which the client asserts. The
@@ -312,7 +312,8 @@ the parachute item modlet (items.xml + buffs.xml) on server and client.
 | Case | Status | Tags | Assert |
 |---|---|---|---|
 | `parachute_equip` | live | parachute, equip | Item resolves, is given, and sits in an equipment slot with the `parachute` tag |
-| `parachute_fall_announce` | live | parachute, fall | After the 60-block lift, the client sees the mod's deploy announce while falling |
+| `parachute_fall_announce` | live | parachute, fall | After the 200-block lift, the client sees the mod's deploy announce while falling |
+| `parachute_land_safe` | live | parachute, land | After deploy the player glides down at the sink rate and lands alive with no broken/sprained leg |
 
 ---
 
@@ -360,8 +361,8 @@ lives in dedicated suites: `mp`, `persist`, `soak_long`, `apm` (not in demo).
 | soak_long | 1 | 0 |
 | apm | 1 | 0 |
 | bot | 4 | 0 |
-| parachute | 2 | 0 |
-| **catalog total** | **111** | **0** |
+| parachute | 3 | 0 |
+| **catalog total** | **112** | **0** |
 
 Demo scoreboard on stock dedicated is the acceptance gate for gameplay surface
 (smoke…finale attract path; residual suites separate). Residual promotion gate:

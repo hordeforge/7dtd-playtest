@@ -42,7 +42,6 @@ UNDECLARED_SUITES = {
     "vehicle",
     "power",
     "finale",
-    "parachute",
     "persist_setup",
     "persist",
     "mp",
