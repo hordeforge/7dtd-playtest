@@ -82,7 +82,7 @@ def runner_invokes_recovery(runner: str) -> bool:
     advance = method_body(runner, r"static\s+void\s+AdvanceToNextCase\s*\([^)]*\)")
     return (
         "PlayerSurvivability.TryPressSpawn" in recover
-        and "PlayerSurvivability.Ensure" in recover
+        and "PlayerSurvivability.Ensure" not in recover
         and "PlayerSurvivability.TryPressSpawn" in play_ready
         and "spawn-window" in play_ready
         and "RecoverLivePlayer" in advance
@@ -123,7 +123,12 @@ def main() -> int:
     assert "fly: false" in src or "fly:false" in src.replace(" ", "")
     assert runner_invokes_recovery(runner)
     assert runner_skips_respawn_setalive(runner)
-    assert "PlayerSurvivability.Ensure" in runner
+    recover_body = method_body(
+        runner, r"static\s+void\s+RecoverLivePlayer\s*\([^)]*\)"
+    )
+    assert "PlayerSurvivability.Ensure" not in recover_body
+    assert "toggleGodMode" not in recover_body
+    assert re.search(r"public\s+static\s+bool\s+Ensure\s*\(", src)
     assert "AllowDead" in runner
     assert "NoAutoHeal" in runner or "survivalCase" in runner
 
@@ -161,6 +166,14 @@ def main() -> int:
     )
     assert not runner_invokes_recovery(broken_runner), (
         "gate must fail when the runner drops TryPressSpawn"
+    )
+    god_runner = runner.replace(
+        "PlayerSurvivability.TryPressSpawn(ctx);",
+        "PlayerSurvivability.TryPressSpawn(ctx);\n"
+        "                PlayerSurvivability.Ensure(p, fly: false, out _);",
+    )
+    assert not runner_invokes_recovery(god_runner), (
+        "gate must fail when RecoverLivePlayer sets God Mode"
     )
     respawn_runner = runner.replace(
         "PlayerSurvivability.TryPressSpawn(ctx);",

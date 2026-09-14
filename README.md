@@ -388,6 +388,7 @@ death without a forced spawn. Providers that also want an explicit first
 case can call `PlayerSurvivability.AddSurvivabilityGuard(queue, label)`.
 `PlayerSurvivability.Ensure(player, fly: false, out detail)` sets God Mode
 and writes fly/noclip from the `fly` flag (off unless the caller asked).
+The runner does not call `Ensure`; a stock combat case must still take damage.
 
 `CaseDef.WalkEntity(suite, id, className, spawnOffset, holdSeconds, clipFps,
 speed, ...)` spawns a non-remote `EntityAlive` of `className` beside the

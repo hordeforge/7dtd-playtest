@@ -32,6 +32,10 @@ Release model (inferred practice, now pinned by `make test`):
   HP>0 as live, and `AdvanceToNextCase` moved to `RunCase` after one press.
   LivePlayer now waits until the spawn-selection window is closed, and does
   not invoke `Act` until then.
+- **Runner recovery turned God Mode on for every LivePlayer case.** Combat
+  and `NoAutoHeal` survival claims would then be invulnerable. Spawn
+  recovery restores vitals only; God Mode stays on
+  `PlayerSurvivability.Ensure` / `AddSurvivabilityGuard`.
 
 ### Added
 
