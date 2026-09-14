@@ -287,19 +287,20 @@ namespace ZdtdPlaytest
                     _playerMissingSince = Time.unscaledTime;
                 float missingFor = Time.unscaledTime - _playerMissingSince;
 
-                // Best-effort force respawn after a short settle (not death/survival asserts).
-                if (!deathCase && !survivalCase && missingFor > 1.0f)
+                // Best-effort spawn-window recovery after a short settle
+                // (not death/survival asserts). LivePlayer only: press the
+                // spawn button; do not Respawn/SetAlive around the window.
+                if (!deathCase && !survivalCase && !worldOnlyPersist && missingFor > 1.0f)
                 {
                     var p = _ctx.Player ?? ResolveLocalPlayer(world);
                     if (p != null)
                     {
                         try
                         {
-                            EnsurePlayerHealthy(p);
+                            RecoverLivePlayer(_ctx, p);
                             _ctx.Player = p;
-                            if (!p.IsDead() && p.Health > 0)
+                            if (!p.IsDead() && p.Health > 0 && !PlayerSurvivability.SpawnWindowOpen(p))
                             {
-                                // Healed: clear missing and run case path this tick.
                                 _playerMissingSince = -1f;
                                 playerOk = true;
                             }
@@ -460,16 +461,22 @@ namespace ZdtdPlaytest
                 + (msg.Length > 0 ? ": " + msg : "");
         }
 
-        static void EnsurePlayerHealthy(EntityPlayerLocal p)
+        /// <summary>
+        /// LivePlayer recovery: press the spawn-selection button if that
+        /// window is open, then God Mode with fly/noclip off once the
+        /// player is actually alive. Does not call Respawn/SetAlive.
+        /// </summary>
+        static void RecoverLivePlayer(CaseCtx ctx, EntityPlayerLocal p)
         {
             if (p == null) return;
             try
             {
-                if (p.IsDead() || p.Health <= 0)
-                {
-                    try { p.Respawn(RespawnType.Died); } catch { /* */ }
-                    try { p.SetAlive(); } catch { /* */ }
-                }
+                if (ctx != null)
+                    ctx.Player = p;
+                PlayerSurvivability.TryPressSpawn(ctx);
+                if (p.IsDead() || p.Health <= 0 || PlayerSurvivability.SpawnWindowOpen(p))
+                    return;
+                PlayerSurvivability.Ensure(p, fly: false, out _);
                 try { p.Health = Math.Max(p.Health, p.GetMaxHealth()); } catch { /* */ }
                 try { p.Stamina = Math.Max(p.Stamina, p.GetMaxStamina()); } catch { /* */ }
             }
@@ -582,13 +589,7 @@ namespace ZdtdPlaytest
             }
 
             player = ResolveLocalPlayer(world) ?? player;
-            // Heal between cases, except AllowDead cases: leave HP as-is so the
-            // death screen can observe the kill and respawn drives its own flow
-            // (its act re-establishes life itself).
             var def = _queue[_caseIndex];
-            if (def.Gate != PlayerGate.AllowDead)
-                EnsurePlayerHealthy(player);
-
             _ctx = new CaseCtx
             {
                 Gm = gm,
@@ -598,6 +599,17 @@ namespace ZdtdPlaytest
                 CaseStartUnscaled = Time.unscaledTime,
                 BenchmarkLap = 0,
             };
+            // LivePlayer must not start against a corpse or spawn screen.
+            // AllowDead leaves HP as-is so the death screen can observe the
+            // kill. WorldOnly does not need a living player.
+            if (def.Gate == PlayerGate.LivePlayer)
+            {
+                RecoverLivePlayer(_ctx, player);
+                player = _ctx.Player ?? player;
+                _ctx.Player = player;
+                if (player != null)
+                    _ctx.StartPos = player.GetPosition();
+            }
             // Parse lap from suite name suffix if present (demo@1)
             if (def.Suite != null && def.Suite.Contains("@"))
             {
@@ -642,14 +654,28 @@ namespace ZdtdPlaytest
                 why = "player-null";
                 return false;
             }
-            // Dead players: try heal so rejoin cold start can proceed.
-            if (player.Health <= 0 || player.IsDead())
+            // Corpse or spawn-selection screen: press the real spawn button.
+            // Respawn/SetAlive alone leave the window open.
+            if (player.Health <= 0 || player.IsDead() || PlayerSurvivability.SpawnWindowOpen(player))
             {
-                try { EnsurePlayerHealthy(player); } catch { /* */ }
+                try
+                {
+                    var spawnCtx = _ctx ?? new CaseCtx { Gm = gm, World = world, Player = player };
+                    spawnCtx.Player = player;
+                    spawnCtx.World = world;
+                    spawnCtx.Gm = gm;
+                    PlayerSurvivability.TryPressSpawn(spawnCtx);
+                }
+                catch { /* */ }
             }
             if (player.Health <= 0 || player.IsDead())
             {
                 why = "player-dead-hp=" + player.Health;
+                return false;
+            }
+            if (PlayerSurvivability.SpawnWindowOpen(player))
+            {
+                why = "spawn-window";
                 return false;
             }
 

@@ -139,6 +139,7 @@ GATES := \
 	test_version_surface_units.py \
 	test_scenario_provider_surface.py \
 	test_mining_probe_surface.py \
+	test_player_survivability_surface.py \
 	test_stock_peer_client.py \
 	test_playtest_lock.py \
 	test_dst.py \

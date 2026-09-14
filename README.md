@@ -374,8 +374,20 @@ Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged` /
 `StagedClip`, `CaseDef.RegisterStaged` / `ClearStaged`, `CaseCtx`,
 `IScenarioProvider`, `Helpers` (including `FrameStagedObject`), `Report`
 (including `Report.Barrier`),
-`MiningSpec` / `MiningProbe` / `MiningResult`. The stock `mining_harvest`
+`MiningSpec` / `MiningProbe` / `MiningResult`,
+`PlayerSurvivability` / `AddSurvivabilityGuard` / `TryPressSpawn`. The stock `mining_harvest`
 case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
+
+Never running a LivePlayer case against a corpse or a spawn-selection
+window is the runner's job. It presses
+`XUiC_SpawnSelectionWindow.SpawnButtonPressed` through
+`PlayerSurvivability.TryPressSpawn` (no press when the window is closed)
+and does not use `EntityPlayer.Respawn` / `SetAlive` for that recovery.
+`PlayerGate.AllowDead`, `WorldOnly`, and `CaseDef.NoAutoHeal` still observe
+death without a forced spawn. Providers that also want an explicit first
+case can call `PlayerSurvivability.AddSurvivabilityGuard(queue, label)`.
+`PlayerSurvivability.Ensure(player, fly: false, out detail)` sets God Mode
+and writes fly/noclip from the `fly` flag (off unless the caller asked).
 
 `CaseDef.WalkEntity(suite, id, className, spawnOffset, holdSeconds, clipFps,
 speed, ...)` spawns a non-remote `EntityAlive` of `className` beside the

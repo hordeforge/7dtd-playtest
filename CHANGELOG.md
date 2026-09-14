@@ -22,6 +22,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Added
+
+- Public **PlayerSurvivability** helper (`AddSurvivabilityGuard`,
+  `TryPressSpawn`, `Ensure`). The runner recovers a `PlayerGate.LivePlayer`
+  case through `TryPressSpawn` (`XUiC_SpawnSelectionWindow.SpawnButtonPressed`
+  only while that window is open) instead of `Respawn`/`SetAlive` alone.
+  God Mode writes fly/noclip from the requested `fly` flag (default off).
+  `AllowDead` / `WorldOnly` / `NoAutoHeal` are unchanged.
+
 ## [0.11.0] - 2026-09-11
 
 ### Added
