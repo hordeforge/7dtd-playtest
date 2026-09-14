@@ -482,8 +482,11 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// LivePlayer recovery: press the spawn-selection button if that
-        /// window is open, then God Mode with fly/noclip off once the
-        /// player is actually alive. Does not call Respawn/SetAlive.
+        /// window is open, then restore vitals once the player is actually
+        /// alive. Does not call Respawn/SetAlive, and does not set God Mode
+        /// — that belongs to <see cref="PlayerSurvivability.Ensure"/> via
+        /// <see cref="PlayerSurvivability.AddSurvivabilityGuard"/>, not to
+        /// every catalog case.
         /// </summary>
         static void RecoverLivePlayer(CaseCtx ctx, EntityPlayerLocal p)
         {
@@ -495,7 +498,6 @@ namespace ZdtdPlaytest
                 PlayerSurvivability.TryPressSpawn(ctx);
                 if (p.IsDead() || p.Health <= 0 || PlayerSurvivability.SpawnWindowOpen(p))
                     return;
-                PlayerSurvivability.Ensure(p, fly: false, out _);
                 try { p.Health = Math.Max(p.Health, p.GetMaxHealth()); } catch { /* */ }
                 try { p.Stamina = Math.Max(p.Stamina, p.GetMaxStamina()); } catch { /* */ }
             }
