@@ -22,6 +22,17 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- **Spawn recovery spammed the spawn button.** `TryPressSpawn` had no
+  interval of its own; WaitReady and mid-case recovery call it every
+  `gmUpdate`, so `SpawnButtonPressed` ran every frame and the window never
+  got a frame to act. The 2s interval now lives in `TryPressSpawn`.
+- **A LivePlayer case could start on the spawn screen.** `playerOk` treated
+  HP>0 as live, and `AdvanceToNextCase` moved to `RunCase` after one press.
+  LivePlayer now waits until the spawn-selection window is closed, and does
+  not invoke `Act` until then.
+
 ### Added
 
 - Public **PlayerSurvivability** helper (`AddSurvivabilityGuard`,
