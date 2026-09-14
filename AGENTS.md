@@ -321,7 +321,8 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
   `~/.cache/7dtd-playtest`.
 
 Public API for external providers: `CaseDef.Live`/`Staged`/`Defer`, `Helpers`,
-`Report`, `MiningSpec`/`MiningProbe`/`MiningResult`. A capability that more
+`Report`, `MiningSpec`/`MiningProbe`/`MiningResult`,
+`PlayerSurvivability`/`AddSurvivabilityGuard`/`TryPressSpawn`. A capability that more
 than one consumer needs (real mining, staged frames, the exclusivity lock)
 belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged`. Never hand-roll the
 marker/hold/assert triple, that is what made every screenshot loop grep a
