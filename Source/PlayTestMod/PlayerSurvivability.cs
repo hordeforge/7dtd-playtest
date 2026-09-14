@@ -73,7 +73,8 @@ namespace ZdtdPlaytest
         public static bool Wait(CaseCtx ctx)
         {
             var player = ResolvePlayer(ctx);
-            if (player != null && player.Spawned && !player.IsDead())
+            if (player != null && player.Spawned && !player.IsDead()
+                && !SpawnWindowOpen(player))
             {
                 bool god = Ensure(player, fly: false, out string godDetail);
                 if (ctx != null)
@@ -84,12 +85,12 @@ namespace ZdtdPlaytest
                 return true;
             }
 
-            if (Time.unscaledTime - lastPress >= PressIntervalSeconds)
-                TryPressSpawn(ctx);
+            TryPressSpawn(ctx);
             if (ctx != null)
             {
                 ctx.Detail = "player spawned=" + (player != null && player.Spawned)
-                    + " dead=" + (player != null && player.IsDead()) + pressDetail;
+                    + " dead=" + (player != null && player.IsDead())
+                    + " window=" + SpawnWindowOpen(player) + pressDetail;
             }
             return false;
         }
@@ -107,6 +108,11 @@ namespace ZdtdPlaytest
         /// </summary>
         public static bool TryPressSpawn(CaseCtx ctx)
         {
+            // The window needs a frame to act. Callers (WaitReady, mid-case
+            // recovery) tick every gmUpdate; without this they spam
+            // SpawnButtonPressed and the press never lands.
+            if (Time.unscaledTime - lastPress < PressIntervalSeconds)
+                return false;
             lastPress = Time.unscaledTime;
             try
             {

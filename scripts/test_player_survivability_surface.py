@@ -40,12 +40,31 @@ def method_body(src: str, signature_re: str) -> str:
 
 def try_press_calls_spawn_button(src: str) -> bool:
     body = method_body(src, r"public\s+static\s+bool\s+TryPressSpawn\s*\([^)]*\)")
-    return "SpawnButtonPressed" in body
+    return "window.SpawnButtonPressed" in body
 
 
 def try_press_returns_when_closed(src: str) -> bool:
     body = method_body(src, r"public\s+static\s+bool\s+TryPressSpawn\s*\([^)]*\)")
     return "IsWindowOpen" in body and "return false" in body
+
+
+def try_press_is_throttled(src: str) -> bool:
+    body = method_body(src, r"public\s+static\s+bool\s+TryPressSpawn\s*\([^)]*\)")
+    return "PressIntervalSeconds" in body and "lastPress" in body
+
+
+def wait_rejects_open_window(src: str) -> bool:
+    body = method_body(src, r"public\s+static\s+bool\s+Wait\s*\([^)]*\)")
+    return "SpawnWindowOpen" in body
+
+
+def runner_holds_liveplayer_until_window_closed(runner: str) -> bool:
+    tick = method_body(runner, r"public\s+static\s+void\s+Tick\s*\([^)]*\)")
+    return (
+        "SpawnWindowOpen" in tick
+        and "PlayerGate.LivePlayer" in tick
+        and "CaseStartUnscaled" in tick
+    )
 
 
 def ensure_fly_from_flag(src: str) -> bool:
@@ -97,7 +116,10 @@ def main() -> int:
     assert re.search(r"public\s+static\s+bool\s+Ensure\s*\(", src)
     assert try_press_calls_spawn_button(src)
     assert try_press_returns_when_closed(src)
+    assert try_press_is_throttled(src)
+    assert wait_rejects_open_window(src)
     assert ensure_fly_from_flag(src)
+    assert runner_holds_liveplayer_until_window_closed(runner)
     assert "fly: false" in src or "fly:false" in src.replace(" ", "")
     assert runner_invokes_recovery(runner)
     assert runner_skips_respawn_setalive(runner)
@@ -115,6 +137,11 @@ def main() -> int:
     # Failure path on a private copy: the same predicates must reject a helper
     # that skips the spawn button, a God Mode that leaves fly on, or a runner
     # that still Respawn/SetAlive.
+    press_body = method_body(src, r"public\s+static\s+bool\s+TryPressSpawn\s*\([^)]*\)")
+    unthrottled = src.replace(press_body, press_body.replace("PressIntervalSeconds", "DELETED"))
+    assert not try_press_is_throttled(unthrottled), (
+        "gate must fail when TryPressSpawn has no press interval"
+    )
     broken_press = src.replace("window.SpawnButtonPressed(method)", "return false")
     assert not try_press_calls_spawn_button(broken_press), (
         "gate must fail when TryPressSpawn does not call SpawnButtonPressed"

@@ -273,9 +273,12 @@ namespace ZdtdPlaytest
             // World-only cases only touch World.GetBlock / TE; allow dead or unspawned.
             bool worldOnlyPersist = curDef != null && curDef.Gate == PlayerGate.WorldOnly;
             // IsSpawned() lags after rejoin/heal; Health>0 + entity is enough to run cases.
+            // An open spawn-selection window is not a live player: the avatar
+            // can have HP while the screen still owns input.
             bool live = _ctx.Player != null
                 && !_ctx.Player.IsDead()
-                && _ctx.Player.Health > 0;
+                && _ctx.Player.Health > 0
+                && !PlayerSurvivability.SpawnWindowOpen(_ctx.Player);
             bool playerOk = deathCase
                 ? _ctx.Player != null
                 : worldOnlyPersist
@@ -376,6 +379,22 @@ namespace ZdtdPlaytest
                 {
                     FinishCase(def, "skip", 0f, def.DeferReason ?? "deferred");
                     return;
+                }
+
+                // Do not run a LivePlayer act against a corpse or spawn screen.
+                // Recover and hold the case clock until the player is actually
+                // in the world; otherwise an 8s case burns its timeout on the
+                // window the runner was supposed to clear first.
+                if (def.Gate == PlayerGate.LivePlayer)
+                {
+                    var p = _ctx.Player ?? ResolveLocalPlayer(world);
+                    if (p == null || p.IsDead() || p.Health <= 0
+                        || PlayerSurvivability.SpawnWindowOpen(p))
+                    {
+                        RecoverLivePlayer(_ctx, p);
+                        _ctx.CaseStartUnscaled = Time.unscaledTime;
+                        return;
+                    }
                 }
 
                 try
