@@ -22,6 +22,8 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-20
+
 ### Fixed
 
 - **Spawn recovery spammed the spawn button.** `TryPressSpawn` had no
