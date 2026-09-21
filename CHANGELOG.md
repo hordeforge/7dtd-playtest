@@ -22,6 +22,22 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-21
+
+### Removed
+
+- **Dead C# helpers.** `Helpers.ShowHud`, `Helpers.CloseWindowGroup` and
+  `Helpers.GetWaterValue` had no caller in the catalog, the providers or any
+  external consumer's documented surface; the public window helpers
+  `OpenWindowGroup` / `OpenWindowNames` stay.
+- **Dead host helpers.** `scripts/suite_loader.suite_ids` (callers use
+  `discover_suites()`) and `ReviewIntent.as_dict` (equivalent to
+  `dataclasses.asdict`); the dead `list` / `catalog` alias mapping in
+  `Catalog.ExpandSuites` (the Runner's own list/catalog special-case covers
+  it), and the two-pass streaming form of
+  `playtest_run.read_loadgen_latest_state` collapsed back to
+  `loadgen_latest_state(read_loadgen_events(path))`.
+
 ## [0.12.0] - 2026-09-20
 
 ### Fixed

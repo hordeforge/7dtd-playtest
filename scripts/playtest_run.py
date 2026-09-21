@@ -722,51 +722,8 @@ def parse_loadgen_event_line(line: str) -> dict | None:
 
 
 def read_loadgen_latest_state(path: Path) -> tuple[int | None, dict[tuple[str, str], dict]]:
-    """Stream the final observer snapshot without retaining every event.
-
-    Loadgen emits state snapshots for the complete run. The final observer
-    only needs the newest joined entity and its newest state for each observed
-    key, so loading the full JSONL file made memory scale with run duration.
-    Two sequential disk passes preserve ``loadgen_latest_state`` semantics,
-    including state lines that precede the selected joined record, while
-    retaining O(observed keys) data instead of O(all snapshots).
-    """
-    entity_id: int | None = None
-    try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                event = parse_loadgen_event_line(line)
-                if event is None or event.get("type") != "joined":
-                    continue
-                candidate = event.get("entityId")
-                if (
-                    isinstance(candidate, int)
-                    and not isinstance(candidate, bool)
-                    and candidate > 0
-                ):
-                    entity_id = candidate
-    except OSError:
-        return None, {}
-
-    latest: dict[tuple[str, str], dict] = {}
-    if entity_id is None:
-        return None, latest
-    try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                event = parse_loadgen_event_line(line)
-                if (
-                    event is None
-                    or event.get("type") != "state"
-                    or event.get("entityId") != entity_id
-                ):
-                    continue
-                kind, name = event.get("kind"), event.get("name")
-                if isinstance(kind, str) and isinstance(name, str):
-                    latest[(kind, name)] = event
-    except OSError:
-        return entity_id, {}
-    return entity_id, latest
+    """Whole-file read of the final observer snapshot (see read_loadgen_events)."""
+    return loadgen_latest_state(read_loadgen_events(path))
 
 
 class LoadgenEventReader:

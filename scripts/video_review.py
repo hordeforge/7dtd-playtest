@@ -66,18 +66,6 @@ class ReviewIntent:
     suite: str
     case: str
 
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "purpose": self.purpose,
-            "subject": self.subject,
-            "camera_path": self.camera_path,
-            "desired_qualities": self.desired_qualities,
-            "avoid": list(self.avoid),
-            "questions": list(self.questions),
-            "suite": self.suite,
-            "case": self.case,
-        }
-
 
 def _string_field(data: dict[str, object], key: str, origin: str) -> str:
     value = data.get(key)

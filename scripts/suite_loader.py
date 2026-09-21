@@ -302,10 +302,6 @@ def discover_suites(suites_dir: Path | None = None) -> dict[str, SuiteDoc]:
     return found
 
 
-def suite_ids(suites_dir: Path | None = None) -> tuple[str, ...]:
-    return tuple(sorted(discover_suites(suites_dir).keys()))
-
-
 def load_suite_by_id(suite_id: str, suites_dir: Path | None = None) -> SuiteDoc | None:
     """Return the declarative suite for suite_id, or None if not declared."""
     return discover_suites(suites_dir).get(suite_id.strip())

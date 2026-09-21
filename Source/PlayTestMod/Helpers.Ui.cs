@@ -70,37 +70,6 @@ namespace ZdtdPlaytest
 
 
         /// <summary>
-        /// Shows or hides the whole in-game HUD.
-        ///
-        /// <para>For a fixture whose frames are the deliverable. Anything a
-        /// person is meant to judge (a worn garment, a placed block, a
-        /// detonation) is competing with the toolbelt, the compass, the stat
-        /// bars and the tutorial callout, and none of those are the subject.
-        /// The game already has one switch for all of it, and this is the same
-        /// call <c>GameManager</c> makes during startup.</para>
-        ///
-        /// <para>Best effort and deliberately quiet. A fixture that cannot hide
-        /// the HUD should still stage its scene: a photograph with a compass in
-        /// the corner is worth having, and an exception thrown while tidying up
-        /// the frame is not.</para>
-        /// </summary>
-        public static bool ShowHud(bool visible)
-        {
-            try
-            {
-                var manager = GameManager.Instance;
-                if (manager == null || manager.nguiWindowManager == null) return false;
-                manager.nguiWindowManager.Show(EnumNGUIWindow.InGameHUD, visible);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-
-        /// <summary>
         /// Opens a game UI window group and reports whether it really ended up
         /// open, not whether the call was accepted.
         ///
@@ -144,26 +113,6 @@ namespace ZdtdPlaytest
                 // and a group that declines to draw are the same result.
                 bool known = wm.nameToWindowMap.ContainsKey(group);
                 wm.Open(group, modal);
-                return known;
-            }
-            catch { return false; }
-        }
-
-
-        /// <summary>
-        /// Closes a window or group by name. Returns whether the name is known,
-        /// on the same reasoning as <see cref="OpenWindowGroup"/>: the close is
-        /// queued, so an immediate <c>IsWindowOpen</c> says nothing.
-        /// </summary>
-        public static bool CloseWindowGroup(EntityPlayerLocal player, string group)
-        {
-            if (string.IsNullOrEmpty(group)) return false;
-            try
-            {
-                var wm = UiFor(player)?.windowManager;
-                if (wm == null || wm.nameToWindowMap == null) return false;
-                bool known = wm.nameToWindowMap.ContainsKey(group);
-                wm.Close(group);
                 return known;
             }
             catch { return false; }

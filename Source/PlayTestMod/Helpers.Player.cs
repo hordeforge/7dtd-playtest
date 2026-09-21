@@ -110,17 +110,6 @@ namespace ZdtdPlaytest
         }
 
 
-        public static float GetWaterValue(EntityPlayerLocal p)
-        {
-            try
-            {
-                if (p?.Stats?.Water != null) return p.Stats.Water.Value;
-            }
-            catch { /* */ }
-            return -1f;
-        }
-
-
         /// <summary>Set magazine Meta on currently held item (ranged fixtures).</summary>
         public static bool SetHeldMeta(EntityPlayerLocal p, int meta)
         {

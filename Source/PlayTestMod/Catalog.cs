@@ -24,9 +24,6 @@ namespace ZdtdPlaytest
                 if (s.Length == 0) continue;
                 switch (s)
                 {
-                    case "list":
-                    case "catalog":
-                        return new[] { "catalog" };
                     case "demo":
                     case "demo_mode":
                         // Attract path: fixtures → vehicle/power → death finale last.
