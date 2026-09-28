@@ -417,7 +417,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the twenty-four offline gate files on
+`make test` runs lint + typecheck plus the twenty-five offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -556,6 +556,13 @@ the run order that both `make test` and `make coverage` expand):
     create_system 3, with `SOURCE_DATE_EPOCH` honored and the zip epoch as
     the fallback. Two runs with different source mtimes and timezones hash
     the same.
+22. coverage-badge surface (`scripts/test_coverage_badge.py`): the number CI
+    publishes into the README is only as honest as its renderer. The gate
+    drives the shipped script: each colour band's inclusive lower bound, the
+    rounding of the measured total, the `0` / `1` / `2` exit codes its own
+    usage line promises, and the `.coverage.json` scratch, which must be gone
+    after a read that failed as well as after one that succeeded. Only the one
+    thing a test cannot have, a measured `.coverage` file, is substituted.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

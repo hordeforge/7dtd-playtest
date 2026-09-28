@@ -203,7 +203,8 @@ GATES := \
 	test_mod_package.py \
 	test_windows_path_surface.py \
 	test_gate_list.py \
-	test_dep_sbom.py
+	test_dep_sbom.py \
+	test_coverage_badge.py
 
 test: lint typecheck
 	@for gate in $(GATES); do \

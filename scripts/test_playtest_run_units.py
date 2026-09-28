@@ -996,6 +996,75 @@ def test_mixed_unrelated_suites_are_undeclared_comma_lists() -> None:
     print("PASS mixed_unrelated_suites undeclared comma-list is mixing")
 
 
+def test_suite_flag_given_reads_the_raw_argv() -> None:
+    """Only an explicit --suite counts, and --suite-file is a different flag.
+
+    argparse cannot tell an omitted flag from one given the default, so
+    main() reads the raw argv instead. Leaving the default in place made a
+    mod repo's own suite load its world and mods while the client ran demo,
+    and dropped PLAYTEST_CASE_REFS, so every catalog case of every demo
+    suite ran unfiltered.
+    """
+    given = playtest_run.suite_flag_given
+    assert given(["--suite", "demo"]) is True
+    assert given(["--suite=demo"]) is True
+    assert given(["--provision", "attach", "--suite", "smoke"]) is True
+    # --suite-file shares the --suite prefix; reading it as the suite flag
+    # would discard the suite id the file names.
+    assert given([]) is False
+    assert given(["--suite-file", "suites/smoke.json"]) is False
+    assert given(["--suite-file=suites/smoke.json"]) is False
+    assert given(["--no-server", "--readonly"]) is False
+    with mock.patch.object(sys, "argv", ["playtest_run.py", "--suite=core"]):
+        assert given(None) is True
+    with mock.patch.object(sys, "argv", ["playtest_run.py", "--suite-file", "x.json"]):
+        assert given(None) is False
+    print("PASS suite_flag_given sees an explicit --suite and nothing else")
+
+
+def test_suite_file_id_applies_only_without_an_explicit_suite() -> None:
+    """main(): --suite-file names the armed suite id unless --suite was given.
+
+    Driven through the real entry point, not the helper, so the branch in
+    main() is what is under test.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-suiteflag-") as td:
+        missing = str(Path(td) / "not-a-suite.json")
+        # No --suite: the file decides the id, and one that will not load is
+        # named rather than leaving the default 'demo' silently in place.
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            try:
+                playtest_run.main(["--suite-file", missing])
+            except SystemExit as ex:
+                assert ex.code == 2, f"expected the harness exit code, got {ex.code!r}"
+            else:
+                raise AssertionError("an unloadable --suite-file was accepted")
+        assert "--suite-file invalid" in err.getvalue(), err.getvalue()
+
+        # --suite given: the file is never read, so the caller's suite is
+        # what the next gate judges. The mixed look+block list is that gate,
+        # which is how the two invocations are told apart.
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            try:
+                playtest_run.main(
+                    ["--suite", "mod_look,mod_block_model", "--suite-file", missing]
+                )
+            except SystemExit as ex:
+                assert ex.code == 2, f"expected the harness exit code, got {ex.code!r}"
+            else:
+                raise AssertionError("a mixed look+block suite list was accepted")
+        message = err.getvalue()
+        assert "suite-file invalid" not in message, message
+        assert "prefab-look" in message, message
+    print("PASS suite_file_id_applies_only_without_an_explicit_suite")
+
+
 def test_one_concern_contract_is_documented() -> None:
     """The mix rule is one concern per run, not only look-versus-block."""
     root = Path(__file__).resolve().parents[1]
@@ -2890,6 +2959,11 @@ def main() -> int:
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("mixed_visual_suites", test_mixed_visual_suites_are_look_plus_block),
         ("mixed_unrelated_suites", test_mixed_unrelated_suites_are_undeclared_comma_lists),
+        ("suite_flag_given", test_suite_flag_given_reads_the_raw_argv),
+        (
+            "suite_file_id_without_explicit_suite",
+            test_suite_file_id_applies_only_without_an_explicit_suite,
+        ),
         ("one_concern_contract_docs", test_one_concern_contract_is_documented),
         ("fixture_gate_catalog_surface", test_fixture_gate_covers_every_barrier_emitting_suite),
         ("fixture_gate_alias_surface", test_fixture_gate_covers_every_expand_suites_alias),

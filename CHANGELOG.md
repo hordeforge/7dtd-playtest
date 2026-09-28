@@ -129,6 +129,16 @@ Release model (inferred practice, now pinned by `make test`):
   `test_quarantine_restore.py` and `test_playtest_compare.py`; README
   "State, backups, and recovery" is the runbook.
 
+- **`scripts/test_coverage_badge.py`: the coverage badge is gated.**
+  `scripts/coverage_badge.py` was the one shipped `scripts/` module no offline
+  gate read, so the number CI publishes into the README was unverified. The
+  gate drives the shipped script: each colour band's inclusive lower bound,
+  the rounding of the measured total, the `0` / `1` / `2` exit codes its own
+  usage line promises, and the `.coverage.json` scratch, which must be gone
+  after a read that failed as well as after one that succeeded. Only the
+  measured report is substituted, and the gate is registered in the Makefile
+  `GATES` list, so it runs under `make test` and `make check`.
+
 - **`make package` builds the release archive.** The release workflow told a
   maintainer to run a target the Makefile never had, so the mod zip had no
   command to produce it. The target builds the mod, then writes
