@@ -30,6 +30,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -595,6 +596,84 @@ def test_main_finally_reaps_mute_helpers() -> None:
     ]
     assert calls, "main()'s finally must call reap_finished_helpers()"
     print("PASS main_finally_reap_helpers teardown reaps detached helpers")
+
+
+def test_managed_run_never_kills_a_client_by_pattern() -> None:
+    """A managed run's client is stopped by instance name, never by pattern.
+
+    GAME_PROC_PATTERNS matches a sandbox client's Proton command line exactly
+    as it matches the operator's Steam client, so a pattern sweep on the managed
+    path reaches every *other* sandbox run's client on the machine. The launch
+    clean and the teardown sweep already route through the shared rule; the
+    rejoin paths must not answer it themselves.
+    """
+    sandbox = playtest_targets.TargetPlan(
+        provision="managed",
+        backend="stock",
+        sandbox_server="srv-playtest",
+        sandbox_client="client-playtest",
+    )
+    shared = playtest_targets.TargetPlan(provision="managed", backend="zdtd")
+
+    assert playtest_run.game_sweep_patterns(sandbox) == [], (
+        "a managed run has no client pattern sweep; its client is sb stop's"
+    )
+    assert playtest_run.game_sweep_patterns(shared) == list(
+        playtest_run.GAME_PROC_PATTERNS
+    ), "a shared-client run owns the only client there is"
+    assert playtest_run.game_sweep_patterns(None) == list(
+        playtest_run.GAME_PROC_PATTERNS
+    ), "an unresolved plan keeps the shared-client behaviour"
+
+    swept: list[list[str]] = []
+    stopped: list[str | None] = []
+    proc_stopped: list[object] = []
+    # stop_proc is mocked, so the handle only has to be an object of the type
+    # the parameter declares.
+    proc_a = cast("subprocess.Popen[bytes]", object())
+    proc_b = cast("subprocess.Popen[bytes]", object())
+    with (
+        mock.patch.object(
+            playtest_run, "pkill_patterns", side_effect=lambda pats, sig: swept.append(list(pats))
+        ),
+        mock.patch.object(
+            playtest_targets,
+            "stop_sandbox_client",
+            side_effect=lambda plan: stopped.append(plan.sandbox_client),
+        ),
+        mock.patch.object(playtest_run, "stop_proc", side_effect=proc_stopped.append),
+    ):
+        playtest_run.stop_run_client(sandbox, proc_a)
+        playtest_run.stop_run_client(shared, proc_b)
+
+    assert swept == [list(playtest_run.GAME_PROC_PATTERNS)], (
+        f"only the shared-client plan may sweep by pattern, got {swept!r}"
+    )
+    assert stopped == ["client-playtest"], (
+        f"the managed run stops its own instance by name, got {stopped!r}"
+    )
+    assert proc_stopped == [proc_a, proc_b], (
+        f"both topologies stop the handle they launched, got {proc_stopped!r}"
+    )
+
+    # No call site may hand GAME_PROC_PATTERNS to pkill_patterns directly: the
+    # rule is answered in one place, so a new kill site inherits it.
+    tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
+    direct = [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "pkill_patterns"
+        and any(
+            isinstance(a, ast.Name) and a.id == "GAME_PROC_PATTERNS" for a in n.args
+        )
+    ]
+    assert direct == [], (
+        "pkill_patterns(GAME_PROC_PATTERNS, ...) must go through "
+        f"game_sweep_patterns (offending lines {direct})"
+    )
+    print("PASS managed_run_never_kills_a_client_by_pattern")
 
 
 def test_snapshot_previous_log_copies_before_truncate() -> None:
@@ -2525,6 +2604,17 @@ def test_telnet_admin_pinned_to_loopback() -> None:
             f"{suite.name} declares TelnetRemoteAllowedIPs; the admin-plane reachability "
             "is the orchestrator's, not a suite's to widen"
         )
+    # The report records the config `sb render-config` was actually given, so
+    # the snapshot has to be taken after the forced keys above, not before: a
+    # suite block plus defaults is not the server a re-run reproduces when the
+    # admin plane is missing from the record.
+    snapshot = src.find("args._applied_server_config = {")
+    for key in ("TelnetEnabled", "TelnetRemoteAllowedIPs", "TelnetPassword"):
+        at = src.find(f'config["{key}"]')
+        assert 0 <= at < snapshot, (
+            f"{key} is forced after the applied-config snapshot, so the run "
+            "report omits a key the server really ran with"
+        )
     print("PASS telnet_admin_pinned_to_loopback")
 
 
@@ -2631,6 +2721,10 @@ def main() -> int:
         ),
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
         ("main_finally_reap_helpers", test_main_finally_reaps_mute_helpers),
+        (
+            "managed_client_never_killed_by_pattern",
+            test_managed_run_never_kills_a_client_by_pattern,
+        ),
         ("wait_file_contains", test_wait_file_contains_incremental),
         ("clock_seam", test_run_time_reads_go_through_the_clock_seam),
         ("client_install_discovery", test_client_install_is_discovered_from_steam_libraries),

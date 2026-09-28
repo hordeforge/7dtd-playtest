@@ -577,6 +577,41 @@ def clean_processes(*, kill_wine: bool = False) -> None:
     pause(2)
 
 
+def game_sweep_patterns(plan: playtest_targets.TargetPlan | None) -> list[str]:
+    """Game-process patterns this run may kill by command-line match.
+
+    A shared-client or zdtd run owns the only client on the machine, so a
+    pattern sweep finds nothing of anyone else's. A managed run's client is a
+    Safehouse instance whose Proton command line matches GAME_PROC_PATTERNS
+    exactly as the operator's Steam client does, so the same sweep reaches
+    every other sandbox run's client on this machine, which is why the managed
+    path stops its own instance by name (`sb stop`) and never by pattern
+    (AGENTS.md, rule 12). Every kill site asks here, so the rejoin paths
+    cannot answer differently from the launch clean and the teardown sweep.
+    """
+    if plan is not None and plan.is_sandbox:
+        return []
+    return list(GAME_PROC_PATTERNS)
+
+
+def stop_run_client(
+    plan: playtest_targets.TargetPlan | None, proc: subprocess.Popen | None
+) -> None:
+    """Stop this run's client on any topology.
+
+    The two stop paths are not interchangeable: a shared-client or zdtd run
+    sweeps by command line (it owns the only client there is), while a managed
+    run's client is stopped through its instance, by name.
+    """
+    if proc is not None:
+        stop_proc(proc)
+    patterns = game_sweep_patterns(plan)
+    if patterns:
+        pkill_patterns(patterns, sig="-9")
+    elif plan is not None and plan.is_sandbox:
+        playtest_targets.stop_sandbox_client(plan)
+
+
 def truncate_file(path: Path, what: str) -> bool:
     """Empty an append-only log so incremental readers restart from zero.
 
@@ -3416,17 +3451,6 @@ def main(argv: list[str] | None = None) -> int:
                 # none, so they never silently override a suite's own choice.
                 config.setdefault("GameWorld", args.world_name)
                 config.setdefault("GameName", args.game_name)
-                # What the world actually was, recorded for the report: `sb`
-                # rebuilds the instance config from the base template plus
-                # exactly these declarations, so this list reproduces the run.
-                # The per-run telnet secret is the one declaration that cannot
-                # be reproduced, so it is dropped; the loader already refuses a
-                # suite that declares it.
-                args._applied_server_config = {
-                    k: v
-                    for k, v in config.items()
-                    if k.lower() != "telnetpassword"
-                }
                 # The orchestrator's own telnet surface is not the suite's to
                 # declare: it must match what TelnetAdmin authenticates with.
                 # TelnetRemoteAllowedIPs pins the admin plane to loopback, the
@@ -3437,6 +3461,15 @@ def main(argv: list[str] | None = None) -> int:
                 config["TelnetEnabled"] = "true"
                 config["TelnetRemoteAllowedIPs"] = "127.0.0.1"
                 config["TelnetPassword"] = telnet_password
+                # What the world actually was, recorded for the report: `sb`
+                # rebuilds the instance config from the base template plus
+                # exactly these declarations, so this list reproduces the run.
+                # Taken after the forced keys above, which are declarations like
+                # any other, and with the per-run password dropped: the report
+                # leaves the machine.
+                args._applied_server_config = {
+                    k: v for k, v in config.items() if k != "TelnetPassword"
+                }
                 mods = (
                     suite_loader.resolve_mods(
                         suite_doc, workspace=WORKSPACE, repo=ROOT, side="server"
@@ -3777,12 +3810,11 @@ def main(argv: list[str] | None = None) -> int:
                     f"fail={setup_fail} barrier={setup_barrier_seen}; "
                     "aborting rejoin verify"
                 )
-                stop_proc(client_proc)
+                stop_run_client(args._target_plan, client_proc)
                 client_proc = None
                 stop_proc(server_proc)
                 server_proc = None
                 playtest_targets.stop_sandbox_server(args._target_plan)
-                pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
                 summary = {
                     "pass": setup_pass,
                     "fail": max(setup_fail, 1),
@@ -3838,15 +3870,13 @@ def main(argv: list[str] | None = None) -> int:
                 finally:
                     tn.close()
             pause(4)
-            stop_proc(client_proc)
+            stop_run_client(args._target_plan, client_proc)
             client_proc = None
             stop_proc(server_proc)
             server_proc = None
             # Stop the dedicated by instance, never by pattern: the rejoin
             # restart must not reach another sandbox instance's server.
             playtest_targets.stop_sandbox_server(args._target_plan)
-            pause(3)
-            pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
             pause(5)
             # Rejoin verifies persistence: restart on the save the setup
             # generation just wrote, so no wipe here.
@@ -4519,12 +4549,15 @@ def main(argv: list[str] | None = None) -> int:
             # their poll window, reparented to init once this process ends.
             reap_finished_helpers()
             # Soft clean after: leave Steam alone. A managed run has already
-            # stopped its own instances by name above; the pattern sweep is for
-            # the shared-client and zdtd paths only, and would otherwise reach
-            # a concurrent sandbox run's client.
-            sweep_patterns = [r"zig-out/bin/zdtd", r"7dtd-loadgen"]
-            if teardown_plan is None or not teardown_plan.is_sandbox:
-                sweep_patterns = [*GAME_PROC_PATTERNS, *sweep_patterns]
+            # stopped its own instances by name above; the game-pattern sweep
+            # is for the shared-client and zdtd paths only (see
+            # game_sweep_patterns), and would otherwise reach a concurrent
+            # sandbox run's client.
+            sweep_patterns = [
+                *game_sweep_patterns(teardown_plan),
+                r"zig-out/bin/zdtd",
+                r"7dtd-loadgen",
+            ]
             if teardown_plan is not None and teardown_plan.readonly:
                 # A readonly host is one this run must never write to, and a
                 # SIGKILL sweep is a write. Nothing here started any of these

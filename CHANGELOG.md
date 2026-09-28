@@ -301,6 +301,21 @@ Migration, by symbol:
   stripped C0 and DEL but not U+0080-U+009F, whose U+009B is the 8-bit CSI, so
   a log line carrying one could still repaint the operator's screen.
   `video_review.terminal_safe` already covered the range; the two now agree.
+- **A rejoin run killed a client by pattern, on the managed path too.** The
+  launch clean and the teardown sweep stop a managed run's own Safehouse client
+  by instance name, because `GAME_PROC_PATTERNS` matches a sandbox client's
+  Proton command line exactly as it matches the operator's Steam client and
+  would take down a concurrent sandbox run's client with it. The two rejoin
+  paths (the setup-incomplete abort and the restart that verifies persistence)
+  answered that rule themselves and swept by pattern, so the invariant held
+  everywhere except there. `game_sweep_patterns(plan)` is now the single answer
+  and every kill site, `stop_run_client` included, goes through it.
+- **The run report's server config omitted the keys the harness forced.** The
+  `server_config` snapshot was taken before `TelnetEnabled`,
+  `TelnetRemoteAllowedIPs` and `TelnetPassword` were applied, so the recorded
+  "what the world actually was" list could not reproduce the run it described.
+  The snapshot now follows the forced keys and still drops the per-run
+  password, which must not leave the machine.
 - **The vision-review intent had no size bound.** Everything in an intent goes
   into the review prompt verbatim, so a pasted log in `purpose` or a thousand
   `questions` was an unbounded provider request. `parse_intent` now refuses an
