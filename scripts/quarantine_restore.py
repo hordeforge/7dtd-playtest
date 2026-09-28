@@ -72,12 +72,50 @@ def manifest_path(entry: Path) -> Path:
     return entry / MANIFEST_NAME
 
 
+def fsync_file(path: Path) -> None:
+    """Flush a file's bytes to disk, so a caller may report it preserved.
+
+    `copy2` returns once the kernel has the data, not once the device does.
+    A power loss between the copy and the caller's next destructive step
+    (truncating the source log) leaves the source gone and the copy empty.
+    """
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def fsync_dir(path: Path) -> None:
+    """Flush a directory's entries, so a rename into it survives power loss.
+
+    A file's own fsync covers its bytes; the name it is reachable under is
+    held by the parent directory, and a move the parent never acknowledged
+    can be lost while the manifest that names it survives. Filesystems that
+    refuse O_RDONLY on a directory (some network mounts) are not a data
+    loss, so the failure is swallowed.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def record(entry: Path, src: Path, dest: Path) -> None:
     """Append one `{src, dest}` pair to the entry manifest, durably.
 
-    The line is fsynced before returning: a file already moved aside with no
-    manifest line is unrecoverable evidence, because the operator cannot tell
-    which world or log it came from.
+    The line and the entry's directory entry are fsynced before returning: a
+    file already moved aside with no manifest line is unrecoverable evidence,
+    because the operator cannot tell which world or log it came from. Callers
+    record *before* the move or copy, since a recorded pair whose destination
+    is absent costs a "nothing to restore" line while an unrecorded move
+    costs the only copy of a world.
     """
     line = json.dumps({_SRC: str(src), _DEST: str(dest)}) + "\n"
     path = manifest_path(entry)
@@ -85,6 +123,7 @@ def record(entry: Path, src: Path, dest: Path) -> None:
         fh.write(line)
         fh.flush()
         os.fsync(fh.fileno())
+    fsync_dir(entry)
 
 
 def _read_manifest(entry: Path) -> tuple[list[tuple[Path, Path]], int]:
@@ -213,7 +252,9 @@ def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
         try:
             src.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(dest, tmp)
+            fsync_file(tmp)
             os.replace(tmp, src)
+            fsync_dir(src.parent)
         except OSError as ex:
             # A half-written copy2 or a refused replace leaves the temp file
             # sitting in the world directory, where the next sweep can mistake
@@ -230,6 +271,7 @@ def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
         if move:
             with contextlib.suppress(OSError):
                 dest.unlink()
+                fsync_dir(dest.parent)
     print(f"restored={restored} blocked={blocked}")
     return 0 if restored and not blocked else 1
 

@@ -662,9 +662,9 @@ Durable state this system owns, and what an incident costs:
 | State | Location | Survives instance loss? |
 |---|---|---|
 | Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
-| Run artifacts: `report-*.json`, `junit-*.xml`, `server-orch.log` | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run, and a prune that cannot delete warns | No |
+| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run, and a prune that cannot delete warns | No |
 | Captured evidence: clip, contact sheet, frames, audio, `client.log`, and the deadeye review envelope | `.local/capture/<suite>-<stamp>/` (gitignored; `--out DIR` overrides; `capture_audio.sh` uses `<suite>-audio-<stamp>`) | No |
-| Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/`, each with a `restore.jsonl` naming where every file came from | No |
+| Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/`, each with a `restore.jsonl` naming where every file came from, written before the file moves | No |
 | Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
 
 Run artifacts carry what a remote LAN player on the test server wrote into
@@ -701,8 +701,13 @@ Recovery facts:
   resets the instance's userdata outright, so the `quarantine_restore.py`
   commands below only cover a zdtd world and a previous client log.
 
-  Every move appends `{src, dest}` to the entry's `restore.jsonl`, so the
-  copy-back does not depend on remembering which `--world` produced it:
+  Every move appends `{src, dest}` to the entry's `restore.jsonl` **before**
+  the file leaves its path, and the line is fsynced together with the entry
+  directory, so a crash mid-move still leaves a restorable entry. A manifest
+  that cannot be written blocks the move (the run refuses to start against a
+  world it could not put back) and the previous client log is only truncated
+  once its preserved copy is on disk, so the copy-back does not depend on
+  remembering which `--world` produced it:
 
   ```bash
   python3 scripts/quarantine_restore.py list

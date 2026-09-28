@@ -15,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -244,6 +245,122 @@ def test_a_failed_restore_leaves_no_temp_copy_in_the_world_directory() -> None:
         print("PASS a failed restore leaves no temp copy in the world directory")
 
 
+def test_move_is_recorded_before_the_bytes_leave_their_path() -> None:
+    """The manifest line lands before the rename, not after it.
+
+    Order is the whole point: a recorded pair whose destination never
+    arrived costs one "nothing to restore" line on the copy-back, while a
+    move the manifest never heard about costs the only copy of a world.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "quarantine"
+        world = root / "world"
+        world.mkdir()
+        (world / "players.zsv").write_text("players", encoding="utf-8")
+
+        seen: list[tuple[bool, list[str]]] = []
+        real_move = shutil.move
+
+        def spy(src: str, dst: str) -> str:
+            entry = qr.entries(qroot)[0]
+            seen.append((
+                Path(dst).is_file(),
+                [src_path.name for src_path, _ in qr.read_manifest(entry)],
+            ))
+            return real_move(src, dst)
+
+        with mock.patch("playtest_run.shutil.move", side_effect=spy):
+            playtest_run.fresh_zdtd_world(world, qroot)
+
+        assert seen == [(False, ["players.zsv"])], (
+            f"at move time the pair must be recorded and the bytes not yet moved, got {seen}"
+        )
+        assert (world / "players.zsv").is_file() is False
+        print("PASS the move is recorded before it happens")
+
+
+def test_unrecordable_move_leaves_the_world_in_place() -> None:
+    """No manifest line means no move: the data stays and the run refuses."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "quarantine"
+        world = root / "world"
+        world.mkdir()
+        (world / "players.zsv").write_text("players", encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), mock.patch.object(
+            qr, "record", side_effect=OSError("manifest unwritable")
+        ):
+            try:
+                playtest_run.fresh_zdtd_world(world, qroot)
+                raised = None
+            except playtest_run.FreshSaveError as ex:
+                raised = ex
+
+        assert raised is not None, "a run must refuse rather than lose the world"
+        assert (world / "players.zsv").is_file(), "the world must be left untouched"
+        assert (world / "players.zsv").read_text(encoding="utf-8") == "players"
+        assert "restore path" in stderr.getvalue(), (
+            f"the operator must be told why, got: {stderr.getvalue()!r}"
+        )
+        print("PASS an unrecordable move leaves the world in place")
+
+
+def test_the_log_is_kept_when_its_preserved_copy_is_unrecordable() -> None:
+    """snapshot_previous_log reports failure so the caller skips truncation."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "quarantine"
+        log = root / "client.log"
+        log.write_text("previous run", encoding="utf-8")
+
+        with contextlib.redirect_stderr(io.StringIO()), mock.patch.object(
+            qr, "record", side_effect=OSError("manifest unwritable")
+        ):
+            assert playtest_run.snapshot_previous_log(log, qroot, "client-log") is False, (
+                "an unrecordable preserved copy must not license truncation"
+            )
+        assert log.read_text(encoding="utf-8") == "previous run"
+        assert not list(qroot.glob("*/client.log")), "nothing may be copied unrecorded"
+
+        assert playtest_run.snapshot_previous_log(log, qroot, "client-log") is True
+        log.write_text("this run", encoding="utf-8")  # the caller's truncation
+        entry = qr.entries(qroot)[-1]  # the failed attempt left an empty entry
+        assert qr.main([
+            "restore", entry.name, "--quarantine", str(qroot), "--apply", "--force",
+        ]) == 0
+        assert log.read_text(encoding="utf-8") == "previous run"
+        print("PASS the client log is preserved before it may be truncated")
+
+
+def test_prune_reports_an_entry_it_could_not_delete() -> None:
+    """A half-deleted entry must not read as a lost world on the next restore."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        qroot = Path(td) / "q"
+        old = qroot / "20200101T000000Z-zdtd-world--stuck"
+        old.mkdir(parents=True)
+        (old / "state").mkdir()
+        kept = old / "state" / "players.zsv"
+        kept.write_text("players", encoding="utf-8")
+        qr.record(old, Path("/worlds/stuck/players.zsv"), kept)
+        (qroot / "20260101T000000Z-client-log").mkdir()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), mock.patch(
+            "playtest_run.shutil.rmtree", side_effect=OSError("device busy")
+        ):
+            playtest_run.prune_quarantine(qroot, keep=1)
+
+        assert old.is_dir(), "a failed prune must not look like a successful one"
+        assert kept.is_file(), "the only copy must survive a failed prune"
+        assert "could not prune 20200101T000000Z-zdtd-world--stuck" in stderr.getvalue(), (
+            f"the failure must be reported, got: {stderr.getvalue()!r}"
+        )
+        print("PASS a prune that cannot delete says so")
+
+
 def test_entry_lookup_accepts_a_timestamp_prefix() -> None:
     with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
         qroot = Path(td) / "q"
@@ -302,6 +419,22 @@ def main() -> int:
         (
             "a_failed_restore_leaves_no_temp_copy_in_the_world_directory",
             test_a_failed_restore_leaves_no_temp_copy_in_the_world_directory,
+        ),
+        (
+            "move_is_recorded_before_the_bytes_leave_their_path",
+            test_move_is_recorded_before_the_bytes_leave_their_path,
+        ),
+        (
+            "unrecordable_move_leaves_the_world_in_place",
+            test_unrecordable_move_leaves_the_world_in_place,
+        ),
+        (
+            "the_log_is_kept_when_its_preserved_copy_is_unrecordable",
+            test_the_log_is_kept_when_its_preserved_copy_is_unrecordable,
+        ),
+        (
+            "prune_reports_an_entry_it_could_not_delete",
+            test_prune_reports_an_entry_it_could_not_delete,
         ),
         (
             "entry_lookup_accepts_a_timestamp_prefix",

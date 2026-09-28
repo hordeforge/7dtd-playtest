@@ -1457,6 +1457,9 @@ def write_text_atomic(path: Path, text: str) -> None:
     a sibling temp file, flush it to disk, then rename over the target: rename
     is atomic within a directory, so a reader sees either the old payload or
     the new one, and a failure before the rename leaves the old one intact.
+    The directory entry is flushed after the rename as well, since the name
+    the report is reachable under lives in the parent directory and a power
+    loss that keeps neither generation loses the run's only verdict.
 
     The payload is this run's evidence and can carry the operator's home
     directory, world names and the server's APM dump, so it is created 0600
@@ -1476,6 +1479,7 @@ def write_text_atomic(path: Path, text: str) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
+        quarantine_restore.fsync_dir(path.parent)
     finally:
         with contextlib.suppress(OSError):
             tmp.unlink()
@@ -2085,7 +2089,14 @@ def prune_quarantine(
                     f"quarantine: pruning {old.name} past the newest "
                     f"{keep} entries; it held the only copy of {names}{more}"
                 )
-            shutil.rmtree(old, ignore_errors=True)
+            try:
+                shutil.rmtree(old)
+            except OSError as ex:
+                # ignore_errors would leave a half-deleted entry behind: its
+                # manifest keeps naming files that are gone, so `restore`
+                # reports them MISSING as if the world had been lost rather
+                # than as the prune that dropped it.
+                warn(f"quarantine: could not prune {old.name}: {ex}")
         else:
             with contextlib.suppress(OSError):
                 old.unlink()
@@ -2119,25 +2130,32 @@ def _quarantine_entry(qroot: Path, label: str) -> Path | None:
 def _quarantine_move(src: Path, entry: Path, rel: str) -> bool:
     """Move src to entry/<rel>/<name>; False leaves src untouched in place.
 
-    The pair is appended to the entry manifest so `quarantine_restore.py` can
-    put the file back without the operator remembering which `--world` (or
-    which log) produced the entry.
+    The pair goes into the entry manifest *before* the move, so a crash
+    between the two still leaves a restorable entry: a recorded pair whose
+    destination never arrived costs one "nothing to restore" line on the
+    copy-back, while a move the manifest never heard about costs the only
+    copy of a world. A manifest that cannot be written therefore blocks the
+    move rather than warning after the fact.
     """
     dest_root = entry / rel
     dest = dest_root / src.name
+    try:
+        quarantine_restore.record(entry, src, dest)
+    except OSError as ex:
+        warn(f"quarantine: cannot record a restore path for {src} ({ex}); "
+             "leaving it in place")
+        return False
     try:
         dest_root.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dest))
     except OSError as ex:
         warn(f"quarantine: could not move {src} aside: {ex}")
         return False
-    try:
-        quarantine_restore.record(entry, src, dest)
-    except OSError as ex:
-        # The bytes are in quarantine and the entry listing still shows the
-        # file; only the recorded source path is lost, so this is a warning,
-        # not a reason to fail a run that already preserved the data.
-        warn(f"quarantine: could not record restore path for {src}: {ex}")
+    # The manifest names the destination, so both ends of the rename have to
+    # survive a power loss together or the entry points at a file that is
+    # not there.
+    quarantine_restore.fsync_dir(dest_root)
+    quarantine_restore.fsync_dir(src.parent)
     return True
 
 
@@ -2215,15 +2233,18 @@ def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> bool:
     entry = _quarantine_entry(qroot, kind)
     if entry is None:
         return False
+    kept = entry / path.name
     try:
-        shutil.copy2(path, entry / path.name)
+        # Record first: a manifest that cannot be written means the copy
+        # would land in quarantine with no way back to the original path, and
+        # the caller is about to truncate the very file this preserves.
+        quarantine_restore.record(entry, path, kept)
+        shutil.copy2(path, kept)
+        quarantine_restore.fsync_file(kept)
+        quarantine_restore.fsync_dir(entry)
     except OSError as ex:
         warn(f"could not preserve previous {kind}: {ex}")
         return False
-    try:
-        quarantine_restore.record(entry, path, entry / path.name)
-    except OSError as ex:
-        warn(f"quarantine: could not record restore path for {path}: {ex}")
     return True
 
 

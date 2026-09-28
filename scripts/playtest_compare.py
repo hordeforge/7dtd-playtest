@@ -42,6 +42,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from playtest_log import parse_client_log  # noqa: E402
+from quarantine_restore import fsync_dir  # noqa: E402
 
 # Roughly 1900 years. No run report is ever that old, and the value is
 # scaled into float seconds, so a larger one is a typo rather than a window.
@@ -58,7 +59,9 @@ def write_text_atomic(path: Path, text: str) -> None:
     The orchestrator has its own copy (playtest_run.write_text_atomic); this
     CLI runs standalone, and its outputs are the committed baselines, so a
     crash must leave the previous generation intact rather than a truncated
-    one that still parses as a diff.
+    one that still parses as a diff. The directory entry is flushed too: the
+    rename is the publication, and a power loss that keeps neither the old
+    file nor the new name loses the only copy of the baseline.
     """
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}")
     try:
@@ -67,6 +70,7 @@ def write_text_atomic(path: Path, text: str) -> None:
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
+        fsync_dir(path.parent)
     finally:
         with contextlib.suppress(OSError):
             tmp.unlink()

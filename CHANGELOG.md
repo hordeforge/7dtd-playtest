@@ -458,6 +458,28 @@ Migration, by symbol:
   runs with `LC_ALL=C TZ=UTC` and a `SOURCE_DATE_EPOCH` the Makefile defaults
   to the zip epoch and exports, so the assembly and the archive wrapping it are
   stamped from one clock and an unset variable still yields fixed bytes.
+- **A quarantined file is recorded before it is moved or copied.**
+  `restore.jsonl` was appended after `shutil.move` and after the previous
+  client log's copy, so a crash in between left the only copy of a swept-aside
+  world in quarantine with no record of the path it came from, and no way back
+  for an operator to guess. The pair is now written (and fsynced, entry
+  directory included) first: a recorded pair whose destination never arrived
+  costs one "nothing to restore" line on the copy-back, and a manifest that
+  cannot be written now blocks the move instead of warning afterwards, so
+  `fresh_zdtd_world` raises `FreshSaveError` and `snapshot_previous_log`
+  reports failure rather than licensing the truncation it was about to do.
+- **A quarantine prune that cannot delete says so.**
+  `shutil.rmtree(..., ignore_errors=True)` left a half-deleted entry behind
+  whose manifest still named files that were gone, so a later `restore`
+  reported them MISSING, as if the world had been lost, rather than as the
+  prune that dropped it. The failure is reported and the entry survives.
+- **Published evidence survives a power loss.**
+  `write_text_atomic` (orchestrator and comparison CLI) and the quarantine
+  copy-back fsynced the file and renamed it into place, but never flushed the
+  parent directory, so the name the report, junit XML, run-ended marker or
+  committed compare baseline is reachable under could be lost with a crash
+  right after the rename. Both ends of the quarantine rename are flushed too.
+
 - **A Unicode line separator in chat text can no longer forge a log line.**
   `str.splitlines()` also breaks on U+000B, U+000C, U+001C-U+001E, NEL,
   U+2028 and U+2029, and the game's logger emits none of them, so a peer who
