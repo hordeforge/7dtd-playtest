@@ -286,7 +286,7 @@ client window, and every frame in a clip is already the client window at
 ## Implementation
 
 1. `Helpers.CaptureClipFrame` in `Source/PlayTestMod/Helpers.Ui.cs`, beside
-   `CaptureFrame`, with the same profile-resolution and `SafeFileName` reuse.
+   `CaptureFrame`, with the same profile-resolution and `AssetName` reuse.
 2. `CaseDef.StagedClip` in `Source/PlayTestMod/CaseDef.cs`, beside `Staged`,
    sharing `Live` the same way `Staged` does.
 3. `scripts/capture_video.sh`, copied in shape from `scripts/capture_frames.sh`

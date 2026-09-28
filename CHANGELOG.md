@@ -60,7 +60,7 @@ Release model (inferred practice, now pinned by `make test`):
   The temp file is now opened `O_EXCL` at 0600.
 
 - **Windows device names no longer reach a staged frame or clip path.**
-  `Helpers.SafeFileName` (the client, a Windows process under Proton) filters a
+  `Helpers.AssetName` (the client, a Windows process under Proton) filters a
   staged frame or clip id to a safe character set, but a name that filters to
   nothing collapsed onto its parent directory, and a reserved device name
   (`AUX`, `nul`, `COM1` ... `LPT9`, with any casing and with the appended

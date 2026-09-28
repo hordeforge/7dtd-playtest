@@ -10,7 +10,7 @@ Two axes, not one fused target:
 | Axis | Values | Meaning |
 |---|---|---|
 | `--provision` (`PLAYTEST_PROVISION`) | `managed` \| `attach` | Safehouse brings the server up and tears it down, or it is already running and this repo touches no lifecycle. `--no-server` is the shorthand for attach |
-| `--server` (`PLAYTEST_SERVER`) | `stock` \| `zdtd` | which server is under test (`PLAYTEST_BACKEND` only pins it against a suite document's `backend`) |
+| `--server` (`PLAYTEST_BACKEND`) | `stock` \| `zdtd` | which server is under test (`PLAYTEST_BACKEND` only pins it against a suite document's `backend`) |
 | `--readonly` | attach-only flag | the host must never be written to (production `7dtd-server-container`) |
 
 A managed stock run is always a Safehouse **pair**: the server instance
@@ -277,7 +277,6 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 |---|---|
 | `PLAYTEST_SUITE` | Canonical suite list / aliases (`smoke`, `core`, `demo`, …) |
 | `PLAYTEST_PROVISION` | Who owns the server process: `managed`/`attach` (or `--provision`) |
-| `PLAYTEST_SERVER` | Default for `--server`: which server is under test, `stock`/`zdtd` |
 | `PLAYTEST_BACKEND` | Not a selector: setting it pins the backend so a suite document's `backend` no longer overrides it |
 | `PLAYTEST_READONLY` | Attach-only: never write to this host (or `--readonly`) |
 | `PLAYTEST_SANDBOX_NAME` | Safehouse pair base name (creates `srv-<name>` / `client-<name>`) |

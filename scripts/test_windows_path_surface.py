@@ -58,21 +58,33 @@ def test_reserved_device_names_are_listed() -> None:
 
 def test_sanitizer_refuses_device_names_and_empty() -> None:
     src = UI.read_text(encoding="utf-8")
-    body = method_body(src, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)")
-    assert "ToLowerInvariant" in body, (
-        "AssetName must compare case-insensitively: Windows device names "
-        "match any casing"
-    )
+    body = method_body(src, r"static string AssetName\(string name\)")
     assert "ReservedDeviceNames" in body, "AssetName never consults ReservedDeviceNames"
     assert '"_" +' in body, (
-        "AssetName must prefix a device name, otherwise `aux` and `aux.png` "
-        "still name the device and CreateDirectory fails"
+        "AssetName must prefix a device name, otherwise `aux` still names the "
+        "device and CreateDirectory fails"
     )
     assert re.search(r"if \(string\.IsNullOrEmpty\(name\)\)\s*return", body), (
+        "AssetName must refuse an empty id before sanitizing: an empty name "
+        "collapses onto the parent directory and the collector never finds "
+        "the frame"
+    )
+    assert re.search(r"if \(safe\.Length == 0\)\s*return", body), (
         "AssetName must not return an empty name: it collapses onto the "
         "parent directory and the collector never finds the frame"
     )
     print("OK AssetName refuses empty names and Windows device names")
+
+
+def test_asset_name_is_lowercase_only() -> None:
+    src = UI.read_text(encoding="utf-8")
+    body = method_body(src, r"static string AssetName\(string name\)")
+    assert re.search(r"c >= 'a' && c <= 'z'", body), (
+        "AssetName must not let an uppercase letter survive: the reserved "
+        "device names match any casing, and the exact lowercase set below is "
+        "the only thing keeping `AUX` (which would become `aux`) off a path"
+    )
+    print("OK AssetName survives lowercase letters only")
 
 
 def test_paths_are_built_by_the_path_api() -> None:
@@ -94,6 +106,7 @@ def test_paths_are_built_by_the_path_api() -> None:
 def main() -> int:
     test_reserved_device_names_are_listed()
     test_sanitizer_refuses_device_names_and_empty()
+    test_asset_name_is_lowercase_only()
     test_paths_are_built_by_the_path_api()
     print("RESULT PASS")
     return 0
