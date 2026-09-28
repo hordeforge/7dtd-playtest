@@ -165,7 +165,7 @@ def test_exit_codes_documented_in_help() -> None:
     r = _run_cli("--help")
     assert r.returncode == 0, r.stderr
     assert "Exit codes:" in r.stdout
-    for line in ("0  comparison written", "1  no playtest result lines",
+    for line in ("0  comparison written", "1  neither side had a playtest result line",
                  "2  a side has no input", "3  inputs older than"):
         assert line in r.stdout, line
 
@@ -220,7 +220,7 @@ def test_future_epoch_refuses_freshness_guard(tmp_path: Path) -> None:
 def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
     """An unwritable --out must fail with its own exit code (4) naming the
     destination, never a traceback with Python's default exit 1 (documented
-    as 'no playtest result lines found')."""
+    as 'neither side had a playtest result line')."""
     s = tmp_path / "stock.log"
     z = tmp_path / "zdtd.log"
     s.write_text(STOCK_LOG, encoding="utf-8")
@@ -333,7 +333,7 @@ def test_no_results_on_either_side_refuses(tmp_path: Path) -> None:
     noise = "[game] boot noise, no playtest events\n"
     r = _run(tmp_path, noise, noise)
     assert r.returncode == 1, r.stderr
-    assert "no playtest result lines" in r.stderr
+    assert "neither side had a playtest result line" in r.stderr
     assert not (tmp_path / "out" / "playtest-compare.json").exists()
 
 

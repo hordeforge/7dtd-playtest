@@ -30,7 +30,7 @@ single frame, and states the reason plainly: a desktop or window screen grab
 is unreliable (the window may be unfocused, occluded, or not mapped, so it
 shows a stale or empty frame) and, on a host running more than one client,
 unsound (it photographs whatever is in front, which has repeatedly meant
-another session's client). `CaseDef.Staged` (CaseDef.cs:139) solves this for
+another session's client). `CaseDef.Staged` (CaseDef.cs:182) solves this for
 one frame: it calls `Helpers.CaptureFrame` (Helpers.Ui.cs), which uses
 Unity's own `ScreenCapture.CaptureScreenshot`, this client process's own
 framebuffer, from inside the game.
@@ -73,10 +73,11 @@ single staged frame already has.
   motion look right", not "does it feel smooth at native frame rate";
   smoothness judgements belong to a person playing the build, not a review
   artefact.
-- **No change to live-suite capture.** Clips are only ever taken during a
-  `CaseDef.Staged`-style hold, the same fixture-not-proof boundary the
-  existing single-shot path already draws. Nothing here samples frames during
-  ordinary `Live` cases or unattended play.
+- **No unattended recording.** A clip is taken during a `CaseDef.Staged`-style
+  hold, the same fixture-not-proof boundary the existing single-shot path
+  already draws, or between an explicit `Helpers.BeginClip` / `EndClip` pair.
+  Nothing samples frames on its own during an ordinary `Live` case or
+  unattended play.
 - **No replacement of `capture_frames.sh` for its current single-frame use.**
   That script and `Helpers.CaptureFrame`'s single in-game shot both still
   work for a case that only needs one photograph. This plan gives the
@@ -110,7 +111,7 @@ unaffected.
 
 ### `CaseDef.StagedClip`
 
-A new factory beside `CaseDef.Staged` (CaseDef.cs:139), built the same way
+A new factory beside `CaseDef.Staged` (CaseDef.cs:182), built the same way
 `Staged` is built: on top of `Live`, with the same `Report.Staged` marker
 emitted the instant staging succeeds (never at result time, for the same
 reason the doc comment on `Staged` already gives: a screenshot loop keyed on

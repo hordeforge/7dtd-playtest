@@ -10,7 +10,7 @@ Two axes, not one fused target:
 | Axis | Values | Meaning |
 |---|---|---|
 | `--provision` (`PLAYTEST_PROVISION`) | `managed` \| `attach` | Safehouse brings the server up and tears it down, or it is already running and this repo touches no lifecycle. `--no-server` is the shorthand for attach |
-| `--server` (`PLAYTEST_BACKEND`) | `stock` \| `zdtd` | which server is under test |
+| `--server` (`PLAYTEST_SERVER`) | `stock` \| `zdtd` | which server is under test (`PLAYTEST_BACKEND` only pins it against a suite document's `backend`) |
 | `--readonly` | attach-only flag | the host must never be written to (production `7dtd-server-container`) |
 
 A managed stock run is always a Safehouse **pair**: the server instance
@@ -274,7 +274,8 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 |---|---|
 | `PLAYTEST_SUITE` | Canonical suite list / aliases (`smoke`, `core`, `demo`, …) |
 | `PLAYTEST_PROVISION` | Who owns the server process: `managed`/`attach` (or `--provision`) |
-| `PLAYTEST_BACKEND` | Which server is under test: `stock`/`zdtd` (or `--server`) |
+| `PLAYTEST_SERVER` | Default for `--server`: which server is under test, `stock`/`zdtd` |
+| `PLAYTEST_BACKEND` | Not a selector: setting it pins the backend so a suite document's `backend` no longer overrides it |
 | `PLAYTEST_READONLY` | Attach-only: never write to this host (or `--readonly`) |
 | `PLAYTEST_SANDBOX_NAME` | Safehouse pair base name (creates `srv-<name>` / `client-<name>`) |
 | `PLAYTEST_SANDBOX_ROOT` | Safehouse checkout that owns the instances (or `--sandbox-root`) |
@@ -397,7 +398,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the nineteen offline gate files on
+`make test` runs lint + typecheck plus the twenty offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -478,7 +479,7 @@ the run order that both `make test` and `make coverage` expand):
     (an unregistered test never executes), `test`/`coverage`/`test-one` share
     that one list, and CI runs the same steps `make check` does. A new gate
     file that nobody added to `GATES` runs under neither `make test` nor CI.
-18. dependency inventory (`scripts/test_dep_sbom.py`): the CycloneDX SBOM
+19. dependency inventory (`scripts/test_dep_sbom.py`): the CycloneDX SBOM
     `make sbom` writes from `uv.lock` and `Source/PlayTestMod/packages.lock.json`
     lists every package both lockfiles resolve, carries the locked version in
     each purl, marks nothing `required` (pyproject declares no runtime

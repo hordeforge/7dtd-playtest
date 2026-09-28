@@ -420,8 +420,8 @@ def resolve_mods(
 ) -> list[Path]:
     """Resolve one side's mod names to built modlet directories.
 
-    A short name resolves to the sibling repo's ``dist/`` output; anything with
-    a separator is a path, taken relative to the suite file when relative.
+    A known short name resolves to the sibling repo's ``dist/`` output; every
+    other entry is a path, taken relative to the suite file when relative.
     """
     if side not in ("client", "server"):
         raise SuiteLoadError(f"side must be client or server, not {side!r}")

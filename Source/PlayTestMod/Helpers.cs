@@ -6,8 +6,8 @@ namespace ZdtdPlaytest
     /// give/equip/vehicle helpers without reimplementing stock API glue.
     ///
     /// One static class, split across partial-class files by domain:
-    /// <c>Helpers.Ui</c>, <c>Helpers.World</c>, <c>Helpers.Player</c>,
-    /// <c>Helpers.Inventory</c>, <c>Helpers.Entities</c>,
+    /// <c>Helpers.Ui</c>, <c>Helpers.World</c>, <c>Helpers.Blocks</c>,
+    /// <c>Helpers.Player</c>, <c>Helpers.Inventory</c>, <c>Helpers.Entities</c>,
     /// <c>Helpers.Vehicles</c>, <c>Helpers.Traders</c>, <c>Helpers.Rig</c>.
     /// </summary>
     public static partial class Helpers

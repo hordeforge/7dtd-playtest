@@ -3,8 +3,8 @@
 
 The orchestrator's process-driving paths need real game binaries, but some
 helpers are fully offline-testable and destructive enough to deserve their
-own gate. Today: the fresh-save quarantine (stock saves, zdtd world state,
-and prior-run log evidence move under <logdir>/quarantine instead of being
+own gate. Today: the fresh-save quarantine (the zdtd world state and the
+prior-run client log evidence move under <logdir>/quarantine instead of being
 hard-deleted; a regression there either wipes the wrong directories or
 silently stops wiping), the host-fixture suite gate, and the startup config
 validators (a bad timeout / port env value must fail fast with a named error

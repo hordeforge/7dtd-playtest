@@ -16,7 +16,7 @@ Usage:
 
 Exit codes:
   0  comparison written
-  1  no playtest result lines found on either side
+  1  neither side had a playtest result line (one empty side still diffs)
   2  a side has no input (side never ran, logs wiped, or a bad path)
   3  inputs older than --require-fresh-minutes
   4  comparison outputs could not be written
@@ -41,9 +41,11 @@ from playtest_log import parse_client_log  # noqa: E402
 
 
 def load_results(path: Path) -> dict:
-    """Return {"results": [...], "summary": {...}, "wall": s|None, "server": str|None}
-    from a report JSON or a log. wall is the orchestrator's wall_sec (server
-    session wall time), reported as a cost axis, never a per-case finding."""
+    """Return {"results": [...], "summary": {...}, "wall": s|None, "server": str|None,
+    "ran_epoch": s|None} from a report JSON or a log. wall is the orchestrator's
+    wall_sec (server session wall time), reported as a cost axis, never a
+    per-case finding. A log input adds "nre_like" and leaves wall/server/
+    ran_epoch None."""
     # One read feeds both decoders: a second read after the JSON attempt can
     # fail (file replaced/removed between reads) and crash the diff on input
     # the first read already saw.
@@ -215,7 +217,7 @@ def main() -> int:
     stock = load_results(stock_path)
     zdtd = load_results(zdtd_path)
     if not stock["results"] and not zdtd["results"]:
-        print("ERROR: no playtest result lines on either side", file=sys.stderr)
+        print("ERROR: neither side had a playtest result line", file=sys.stderr)
         return 1
 
     if args.require_fresh_minutes:

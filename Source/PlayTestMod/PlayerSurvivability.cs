@@ -174,10 +174,10 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// God Mode as an explicit set of three flags rather than a toggle.
-        /// Fly and no-clip follow <paramref name="fly"/> (default off):
-        /// <c>PlayerMoveController.toggleGodMode</c> turns both on as a side
-        /// effect, and this writes them back so a caller that did not ask
-        /// for fly does not keep them.
+        /// Fly and no-clip follow <paramref name="fly"/>, which has no default
+        /// and must be passed: <c>PlayerMoveController.toggleGodMode</c> turns
+        /// both on as a side effect, and this writes them back so a caller that
+        /// did not ask for fly does not keep them.
         /// </summary>
         public static bool Ensure(EntityPlayerLocal player, bool fly, out string detail)
         {

@@ -12,9 +12,10 @@ namespace ZdtdPlaytest
     {
 
         /// <summary>
-        /// Snap player feet to World.GetHeightAt + eye offset so late-suite float
-        /// (void mesh) does not poison place/power fixtures. Server void rescue
-        /// alone is not enough when client Y stays high in air above empty cells.
+        /// Snap player feet to World.GetHeightAt plus a small standing offset so
+        /// late-suite float (void mesh) does not poison place/power fixtures.
+        /// Server void rescue alone is not enough when client Y stays high in
+        /// air above empty cells.
         /// </summary>
         public static bool SnapPlayerToSurface(EntityPlayerLocal p, World world)
         {

@@ -44,7 +44,11 @@ namespace ZdtdPlaytest
         }
 
 
-        /// <summary>origin + offset with Y still on/above surface after FixtureSeedOrigin.</summary>
+        /// <summary>
+        /// <see cref="FixtureSeedOrigin"/> plus the caller's offset. The seed
+        /// has already clamped a void or floating player to the surface, so a
+        /// non-negative <paramref name="dy"/> keeps the target on or above it.
+        /// </summary>
         public static Vector3i FixtureTarget(EntityPlayerLocal p, World world, int dx, int dy, int dz)
         {
             var o = FixtureSeedOrigin(p, world);

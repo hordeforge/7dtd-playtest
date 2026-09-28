@@ -191,7 +191,7 @@ in the log without rerunning with `--help`.
 | Env | Default | Meaning |
 |---|---|---|
 | `PLAYTEST_PROVISION` | `managed` | Who owns the server process: `managed` or `attach` (`--provision`). `--no-server` forces attach |
-| `PLAYTEST_BACKEND` | `stock` | Which server is under test: `stock` or `zdtd` (`--server`). The `make playtest*` targets read it too (`SERVER=`, then this) |
+| `PLAYTEST_BACKEND` | `stock` | Backend the run targets: `stock` or `zdtd` (`--server`). Set it to pin the backend so a suite document's own `backend` no longer overrides it. The `make playtest*` targets read it too (`SERVER=`, then this) |
 | `PLAYTEST_READONLY` | empty | Attach-only: never write to this host (`--readonly`). Boolean, see below |
 | `PLAYTEST_SANDBOX_NAME` | `playtest` | Safehouse pair base name (`srv-<name>` / `client-<name>`) |
 | `PLAYTEST_SANDBOX_ROOT` | `../7dtd-sandbox` | Safehouse checkout that owns the instances (`--sandbox-root`) |
@@ -236,25 +236,31 @@ CLIENT_MUTE=0 make playtest-demo
 
 ### Live-client exclusivity lock
 
-Only one host playtest may drive the shared **client + dedicated/zdtd server**
-at a time. `scripts/playtest_run.py` starts a stock dedicated by default
-(or zdtd with `SERVER=zdtd`); that is under the same lock as the client.
+The lock covers one **client**, not the whole machine. A managed run drives its
+own Safehouse client instance, so its lock file and its live probe are scoped to
+that instance and two runs on different instances share nothing. A run on the
+operator's single Steam client keeps the machine-wide lock, because that client
+really is shared. A managed zdtd run also gates on a live `zdtd`, which the
+orchestrator still starts itself on a caller-chosen port; a stock dedicated is
+never a lock input, since it belongs to an instance with its own port block.
 
-It acquires the lock **before** cleaning processes or launching, refreshes a
-**heartbeat** while the run is active, and releases when the run ends. Acquire
-also fails if a client **or** dedicated process is already live (unless you
-hold a fresh lock). After clean it refuses if ServerPort/telnet is still bound.
+`scripts/playtest_run.py` acquires the lock **before** cleaning processes or
+launching, refreshes a **heartbeat** while the run is active, and releases when
+the run ends. Acquire also fails if the run's own client (plus `zdtd` where
+that applies) is already live and you do not hold the lock. After clean it
+refuses if ServerPort/telnet is still bound.
 
 | | |
 |---|---|
-| Default file | `~/.cache/7dtd-playtest/playtest_running` |
+| Default file | `~/.cache/7dtd-playtest/playtest_running` (a managed run: `playtest_running-<client-instance>`) |
 | Override | `PLAYTEST_LOCK_FILE` (use the **same** path as Atomic/monorepo) |
 | Session | `--session` / `PLAYTEST_SESSION_ID` (auto if empty) |
 | Payload | `running`, `session`, `acquired`, `heartbeat` (UTC ISO) |
 | Stale after | `PLAYTEST_LOCK_STALE_SEC` (default 120) without heartbeat refresh |
 
 Agents: read `heartbeat=` to see if a hold is still live. A fresh heartbeat
-means wait; a stale lock with no client/server process may be reclaimed.
+means wait; a stale lock whose run's client (and `zdtd`, where that applies) is
+not live may be reclaimed.
 Full rules: [AGENTS.md](AGENTS.md) § Playtest / live-client exclusivity.
 
 ## External scenario suites (providers)
@@ -541,7 +547,7 @@ The runner arms from the **first non-empty** of:
 |---|---|
 | `PLAYTEST_SUITE` | Canonical suite list / aliases |
 | `ZDTD_PLAYTEST_SUITE` | Accepted alias (Atomic / older hosts) |
-| `PLAYTEST_CONCERN_SUITES` | Exact token list that is one declared concern (same tokens as `PLAYTEST_SUITE` when you comma-list consecutive steps of one feature). Env form of `--concern-suites` |
+| `PLAYTEST_CONCERN_SUITES` | Exact token list that is one declared concern (same tokens as `PLAYTEST_SUITE` when you comma-list consecutive steps of one feature). Env form of `--concern-suites`; read by the host orchestrator before launch, not by the client |
 | `PLAYTEST=1` or `ZDTD_PLAYTEST=1` | Legacy arm → `demo` |
 | `PLAYTEST_LAPS` / `ZDTD_PLAYTEST_LAPS` | Benchmark repeats |
 | `PLAYTEST_TRACE_ENTITY` / `ZDTD_PLAYTEST_TRACE_ENTITY` | Set `1`/`true` for per-second spawned-entity pose, renderer, grounding and collision probes; `--trace-entity` is the CLI form |
@@ -689,9 +695,11 @@ starts that client without `PLAYTEST_*`, so it joins and remains in the world
 without executing a duplicate scenario suite. The connect mod reads the peer
 name from `7DTD_PLAYER_NAME`; use a current `7dtd-fastconnect` install that
 supports that variable. This is a genuine second client, not a loadgen bot.
-The runner leaves one second between the two launches because the stock V3.1
-server has a 500 ms same-IP connection limiter; without that spacing the
-second localhost client is rejected before authentication.
+The runner waits for the primary client's `Respawning: EnterMultiplayer` line
+(up to 180 s) before launching the peer, and then leaves one second between the
+two launches. Both are needed because the stock V3.1 server has a
+500 ms same-IP connection limiter; without that spacing the second localhost
+client is rejected before authentication.
 
 Run a suite with an isolated peer profile:
 
@@ -1045,7 +1053,7 @@ Legacy: `PLAYTEST=1` or `ZDTD_PLAYTEST=1` arms `demo`.
 ## Suites (catalog summary)
 
 Full tables: **[SCENARIOS.md](SCENARIOS.md)** (every Live case id). Built-in
-counts from `Catalog.cs` (109 Live, 0 Defer):
+counts from `Catalog.cs` (112 Live, 0 Defer):
 
 | Suite | Live cases |
 |---|---:|

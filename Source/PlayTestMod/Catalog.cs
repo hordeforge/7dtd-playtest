@@ -36,7 +36,8 @@ namespace ZdtdPlaytest
                         break;
                     case "benchmark":
                     case "bench":
-                        // Timed repeat of the demo path (laps via PLAYTEST_LAPS)
+                        // Timed repeat of the smoke+core+world+ui path the
+                        // benchmark suite appends (laps via PLAYTEST_LAPS).
                         AddUnique(list, "benchmark");
                         break;
                     case "full":
@@ -140,7 +141,8 @@ namespace ZdtdPlaytest
                 case "apm": AddApm(q, label); break;
                 case "bot": AddBot(q, label); break;
                 case "benchmark":
-                    // Timed attract path; outer loop multiplies by LAPS
+                    // smoke+core+world+ui, not the full demo path; the outer
+                    // lap loop multiplies by LAPS.
                     AddSmoke(q, label);
                     AddCore(q, label);
                     AddWorld(q, label);
@@ -1270,9 +1272,10 @@ namespace ZdtdPlaytest
                     string d;
                     Helpers.RequestWaterSet(ctx.Player, ctx.TargetBlock, out d);
                 }
-                // The radius-64 count scan walks ~7.6k blocks per call; sample it
-                // at 2 Hz (IntB is free in this case) so the frame loop only pays
-                // the cheap single-cell mass probe between samples.
+                // The radius-64 count scan walks ~30k blocks per call (65x65
+                // columns at step 2, seven Y levels); sample it at 2 Hz (IntB is
+                // free in this case) so the frame loop only pays the cheap
+                // single-cell mass probe between samples.
                 int scanPulse = (int)(elapsed * 2f);
                 if (scanPulse != ctx.IntB)
                 {
@@ -4461,12 +4464,15 @@ namespace ZdtdPlaytest
                 float groundY = ctx.World.GetHeightAt(e.GetPosition().x, e.GetPosition().z);
                 float feet = e.GetPosition().y - groundY;
                 ctx.FloatA = feet;
-                ctx.Detail = $"bot {ctx.IntA} feet={feet:0.0} (must stay 0..4m, not flying/noclip)";
+                ctx.Detail = $"bot {ctx.IntA} feet={feet:0.0} (must stay 0..6m, not flying/noclip)";
                 // Even if not perfectly on ground due to terrain sample, must be within sane bounds
                 return Time.unscaledTime - ctx.CaseStartUnscaled >= 3f;
             }, assert: ctx =>
             {
-                // After 3s warmup, bot must have stayed between 0 and 4m above ground (no godmode fly/no-clip through void)
+                // After 3s warmup the bot must sit between 0 and 6m above the
+                // sampled ground (no godmode fly, no noclip through the void).
+                // The assert samples the final position only; the wait samples
+                // every tick but does not require the range to have held.
                 if (ctx.IntA < 0) return false;
                 var e = Helpers.FindAliveById(ctx.World, ctx.IntA) as EntityAlive;
                 if (e == null) return true; // gone is not a physics fail; other bot cases cover spawn

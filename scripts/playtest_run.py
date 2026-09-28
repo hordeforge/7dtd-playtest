@@ -175,14 +175,15 @@ def client_compat_for_game(game: Path, env: dict[str, str] | None = None) -> Pat
 PERSIST_PAD_XYZ = (520, 62, 950)
 PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 
-# Client + dedicated process identities shared by every pkill step (pre-run
-# clean, rejoin teardown, post-run finally): one table so a new runtime shape
-# cannot be added to one step and missed by the others. Site-specific extras
-# (truncated comm names, zdtd, loadgen) append to this list.
-# The client side only. A managed dedicated is a Safehouse instance and is
-# stopped by name (`sb stop`), which matches on that instance's own SB_INSTANCE
-# env: a blanket 7DaysToDieServer pkill from here would take down every other
-# sandbox instance on the machine, including another agent's run.
+# Client process identities shared by every pkill step (pre-run clean, rejoin
+# teardown, post-run finally): one table so a new runtime shape cannot be
+# added to one step and missed by the others. Site-specific extras (truncated
+# comm names, zdtd, loadgen) append to this list.
+# The client side only, on the managed path. A managed dedicated is a Safehouse
+# instance and is stopped by name (`sb stop`), which matches on that instance's
+# own SB_INSTANCE env: a blanket 7DaysToDieServer pkill from here would take
+# down every other sandbox instance on the machine, including another agent's
+# run.
 # The peer waits for this in the primary's log before connecting: the engine
 # rejects same-IP connects less than 500 ms apart, and two clients booting from
 # identical instances reach the menu together no matter how the launches were
@@ -332,6 +333,8 @@ def config_summary(args: argparse.Namespace) -> str:
         f"world={args.world_name if args.server == 'stock' else args.world}",
         f"game_name={args.game_name}",
         f"logdir={args.logdir}",
+        # A literal, not args.fresh_save: the flag is a no-op back-compat
+        # spelling, and every run is fresh by rule.
         "fresh_save=True",
         f"no_server={bool(args.no_server)}",
         f"fixtures={not args.no_fixtures}",
@@ -1549,11 +1552,12 @@ def install_signal_handlers() -> None:
             warn(f"cannot install {name} handler: {ex}")
 
 
-# Soft-delete window for destructive pre-run wipes (--fresh-save, zdtd world
-# reset, prior client-log evidence): data moves under <logdir>/quarantine and
-# is pruned to the newest QUARANTINE_KEEP entries instead of being destroyed.
-# A mispointed --userdata/--game-name/--world therefore costs a copy-back, not
-# an unrecoverable loss.
+# Soft-delete window for the destructive pre-run steps this process owns (the
+# zdtd world reset, prior client/peer log evidence): data moves under
+# <logdir>/quarantine and is pruned to the newest QUARANTINE_KEEP entries
+# instead of being destroyed. A stock save is not here: a managed run wipes it
+# with `sb wipe` on its own instance. A mispointed --world therefore costs a
+# copy-back, not an unrecoverable loss.
 QUARANTINE_DIRNAME = "quarantine"
 QUARANTINE_KEEP = 5
 
@@ -2157,7 +2161,6 @@ def main(argv: list[str] | None = None) -> int:
         description="stock-client playtest orchestrator",
         epilog=(
             "examples:\n"
-            "  playtest_run.py --suite smoke\n"
             "  playtest_run.py --suite smoke              # managed Safehouse instance\n"
             "  playtest_run.py --server zdtd --port 27025\n"
             "  playtest_run.py --no-server --skip-clean   # attach to a running server\n"

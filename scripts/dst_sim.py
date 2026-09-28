@@ -26,6 +26,10 @@ The model we assert (and the reason these are the assertions):
       the wrong session. Crash-during-write is injected on purpose.
   I4  The lock file only ever names a session that actually asked for it.
   I5  While one agent holds, its heartbeat never moves backwards.
+  I6  Liveness: a claim whose holder is gone (stale heartbeat, no live
+      runtime) is reclaimable. This is what makes corruption survivable.
+  I7  While an agent holds, the durable record still agrees with it, so a
+      release accepted from a foreign session cannot go unnoticed.
 
 I1/I2 are paired across the boundary: the acquiring side asserts before it
 starts processes, and the world asserts on every scheduler step after.

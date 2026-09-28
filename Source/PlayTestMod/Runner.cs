@@ -498,8 +498,8 @@ namespace ZdtdPlaytest
         /// <summary>
         /// LivePlayer recovery: press the spawn-selection button if that
         /// window is open, then restore vitals once the player is actually
-        /// alive. Does not call Respawn/SetAlive, and does not set God Mode
-        /// — that belongs to <see cref="PlayerSurvivability.Ensure"/> via
+        /// alive. Does not call Respawn/SetAlive, and does not set God Mode:
+        /// that belongs to <see cref="PlayerSurvivability.Ensure"/> via
         /// <see cref="PlayerSurvivability.AddSurvivabilityGuard"/>, not to
         /// every catalog case.
         /// </summary>

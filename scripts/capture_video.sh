@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
 			esac
 			shift 2
 			;;
-		-h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "capture_video: unknown argument $1" >&2; exit 2 ;;
 	esac
 done
@@ -78,13 +78,14 @@ CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/A
 
 # Refuse to start on top of a live run: the previous run's client is still
 # writing that log, so a "newer than start" check passes against ITS marker and
-# the clip belongs to the wrong run. Same guard and reason as capture_frames.sh.
+# the clip belongs to the wrong run. Same guard and reason as capture_frames.sh,
+# including its scope: `live` reports the client only, not a dedicated or zdtd.
 runtime_rc=0
 "${PY[@]}" "$HERE/playtest_lock.py" live || runtime_rc=$?
 case $runtime_rc in
 	0) : ;;
 	1)
-		echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
+		echo "ERROR: a 7 Days to Die client is already running." >&2
 		echo "       Let it finish before capturing; overlapping runs photograph the wrong one." >&2
 		exit 1
 		;;

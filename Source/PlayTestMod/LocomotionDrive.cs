@@ -126,6 +126,11 @@ namespace ZdtdPlaytest
             ApplyToPlayer(GameManager.Instance?.World?.GetPrimaryPlayer() as EntityPlayerLocal);
         }
 
+        /// <summary>
+        /// Retarget a drive that is already running. A no-op when no drive is
+        /// active, so a case that wants a direction must <see cref="Start"/>
+        /// first.
+        /// </summary>
         public static void SetDirection(float forward, float strafe = 0f, bool running = false, bool sneak = false, bool jump = false)
         {
             if (!_active) return;

@@ -1,15 +1,20 @@
 """Exclusive playtest runtime lock (host-side, no game I/O).
 
-Covers the shared **client and dedicated/zdtd server** on one machine, not
-only the client. Deterministic, parseable lock shared across agents and
-orchestrators. Compatible with the 7dtd-mods monorepo convention:
+Scoped to the **client** a run drives, because the client is the scarce
+resource: one stock install, one display, one GPU. A managed run locks only
+its own Safehouse client instance, so several sandbox runs share a machine;
+a run on the operator's single Steam client locks the machine. A dedicated
+server is not covered (see :func:`dedicated_running`). Deterministic,
+parseable lock shared across agents and orchestrators. Compatible with the
+7dtd-mods monorepo convention:
 
     running=yes|no
     session=<agent>-<UTC YYYYMMDD-HHMMSS>-<hex>
     acquired=<UTC ISO8601 Z>     # set on acquire (when running=yes)
     heartbeat=<UTC ISO8601 Z>    # refreshed while the holder is still active
 
-Default path: ~/.cache/7dtd-playtest/playtest_running
+Default path: ~/.cache/7dtd-playtest/playtest_running, plus a
+``-<client-instance>`` suffix when the run names a client instance.
 Override: PLAYTEST_LOCK_FILE (same env name as Atomic playtest-run helpers).
 Point Atomic and this harness at the **same** path on a shared machine.
 
@@ -18,7 +23,7 @@ holder payload via os.replace so two processes cannot both win under normal
 local FS conditions.
 
 Staleness: if running=yes but heartbeat is older than PLAYTEST_LOCK_STALE_SEC
-(default 120s), and no live runtime process is present, another session may
+(default 120s), and the live probe reports nothing, another session may
 take over (documented reclaim). Fresh heartbeat means the holder is still
 alive; agents should wait.
 
@@ -638,11 +643,12 @@ def can_start(
         return False
     e = _env(env)
     path = _lock_path(path, e)
-    # Default: client OR dedicated/zdtd (full playtest runtime).
+    # Default probe is the shared stock client. A caller with a narrower or
+    # wider scope (a sandbox instance prefix, a zdtd port) injects its own.
     probe = live_probe if live_probe is not None else client_running
     state = read_lock(path, env=e)
     if state.running and state.session and state.session != session:
-        # A foreign claim only frees up once stale AND no runtime is alive.
+        # A foreign claim only frees up once stale AND the probe sees nothing.
         return is_stale(state, max_age_sec=max_age_sec, env=e) and not probe()
     return not (probe() and not (state.running and state.session == session))
 
@@ -687,10 +693,11 @@ def acquire(
 ) -> LockState:
     """Acquire the lock for ``session``. Re-entrant for the same session.
 
-    Raises PlaytestLockError when held by another fresh session or a live
-    playtest runtime (client and/or dedicated server) blocks start. A **stale**
-    foreign lock (old/missing heartbeat) may be taken over only when no live
-    runtime process is present.
+    Raises PlaytestLockError when held by another fresh session, or when
+    ``live_probe`` reports a busy runtime (it defaults to the shared stock
+    client; a managed run injects its own instance-scoped probe). A **stale**
+    foreign lock (old/missing heartbeat) may be taken over only when the probe
+    reports nothing.
     """
     session = _require_session(session)
     e = _env(env)
@@ -723,8 +730,8 @@ def acquire(
                     held_by=state.session,
                     reason="foreign_holder",
                 )
-        # Free lock but client and/or dedicated already up: refuse unless the
-        # file also carries a stale foreign claim, which the block above
+        # Free lock but the probe already sees a busy runtime: refuse unless
+        # the file also carries a stale foreign claim, which the block above
         # already rejected as stale_but_live.
         if live and not (state.running and state.session == session) and not (
             state.running

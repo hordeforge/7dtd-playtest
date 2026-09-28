@@ -85,15 +85,17 @@ CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/A
 # runs while watching a run (a `tail -f` of the client log, a `pgrep` in a
 # wait loop). That false positive is not theoretical. Instead reuse the
 # orchestrator's own runtime probe (playtest_lock): it inspects each
-# process's executable, so stock/Proton clients (including the Wine preloader
-# phase), the stock dedicated, and zdtd are all covered with no drift between
-# this guard and the lock the runner itself enforces.
+# process's executable, so the stock/Proton client (including the Wine
+# preloader phase) is detected with no drift between this guard and the
+# lock the runner itself enforces. `live` reports the client only: a stock
+# dedicated or a zdtd belongs to its own instance and ports, so neither
+# blocks a capture.
 runtime_rc=0
 "${PY[@]}" "$HERE/playtest_lock.py" live || runtime_rc=$?
 case $runtime_rc in
 	0) : ;;
 	1)
-		echo "ERROR: a 7 Days to Die client or dedicated server is already running." >&2
+		echo "ERROR: a 7 Days to Die client is already running." >&2
 		echo "       Let it finish before capturing; overlapping runs photograph the wrong one." >&2
 		exit 1
 		;;
@@ -193,9 +195,8 @@ for i in $(seq -w 1 "$FRAMES"); do
 	sleep "$INTERVAL"
 done
 
-# Keep the suite's own verdict visible: capture_audio.sh prints "suite exit",
-# and a frame set from a crashed run means something different than one from
-# a green run.
+# Reap the suite and carry its exit into RESULT below: a frame set from a
+# crashed run means something different than one from a green run.
 RUN_RC=0
 wait "$RUN_PID" || RUN_RC=$?
 # Reaped: the EXIT trap must not signal a pid the shell has already collected.

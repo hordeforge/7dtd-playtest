@@ -35,7 +35,7 @@ namespace ZdtdPlaytest
         /// <summary>
         /// Track a camera-staged instance so the next <see cref="Staged"/> case
         /// (and the end of this hold) destroys it. Prefabs instantiated in the
-        /// player's face otherwise pile up at the same spot — a particle system,
+        /// player's face otherwise pile up at the same spot: a particle system,
         /// then a mesh, then a cube, all occupying one point, which is not a
         /// picture anyone can sign off.
         ///
@@ -381,21 +381,27 @@ namespace ZdtdPlaytest
         ///
         /// <para>The spawn is the game's own (`SpawnEntityNear` →
         /// <c>EntityFactory.CreateEntity</c> + <c>SpawnEntityInWorld</c>), so the
-        /// game grounds the entity with its own physics and casts its shadow —
-        /// a spawned animal is never a staged prefab hovering in front of the
+        /// game grounds the entity with its own physics and casts its shadow: a
+        /// spawned animal is never a staged prefab hovering in front of the
         /// camera, which is how a static staged look ends up with its feet
         /// measured against a terrain query that disagrees with the collider.
-        /// Each tick the case steps the entity forward along the ground (a
-        /// position drive, only in x/z so the game's grounding is preserved),
-        /// so an AvatarController that plays clips by motion state —
-        /// <c>GameObjectAnimalAnimation</c> plays <c>Walk</c> while the entity's
-        /// motion is non-zero — animates the gait. The entity is despawned when
-        /// the hold ends.</para>
+        /// Each tick the case repositions the entity on a slow orbit around its
+        /// spawn point, with Y taken from a downward physics query onto the
+        /// traversable surface, so an AvatarController that plays clips by
+        /// motion state (<c>GameObjectAnimalAnimation</c> plays <c>Walk</c>
+        /// while the entity's motion is non-zero) animates the gait. The entity
+        /// is despawned when the hold ends.</para>
         ///
         /// <para>The assert establishes that the entity spawned and actually
         /// travelled; it never claims the gait looked right. The verdict is the
         /// muxed clip, and a person's.</para>
         /// </summary>
+        /// <param name="speed">Orbit angular rate around the spawn point, in
+        /// radians per second. Ground speed is that rate times the fixed 3 m
+        /// orbit radius, so this is not a metres-per-second value.</param>
+        /// <param name="spawnOffset">Accepted for the caller's readability and
+        /// not read: the act spawns at a fixed (1.5, 2, 1.5) offset from the
+        /// player, and the walk orbits that spawn point.</param>
         public static CaseDef WalkEntity(
             string suite,
             string id,
@@ -426,7 +432,7 @@ namespace ZdtdPlaytest
                     // client does not simulate a remote entity (gravity, AI, the
                     // gait animation), and GameObjectAnimalAnimation only plays
                     // for a non-remote one. Setting isEntityRemote=false makes
-                    // the client run it like a local entity — it grounds, its AI
+                    // the client run it like a local entity: it grounds, its AI
                     // wanders and the Walk gait plays. That is exactly what a
                     // server-side spawn would give, without orchestrator plumbing.
                     var spawned = Helpers.SpawnEntityNear(player, className, new Vector3(1.5f, 2f, 1.5f));
@@ -463,26 +469,15 @@ namespace ZdtdPlaytest
                     float elapsed = Time.unscaledTime - ctx.FloatA;
                     if (e != null)
                     {
-                        // Keep the creature framed in the player camera while it
-                        // walks. The old wait advanced the creature along its own
-                        // facing from a fixed world offset, so it walked off the
-                        // player's view and the clip photographed bare terrain —
-                        // the "walk" passed its assert (position moved, renderer
-                        // present) but was never judgeable, and every grounding
-                        // verdict drawn from it was unfounded. Here the creature
-                        // is repositioned in front of the camera each tick (yaw
-                        // slowly changing, to read as a walk) and grounded onto
-                        // the terrain surface, so the clip actually shows it
-                        // walking on the ground in frame.
+                        // Drive the creature on a slow orbit around its spawn
+                        // point, grounded each tick, so the clip reads as a
+                        // walk on the terrain. The orbit is anchored to the
+                        // spawn, not to the player camera: the player's FP
+                        // camera is detached for this clip, so its transform
+                        // position is not a reliable framing anchor.
                         try
                         {
                             var player = ctx.Player;
-                            // Drive the creature in a slow orbit around its spawn,
-                            // grounding it each tick, so the clip reads as a walk
-                            // on the terrain instead of a creature flung around by
-                            // a camera. Decoupled from the player camera: with the
-                            // player's FP camera detached for this clip, its
-                            // transform position is not a reliable framing anchor.
                             float yaw = Time.unscaledTime * speed;
                             var pivot = ctx.StartPos;
                             var target = pivot + new Vector3(Mathf.Sin(yaw) * 3.0f, 0f, Mathf.Cos(yaw) * 3.0f);
