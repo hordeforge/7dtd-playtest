@@ -27,6 +27,24 @@ uv run --locked python scripts/dst_run.py --agents 5 --no-faults
 200 seeds is about 200 simulated hours and takes ~2 seconds, because no wall
 time is ever spent waiting.
 
+## Replaying a run
+
+A seed determines a run, and the run says so in a form you can compare:
+
+```
+uv run --locked python scripts/dst_run.py --seed 18 --json out.json
+# summary: run_digest=<sha256 over every seed's trace digest, in order>
+#          failing_trace_digest: the failing seed's own trace digest
+```
+
+Re-run the same seed list and compare `run_digest`: equal means the replay is
+byte-for-byte the run, across processes and `PYTHONHASHSEED` values alike. A
+failure prints its own `digest:` line and dumps the event history to
+`<trace-dir>/dst-trace-<seed>.jsonl`. **A replay never overwrites an existing
+dump**: it lands on `dst-trace-<seed>-2.jsonl` (and `-3`, …) and names the
+baseline it kept, because the first dump is the record of what the run did and
+diffing the two is how a divergence is located.
+
 ## Pieces
 
 | File | Role |
@@ -120,6 +138,12 @@ in them.
 
 I1/I2 and I7 are deliberately paired across the boundary: the acquiring agent
 asserts before it starts processes, and the world asserts after every step.
+
+The scheduler's runaway cap (`--max-steps`, default 1,000,000 resumes) is a
+verdict too, not a safety valve that returns cleanly: a run that reaches it
+never got to its horizon and its invariants were never checked past the cut,
+so it is reported as a failure with its seed, its digest and its trace, like
+any other violation.
 
 ## What it found
 

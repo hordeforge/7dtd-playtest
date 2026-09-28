@@ -110,6 +110,10 @@ class SimConfig:
     run_seconds: float = 3600.0
     session_min_hold: float = 60.0
     session_max_hold: float = 900.0
+    # Runaway cap on scheduler resumes. A run that reaches it has not reached
+    # its horizon and its invariants stopped being checked, so it is reported
+    # as a failure rather than as a truncated clean run.
+    max_steps: int = 1_000_000
     faults: Faults = field(default_factory=Faults)
 
 
@@ -705,7 +709,7 @@ def run_simulation(seed: int, cfg: SimConfig | None = None) -> SimResult:
                 sim.spawn(a.name, a.run(), delay=i * 0.5)
             violation: str | None = None
             try:
-                sim.run(until=cfg.run_seconds)
+                sim.run(until=cfg.run_seconds, max_steps=cfg.max_steps)
             except InvariantViolation as ex:
                 violation = str(ex)
         finally:

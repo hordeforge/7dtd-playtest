@@ -6,14 +6,19 @@
     python3 scripts/dst_run.py --soak 300      # keep going for 5 minutes
     python3 scripts/dst_run.py --regressions   # replay every captured seed
 
-Every run is a pure function of its seed. A failure prints the seed and the
-exact command to reproduce it, dumps the trace, and (with --record) appends
-the seed to the regression list so it is replayed forever after.
+Every run is a pure function of its seed. A failure prints the seed, the
+trace digest, and the exact command to reproduce it, dumps the trace without
+overwriting the dump a previous run of that seed left (the baseline a replay
+is diffed against), and (with --record) appends the seed to the regression
+list so it is replayed forever after. ``--json`` carries ``run_digest`` over
+every seed it ran, so two runs of the same seed list are comparable without
+keeping the traces.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -85,6 +90,7 @@ def config_from_args(args: argparse.Namespace) -> SimConfig:
         stale_sec=args.stale_sec,
         heartbeat_sec=args.heartbeat_sec,
         run_seconds=args.sim_seconds,
+        max_steps=args.max_steps,
         faults=faults,
     )
 
@@ -102,6 +108,7 @@ def replay_flags(cfg: SimConfig) -> str:
         f"--sim-seconds {cfg.run_seconds:g}",
         f"--stale-sec {cfg.stale_sec:g}",
         f"--heartbeat-sec {cfg.heartbeat_sec:g}",
+        f"--max-steps {cfg.max_steps}",
     ]
     faults = cfg.faults
     if faults != Faults():
@@ -153,6 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="simulated heartbeat age after which a lock is stale")
     ap.add_argument("--heartbeat-sec", type=float, default=30.0,
                     help="simulated heartbeat interval")
+    ap.add_argument("--max-steps", type=int, default=SimConfig.max_steps,
+                    help="scheduler resumes before the run is called a runaway "
+                         "(reported as a failure, never as a clean stop)")
     ap.add_argument("--no-faults", action="store_true",
                     help="disable fault injection (happy path only)")
     ap.add_argument("--clock-skew", action="store_true",
@@ -171,10 +181,34 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def trace_dump_path(trace_dir: Path, seed: int) -> tuple[Path, Path | None]:
+    """Dump path for ``seed``, and the earlier dump it must not overwrite.
+
+    Replaying a failing seed is how you find out whether the divergence is
+    yours, so the first trace is the baseline the replay is diffed against.
+    Writing over it destroys the only record of what the run actually did,
+    and a second dump that lands on the same name is indistinguishable from a
+    replay that reproduced it exactly. So a name already taken gets a
+    numbered sibling, and the caller is told which file that was.
+    """
+    base = trace_dir / f"dst-trace-{seed}.jsonl"
+    if not base.exists():
+        return base, None
+    n = 2
+    while (trace_dir / f"dst-trace-{seed}-{n}.jsonl").exists():
+        n += 1
+    return trace_dir / f"dst-trace-{seed}-{n}.jsonl", base
+
+
 def report_failure(
     result: SimResult, cfg: SimConfig, trace_dir: Path, argv0: str
 ) -> Path | None:
-    """Print the seed, the repro command, and the tail of the event history.
+    """Print the seed, the trace digest, the repro command, and the tail of
+    the event history.
+
+    The digest is what says whether a replay reproduced the run: two dumps of
+    one seed with the same digest are the same run, and a differing one names
+    the divergence without anyone reading a few thousand events.
 
     Returns the trace path, or None when the dump could not be written. The
     dump failing (full disk, unwritable dir) must not prevent the verdict,
@@ -182,10 +216,11 @@ def report_failure(
     convenience, those prints are the evidence.
     """
     path: Path | None = None
+    baseline: Path | None = None
     lines = result.trace_lines
     try:
         trace_dir.mkdir(parents=True, exist_ok=True)
-        dump = trace_dir / f"dst-trace-{result.seed}.jsonl"
+        dump, baseline = trace_dump_path(trace_dir, result.seed)
         dump.write_text("\n".join(lines) + "\n", encoding="utf-8")
         path = dump
     except OSError as ex:
@@ -194,10 +229,14 @@ def report_failure(
     print("=" * 72, file=sys.stderr)
     print(f"[dst] FAIL seed={result.seed}", file=sys.stderr)
     print(f"[dst] invariant: {result.violation}", file=sys.stderr)
+    print(f"[dst] digest:    {result.digest}", file=sys.stderr)
     print(f"[dst] replay:    {replay_command(result.seed, cfg, argv0)}",
           file=sys.stderr)
     if path is not None:
         print(f"[dst] trace:     {path} ({len(lines)} events)", file=sys.stderr)
+        if baseline is not None:
+            print(f"[dst] baseline:  {baseline} (kept; diff the two to see where "
+                  "the replay diverged)", file=sys.stderr)
     else:
         print("[dst] trace:     <unavailable; see warning above>", file=sys.stderr)
     print("=" * 72, file=sys.stderr)
@@ -234,6 +273,10 @@ def main(argv: list[str] | None = None) -> int:
     ran = 0
     coverage: set[str] = set()
     failures: list[SimResult] = []
+    # One digest over every run's own trace digest, in order: the evidence a
+    # later replay of the same seed list is compared against. Without it a
+    # green CI run leaves nothing behind that says what it actually did.
+    run_digest = hashlib.sha256()
     index = 0
     while True:
         if index >= len(seeds):
@@ -246,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_simulation(seed, cfg)
         ran += 1
         coverage |= result.coverage
+        run_digest.update(f"{seed}:{result.digest}\n".encode())
         if result.violation:
             failures.append(result)
             report_failure(result, cfg, args.trace_dir, sys.argv[0])
@@ -256,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[dst] {ran} seeds ok (last={seed})")
 
     wall = time.monotonic() - started
+    run_digest_hex = run_digest.hexdigest()
     summary = {
         "seeds_run": ran,
         "failures": len(failures),
@@ -265,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
         "faults": not args.no_faults,
         "coverage": sorted(coverage),
         "failing_seed": failures[0].seed if failures else None,
+        "failing_trace_digest": failures[0].digest if failures else None,
+        "run_digest": run_digest_hex,
     }
     if args.json:
         try:
@@ -281,7 +328,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(
         f"[dst] PASS {ran} seeds, {summary['simulated_sec']:.0f} simulated seconds "
-        f"in {wall:.1f}s wall, {len(coverage)} scenario kinds covered"
+        f"in {wall:.1f}s wall, {len(coverage)} scenario kinds covered, "
+        f"run_digest={run_digest_hex[:16]}"
     )
     return 0
 

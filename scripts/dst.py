@@ -218,13 +218,24 @@ class Simulation:
 
     def run(self, *, until: float | None = None, max_steps: int = 1_000_000) -> None:
         """Run until the queue drains, ``until`` simulated seconds elapse, or
-        ``max_steps`` resumes happen (a runaway actor must not hang CI)."""
+        ``max_steps`` resumes happen.
+
+        Hitting the cap is a verdict, not a quiet stop: the run has not
+        reached its horizon, its last stretch went unchecked by the
+        invariants, and every later step would have been dropped. A livelock
+        that returns normally reads downstream as a clean run, which is the
+        one thing a simulation must never claim.
+        """
         deadline = None if until is None else self.clock.start_epoch + until
         self.check_invariants()
         while self._queue:
             if self.steps >= max_steps:
                 self.record("sim", "max_steps", steps=self.steps)
-                return
+                raise InvariantViolation(
+                    f"scheduler hit the {max_steps}-step runaway cap with "
+                    f"{len(self._queue)} actor(s) still queued: the run was cut "
+                    f"off, not finished"
+                )
             item = heapq.heappop(self._queue)
             if deadline is not None and item.at > deadline:
                 self.clock.advance_to(deadline)

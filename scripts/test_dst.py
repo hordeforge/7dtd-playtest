@@ -205,6 +205,104 @@ def test_simulator_catches_planted_regressions() -> None:
         print(f"  planted '{name}' caught on {count}/30 seeds")
 
 
+def test_runner_summary_replays_byte_identically() -> None:
+    """The shipped CLI, not just the library, is a function of its seeds.
+
+    The summary is the only evidence a green run leaves, so it has to be the
+    part that is reproducible: two fresh processes with different hash seeds
+    must publish the same ``run_digest`` and the same coverage. A digest that
+    moved here would mean something outside the seed reached a run.
+    """
+    import json
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        summaries = []
+        for i, hash_seed in enumerate(("0", "12345")):
+            out = Path(td) / f"summary{i}.json"
+            proc = subprocess.run(
+                [
+                    sys.executable, str(SCRIPTS / "dst_run.py"),
+                    "--seed", "4242", "--json", str(out),
+                    "--trace-dir", str(Path(td) / "traces"),
+                    "--quiet",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=True,
+                env={"PATH": "/usr/bin:/bin", "PYTHONHASHSEED": hash_seed},
+            )
+            _assert("run_digest=" in proc.stdout, "PASS line carries no run digest")
+            summaries.append(json.loads(out.read_text(encoding="utf-8")))
+    a, b = summaries
+    for key in ("run_digest", "coverage", "seeds_run", "simulated_sec", "agents"):
+        _assert(a[key] == b[key], f"summary {key} differs across processes: {a} {b}")
+    _assert(a["run_digest"] != "", "empty run digest")
+
+
+def test_failure_dump_keeps_the_previous_trace() -> None:
+    """A replay of a failing seed must not overwrite the run it replays.
+
+    The first dump is the baseline the replay is diffed against, so a second
+    dump of the same seed lands beside it and names it.
+    """
+    import contextlib
+    import io
+    import tempfile
+
+    from dst_sim import SimConfig, SimResult
+
+    def _result(digest: str) -> SimResult:
+        return SimResult(
+            seed=4242, digest=digest, steps=1, refusals={}, torn=0, crashes=0,
+            io_errors=0, max_concurrent_runtime=1, violation="[t] broken",
+            trace_lines=[f'{{"digest":"{digest}"}}'],
+        )
+
+    with tempfile.TemporaryDirectory() as td:
+        trace_dir = Path(td) / "traces"
+        errbuf = io.StringIO()
+        with contextlib.redirect_stderr(errbuf):
+            first = dst_run.report_failure(_result("a" * 64), SimConfig(),
+                                           trace_dir, "dst_run.py")
+            second = dst_run.report_failure(_result("b" * 64), SimConfig(),
+                                            trace_dir, "dst_run.py")
+        err = errbuf.getvalue()
+        if first is None or second is None:
+            raise AssertionError("no trace dump written")
+        base, replay = first, second
+        _assert(base != replay, f"replay clobbered the baseline dump {base}")
+        _assert(
+            f'"digest":"{"a" * 64}"' in base.read_text(encoding="utf-8"),
+            "baseline was overwritten by the replay",
+        )
+        _assert(
+            f'"digest":"{"b" * 64}"' in replay.read_text(encoding="utf-8"),
+            "replay dump does not hold the replayed run",
+        )
+        _assert(str(base) in err and "baseline:" in err,
+                "the kept baseline is not named for the operator")
+    _assert("digest:    " + "b" * 64 in err, "FAIL block does not name the digest")
+
+
+def test_runaway_cap_is_a_verdict_not_a_silent_stop() -> None:
+    """A run cut off by the step cap must fail, not pass truncated.
+
+    The cap is the scheduler's answer to a livelock. Returning from it quietly
+    would report a run that never reached its horizon, whose invariants were
+    never checked past the cut, as a clean one.
+    """
+    capped = run_simulation(4242, SimConfig(max_steps=5))
+    _assert(capped.violation is not None, "a capped run reported a clean pass")
+    _assert(capped.violation is not None and "runaway cap" in capped.violation,
+            f"cap failure does not name the cap: {capped.violation}")
+    _assert("max_steps" in capped.coverage, "the cap is not in the trace")
+    _assert(run_simulation(4242).violation is None,
+            "the default cap cut a normal run short")
+
+
 def test_regression_seeds_replay() -> None:
     seeds = dst_run.load_regression_seeds()
     for seed in seeds:
@@ -224,6 +322,7 @@ def test_replay_command_pins_the_config() -> None:
         ["--agents", "5", "--sim-seconds", "600",
          "--stale-sec", "60", "--heartbeat-sec", "10"],
         ["--no-faults", "--agents", "7", "--sim-seconds", "120"],
+        ["--max-steps", "50", "--sim-seconds", "60"],
     ):
         want = dst_run.config_from_args(dst_run.build_parser().parse_args(argv))
         cmd = dst_run.replay_command(1234, want, "scripts/dst_run.py")
@@ -333,6 +432,11 @@ def main() -> int:
          test_simulator_catches_planted_regressions),
         ("regression_seeds_replay", test_regression_seeds_replay),
         ("replay_command_pins_the_config", test_replay_command_pins_the_config),
+        ("runner_summary_replays_byte_identically",
+         test_runner_summary_replays_byte_identically),
+        ("failure_dump_keeps_the_previous_trace",
+         test_failure_dump_keeps_the_previous_trace),
+        ("runaway_cap_is_a_verdict", test_runaway_cap_is_a_verdict_not_a_silent_stop),
         ("release_no_op_when_not_owner", test_lock_release_is_no_op_when_not_owner),
         ("heartbeat_flags_lost_claim", test_heartbeat_loop_flags_a_lost_claim),
         ("failure_reporting_survives_unwritable_trace_dir",
