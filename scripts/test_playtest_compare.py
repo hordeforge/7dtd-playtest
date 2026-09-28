@@ -8,6 +8,7 @@ and one-sided cases become findings; matching cases do not.
 from __future__ import annotations
 
 import json
+import random
 import subprocess
 import sys
 import time
@@ -434,6 +435,141 @@ def test_non_string_case_in_report_does_not_crash_diff(tmp_path: Path) -> None:
     payload = json.loads((out / "playtest-compare.json").read_text(encoding="utf-8"))
     by = {c["case"]: c for c in payload["cases"]}
     assert by["?"]["stock"]["status"] == "PASS"
+
+
+# Scalars a report JSON can carry where a case id, a status, a count, a
+# duration or a wall clock belongs. The parser must take every one of them and
+# still produce a comparison, or refuse the input with a documented exit code.
+_HOSTILE_SCALARS: tuple[object, ...] = (
+    None, True, False, 0, -1, 7, 1 << 70, 1.5, float("inf"), float("nan"),
+    "", "x", "PASS", "3", "0x10", "[]", "{}", [1, 2], {"k": "v"},
+    "a|b\nc`d", "\x00\x1f\x7f\x9f", "‮rtl‭", "\U0001f600", "-",  # noqa: PLE2502
+)
+
+
+def _hostile_payload(rng: random.Random) -> object:
+    """One run report, built from the shapes a real file can hold.
+
+    A report-*.json is not the orchestrator's private output by construction:
+    it is a file on disk that a crashed or interrupted run truncates, another
+    tool writes, or an operator hand-builds. The grammar puts a hostile value
+    at every position main() reads, and drops whole keys, so the diff has to
+    hold every cross-field rule on what is left.
+    """
+    payload: dict[str, object] = {}
+    if rng.random() < 0.85:
+        rows: list[object] = []
+        for _ in range(rng.randrange(0, 4)):
+            row = rng.choice(_HOSTILE_SCALARS) if rng.random() < 0.15 else {
+                "case": rng.choice(_HOSTILE_SCALARS),
+                "status": rng.choice(_HOSTILE_SCALARS),
+                "detail": rng.choice(_HOSTILE_SCALARS),
+            }
+            rows.append(row)
+        payload["results"] = rng.choice(_HOSTILE_SCALARS) if rng.random() < 0.15 else rows
+    if rng.random() < 0.8:
+        payload["summary"] = (
+            {k: rng.choice(_HOSTILE_SCALARS) for k in ("pass", "fail", "skip")}
+            if rng.random() < 0.7
+            else rng.choice(_HOSTILE_SCALARS)
+        )
+    if rng.random() < 0.6:
+        payload["wall_sec"] = rng.choice(_HOSTILE_SCALARS)
+    if rng.random() < 0.6:
+        payload["server"] = rng.choice(_HOSTILE_SCALARS)
+    if rng.random() < 0.6:
+        payload["ran_epoch"] = rng.choice(_HOSTILE_SCALARS)
+    return payload
+
+
+def _hostile_side(rng: random.Random, path: Path) -> None:
+    """Write one side of the diff: a report JSON, a client log, or raw bytes."""
+    roll = rng.random()
+    if roll < 0.2:
+        # A log, or a truncated/mangled one: the non-JSON fallback path.
+        path.write_text(
+            "".join(
+                rng.choice([
+                    "[7dtd-playtest] PASS smoke/join detail=ok\n",
+                    "[7dtd-playtest] " + json.dumps(_hostile_payload(rng)) + "\n",
+                    "[7dtd-playtest] SUMMARY pass=x fail=\n",
+                    '{"results": [\n', "\x00\xff\xfe truncated \xe2\x82",
+                ])
+                for _ in range(rng.randrange(0, 5))
+            ),
+            encoding="utf-8", errors="replace",
+        )
+        return
+    payload = _hostile_payload(rng)
+    if roll < 0.28:
+        # Raw bytes that are not valid UTF-8 at all.
+        path.write_bytes(json.dumps(payload).encode("utf-8")[: rng.randrange(0, 40)] + b"\xff\xfe")
+        return
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_fuzz_compare_survives_hostile_report_pairs(tmp_path: Path) -> None:
+    """Seeded grammar fuzzer over both diff inputs, driving the real CLI.
+
+    A report JSON is a file, so its JSON types are untrusted: a hand-built
+    fixture, a truncated run, or another tool's output can put a string, a
+    number, null or a nested list where a result row, a case id, a count or a
+    wall time belongs. The diff must still answer, and answer it with a
+    documented exit code: a traceback out of this CLI is exit 1, which the
+    module documents as "neither side had a result line", so a crash reads to
+    every caller as a verdict about the run rather than about the file.
+    """
+    rng = random.Random(20260928)
+    compared = 0
+    refused = 0
+    for i in range(40):
+        case_dir = tmp_path / f"run{i}"
+        case_dir.mkdir()
+        stock, zdtd = case_dir / "stock.json", case_dir / "zdtd.json"
+        _hostile_side(rng, stock)
+        _hostile_side(rng, zdtd)
+        out = case_dir / "out"
+        r = _run_cli("--stock", str(stock), "--zdtd", str(zdtd), "--out", str(out))
+        assert "Traceback" not in r.stderr, (
+            f"iteration {i} crashed the diff:\n{r.stderr}\n"
+            f"stock: {stock.read_bytes()[:200]!r}\nzdtd: {zdtd.read_bytes()[:200]!r}"
+        )
+        # Both sides exist and are readable files, so the comparison is the
+        # answer: 0 (written) or 1 (no result line on either side). Any other
+        # code means a freshness or write failure the fuzzer did not ask for.
+        assert r.returncode in (0, 1), f"iteration {i} exit {r.returncode}: {r.stderr}"
+        if r.returncode == 1:
+            refused += 1
+            assert not (out / "playtest-compare.json").exists()
+            continue
+        compared += 1
+        payload = json.loads(
+            (out / "playtest-compare.json").read_text(encoding="utf-8")
+        )
+        # Every row the diff emitted is a usable row: a string case id, string
+        # statuses, string details, and int counts. A coerced value that is
+        # still the wrong type would break the next consumer of this artifact
+        # exactly where the run log was trusted one step less.
+        for row in payload["cases"]:
+            assert isinstance(row["case"], str) and row["case"]
+            for side in ("stock", "zdtd"):
+                assert isinstance(row[side]["status"], str)
+                assert isinstance(row[side]["detail"], str)
+                assert len(row[side]["detail"]) <= 120
+        for side in ("stock", "zdtd"):
+            for count in payload[side]["summary"].values():
+                assert isinstance(count, int) and not isinstance(count, bool)
+        # The markdown renders for a human: one table row per case, and no
+        # crafted value authoring a line of its own below the table.
+        md = (out / "playtest-compare.md").read_text(encoding="utf-8")
+        body = md.split("## Per-case", 1)[1].split("## Findings", 1)[0]
+        table = [ln for ln in body.splitlines() if ln.strip()]
+        assert len(table) == len(payload["cases"]) + 2, (
+            f"iteration {i}: {len(table)} table lines for {len(payload['cases'])} cases"
+        )
+    assert compared >= 15, f"fuzzer only compared {compared}/40 pairs: corpus is too weak"
+    assert refused >= 1, "fuzzer never reached the no-result-line refusal"
+    print(f"PASS compare_fuzz 40 hostile sides, {compared} compared and {refused} refused")
 
 
 if __name__ == "__main__":

@@ -44,12 +44,73 @@ from playtest_log import parse_client_log  # noqa: E402
 MAX_FRESHNESS_MINUTES = 10**9
 
 
+def _count(value: object) -> int:
+    """A summary count as an int; anything else (bool included) is 0."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _summary_counts(value: object) -> dict[str, int]:
+    """``{pass, fail, skip}`` counts out of whatever a side reported.
+
+    Absent or malformed counts read as 0, which is what an unrun case counts
+    as; they are a cost axis in the report, never a verdict.
+    """
+    if not isinstance(value, dict):
+        return {"pass": 0, "fail": 0, "skip": 0}
+    return {k: _count(value.get(k, 0)) for k in ("pass", "fail", "skip")}
+
+
+def _text(value: object) -> str:
+    """Any JSON value as the text a log-derived field renders as."""
+    if isinstance(value, str):
+        return value
+    return "" if value is None else str(value)
+
+
+def _wall_seconds(value: object) -> float | None:
+    """``wall_sec`` as a finite float, or None when absent or unusable."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _result_rows(value: object) -> list[dict[str, str]]:
+    """Result rows as ``{case, status, detail}`` string dicts.
+
+    This is the untrusted boundary of the tool: a report JSON is a file on
+    disk, not a value this repo produced in this process, so a truncated run,
+    a hand-built fixture, or another tool's output can put any JSON value
+    where a row, a case id, a status or a detail belongs. Coercing once here
+    is what lets the diff below read strings; a row that is not an object at
+    all keeps its place as an unnamed case (``?``) instead of ending the run.
+    """
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for raw in value:
+        row = raw if isinstance(raw, dict) else {}
+        case = row.get("case")
+        if not isinstance(case, str) or not case:
+            case = "?"
+        status = row.get("status", "MISSING")
+        detail = row.get("detail")
+        rows.append(
+            {
+                "case": case,
+                "status": _text(status),
+                "detail": _text(detail),
+            }
+        )
+    return rows
+
+
 def load_results(path: Path) -> dict:
     """Return {"results": [...], "summary": {...}, "wall": s|None, "server": str|None,
     "ran_epoch": s|None} from a report JSON or a log. wall is the orchestrator's
     wall_sec (server session wall time), reported as a cost axis, never a
     per-case finding. A log input adds "nre_like" and leaves wall/server/
-    ran_epoch None."""
+    ran_epoch None. Results, summary and wall are coerced to the shapes main()
+    reads (see :func:`_result_rows`): both inputs are files."""
     # One read feeds both decoders: a second read after the JSON attempt can
     # fail (file replaced/removed between reads) and crash the diff on input
     # the first read already saw.
@@ -67,12 +128,14 @@ def load_results(path: Path) -> dict:
         if isinstance(loaded, dict) and "results" in loaded:
             payload = loaded
     if payload is not None:
-        return {"results": payload["results"], "summary": payload.get("summary"),
-                "wall": payload.get("wall_sec"),
+        return {"results": _result_rows(payload["results"]),
+                "summary": _summary_counts(payload.get("summary")),
+                "wall": _wall_seconds(payload.get("wall_sec")),
                 "server": payload.get("server"),
                 "ran_epoch": payload.get("ran_epoch")}
     parsed = parse_client_log(text)
-    return {"results": parsed["results"], "summary": parsed["summary"],
+    return {"results": _result_rows(parsed["results"]),
+            "summary": _summary_counts(parsed["summary"]),
             "nre_like": parsed["nre_like"], "wall": None, "server": None,
             "ran_epoch": None}
 
@@ -264,14 +327,9 @@ def main() -> int:
     def by_case(res: dict[str, Any]) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
         for r in res["results"]:
-            # A report JSON can carry any JSON value where a case id belongs
-            # (hand-built fixtures, older tools); a non-string key would
-            # crash sorted() below on the str/int mix, so coerce like
-            # ClientLogScan coerces its event fields.
-            case = r.get("case")
-            if not isinstance(case, str) or not case:
-                case = "?"
-            out.setdefault(case, []).append(r)
+            # load_results already coerced every row to a non-empty string
+            # case id, so the sort below never sees a str/int key mix.
+            out.setdefault(r["case"], []).append(r)
         return out
 
     scases, zcases = by_case(stock), by_case(zdtd)
@@ -288,21 +346,18 @@ def main() -> int:
         })
         if s_st != z_st:
             # Findings are display prose shared by the md and JSON payloads;
-            # md_cell keeps a log-derived id from authoring markdown there.
+            # md_cell keeps a log-derived id or status from authoring markdown
+            # there, since both come out of the client's own bytes.
             shown = md_cell(case)
+            s_shown, z_shown = md_cell(s_st), md_cell(z_st)
             if "MISSING" in (s_st, z_st):
                 findings.append(f"{shown}: ran only on "
                                 f"{'stock' if z_st == 'MISSING' else 'zdtd'} "
-                                f"({s_st} vs {z_st})")
+                                f"({s_shown} vs {z_shown})")
             else:
-                findings.append(f"{shown}: status differs ({s_st} vs {z_st})")
+                findings.append(f"{shown}: status differs ({s_shown} vs {z_shown})")
 
-    def summary(res: dict[str, Any]) -> dict[str, int]:
-        s = res.get("summary") or {}
-        return {"pass": s.get("pass", 0), "fail": s.get("fail", 0),
-                "skip": s.get("skip", 0)}
-
-    ss, zs = summary(stock), summary(zdtd)
+    ss, zs = stock["summary"], zdtd["summary"]
     wall = {"stock": stock.get("wall"), "zdtd": zdtd.get("wall")}
     ran_at = {"stock": ran_epoch_of(stock_path, stock),
               "zdtd": ran_epoch_of(zdtd_path, zdtd)}
@@ -339,8 +394,8 @@ def main() -> int:
     lines.append("|---|---|---|")
     for r in rows:
         lines.append(
-            f"| `{md_cell(r['case'])}` | {r['stock']['status']} "
-            f"| {r['zdtd']['status']} |"
+            f"| `{md_cell(r['case'])}` | {md_cell(r['stock']['status'])} "
+            f"| {md_cell(r['zdtd']['status'])} |"
         )
     lines.append("\n## Findings\n")
     if findings:
