@@ -111,7 +111,14 @@ class LockStorage:
             return None
 
     def write_text(self, path: Path, text: str) -> None:
-        path.write_text(text, encoding="utf-8")
+        # The payload is published by os.replace, which renames the name but
+        # not the bytes: without the fsync a crash after the rename can leave
+        # a zero-length lock file, and the next run reads a claim with no
+        # session (or no heartbeat) from it. Flush before the caller renames.
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
 
     def replace(self, src: Path, dst: Path) -> None:
         os.replace(src, dst)

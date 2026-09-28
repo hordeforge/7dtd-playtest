@@ -18,11 +18,13 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import random
 import sys
 import tempfile
 from itertools import pairwise
 from pathlib import Path
+from unittest import mock
 from xml.etree import ElementTree
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -1052,6 +1054,58 @@ def test_feed_line_counts_nre_hits_without_the_batch_helper() -> None:
     print("PASS feed_line counts nre hits like feed_lines")
 
 
+def test_artifacts_publish_by_rename_and_roll_back() -> None:
+    """Every artifact this run publishes is read by something else: the
+    report and junit XML by report_summary / playtest_compare, the run-ended
+    marker by a capture loop in another process. A plain write truncates
+    first, so a crash mid-write leaves a half file that parses as corrupt
+    evidence. Publish by rename, and a failure before the rename must leave
+    the previous payload exactly as it was."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        report = root / "report-1.json"
+        junit = root / "junit-1.xml"
+        marker = root / "run-ended"
+
+        playtest_run.write_report(report, {"old": True})
+        playtest_run.write_junit(junit, "smoke", [])
+        playtest_run.write_run_ended_marker(root, "timeout")
+        assert json.loads(report.read_text(encoding="utf-8")) == {"old": True}
+        ElementTree.parse(junit)
+        assert marker.read_text(encoding="utf-8") == "timeout\n"
+
+        def boom(src: object, dst: object) -> None:
+            raise OSError("no space left on device")
+
+        # playtest_run publishes through os.replace, so the module's own
+        # os is the seam; patching the attribute on the shared module object
+        # keeps the import graph honest.
+        with mock.patch.object(os, "replace", boom):
+            playtest_run.write_report(report, {"new": True})
+            playtest_run.write_junit(junit, "smoke", [
+                {"case": "s/c", "status": "FAIL", "detail": "d"},
+            ])
+            playtest_run.write_run_ended_marker(root, "done")
+
+        # Nothing published, nothing truncated: a failed publish is invisible.
+        assert json.loads(report.read_text(encoding="utf-8")) == {"old": True}, (
+            "a failed publish must leave the previous report intact"
+        )
+        assert not (root / "junit-1.xml").read_text(encoding="utf-8").count("testcase"), (
+            "a failed publish must not leak the new cases into the old junit"
+        )
+        assert marker.read_text(encoding="utf-8") == "timeout\n", (
+            "a failed publish must leave the previous run-ended reason intact"
+        )
+        # No temp litter left behind for the next run to trip over.
+        assert sorted(p.name for p in root.iterdir()) == [
+            "junit-1.xml",
+            "report-1.json",
+            "run-ended",
+        ]
+    print("PASS artifacts_atomic publish-by-rename with rollback on failure")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -1075,6 +1129,7 @@ def main() -> int:
     test_collect_visual_reviews_is_empty_without_a_directory()
     test_report_summary_prints_counts_and_fails_closed()
     test_fuzz_report_summary_never_launders_a_broken_lap()
+    test_artifacts_publish_by_rename_and_roll_back()
     print("RESULT PASS")
     return 0
 

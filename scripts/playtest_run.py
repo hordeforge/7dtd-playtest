@@ -1192,8 +1192,7 @@ def write_zdtd_apm_dump(
     def _write_dump(text: str) -> bool:
         """Write the dump file; False leaves the retry-next-poll path armed."""
         try:
-            dump_path.parent.mkdir(parents=True, exist_ok=True)
-            dump_path.write_text(text, encoding="utf-8")
+            write_text_atomic(dump_path, text)
         except OSError as ex:
             warn(f"apm dump: could not write {dump_path}: {ex}")
             return False
@@ -1255,10 +1254,34 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
             fh.close()
 
 
+def write_text_atomic(path: Path, text: str) -> None:
+    """Publish ``text`` at ``path`` so no reader ever sees a partial file.
+
+    Every file this run writes is read by something else: the report and
+    junit XML by report_summary / playtest_compare, the run-ended marker by a
+    capture loop in another process, the apm dump by the next attempt. A plain
+    write_text truncates first, so a crash (or a concurrent reader) lands on a
+    half-written file that parses as corrupt evidence with no way back. Write
+    a sibling temp file, flush it to disk, then rename over the target: rename
+    is atomic within a directory, so a reader sees either the old payload or
+    the new one, and a failure before the rename leaves the old one intact.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+
+
 def write_report(path: Path, payload: dict) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        write_text_atomic(path, json.dumps(payload, indent=2) + "\n")
     except OSError as ex:
         # A full disk must not erase the run's verdict: the caller keeps
         # going so SUMMARY/exit still reflect the playtest result.
@@ -1338,8 +1361,7 @@ def write_junit(path: Path, suite: str, results: list[dict]) -> None:
         lines.append("  </testcase>")
     lines.append("</testsuite>")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        write_text_atomic(path, "\n".join(lines) + "\n")
     except OSError as ex:
         err(f"could not write junit {path}: {ex}")
         return
@@ -1691,7 +1713,10 @@ RUN_ENDED_NAME = "run-ended"
 
 def write_run_ended_marker(logdir: Path, reason: str) -> None:
     try:
-        (logdir / RUN_ENDED_NAME).write_text(reason + "\n", encoding="utf-8")
+        # Another process polls this file (a capture loop ends on it), so it
+        # is published by rename: a reader must see the whole line or the
+        # previous content, never a half-written marker.
+        write_text_atomic(logdir / RUN_ENDED_NAME, reason + "\n")
     except OSError as ex:
         warn(f"could not write run-ended marker in {logdir}: {ex}")
 

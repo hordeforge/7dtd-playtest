@@ -443,8 +443,11 @@ def resolve_mods(
 def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
     """JSON-serializable summary for the run report.
 
-    Every declared field is carried, so the report reparses as the suite that
-    ran (``parse_suite_dict`` on this mapping gives the same document).
+    Every field of the *document* is carried, so the report reparses as the
+    suite that ran (``parse_suite_dict`` on this mapping gives the same
+    document). The path a doc was loaded from is not one of them: ``source``
+    is not a document key, so emitting it would make the report a document the
+    loader refuses to read back.
     """
     return {
         "id": doc.id,
@@ -467,5 +470,4 @@ def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
             for c in doc.cases
         ],
         "notes": list(doc.notes),
-        "source": str(doc.source) if doc.source else None,
     }
