@@ -21,6 +21,12 @@ file at the original path is kept unless `--force` overwrites it, and
 Everything here works off the recorded absolute paths, so a restore on a
 different machine writes where the run said it wrote. That is the point of
 the manifest: no operator has to remember which `--world` produced an entry.
+
+Exit codes:
+  0  the requested listing or plan is complete, or the restore wrote every file
+  1  the entry recorded no files, or a restore left one blocked (a path
+     already occupied without --force, or a copy that failed)
+  2  bad usage, or the named quarantine root or entry does not exist
 """
 from __future__ import annotations
 
@@ -160,7 +166,10 @@ def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
     pairs, dropped = _read_manifest(entry)
     print("\n".join(_describe(pairs, entry, dropped)))
     if not pairs:
-        return 2
+        # 1, like `show` on the same entry: nothing about the invocation was
+        # wrong, the entry records nothing to restore. 2 would read as a
+        # malformed command line, which it is not.
+        return 1
     if not apply:
         print("dry run: nothing written; pass --apply to restore")
         return 0

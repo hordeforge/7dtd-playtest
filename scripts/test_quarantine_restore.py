@@ -126,7 +126,7 @@ def test_cli_fails_closed_on_a_missing_quarantine_or_entry() -> None:
         assert qr.main(["restore", "nope", "--quarantine", str(qroot)]) == 2
         # A traversal segment never resolves to an entry.
         assert qr.main(["restore", "../etc", "--quarantine", str(qroot)]) == 2
-        assert qr.main(["restore", "20260101T000000Z-x", "--quarantine", str(qroot)]) == 2, (
+        assert qr.main(["restore", "20260101T000000Z-x", "--quarantine", str(qroot)]) == 1, (
             "an entry with no manifest has nothing to restore"
         )
         assert qr.main(["show", "20260101T000000Z-x", "--quarantine", str(qroot)]) == 1

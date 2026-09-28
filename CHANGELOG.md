@@ -93,7 +93,16 @@ Release model (inferred practice, now pinned by `make test`):
   nonzero exit means, which the one-line usage previously left unsaid for
   the probe the capture scripts gate on. `capture_frames.sh`,
   `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
-  already used.
+  already used. `quarantine_restore.py` documents its exit codes too, and
+  `restore <entry>` on an entry carrying no `restore.jsonl` now exits 1 like
+  `show` on the same entry instead of 2, because nothing about the command
+  line was wrong. `playtest_run.py --help` describes the six
+  `--loadgen-observe-*` / `--loadgen-expect-*` flags, which carried no help
+  text at all. `dep_sbom.py` names the reason on stderr and exits 1 for a
+  lockfile it cannot parse (the `ValueError` behind its own exit-code
+  promise used to reach the operator as a traceback), and creates the
+  output's parent directory, so the `dep_sbom.py dist/app.cdx.json` example
+  in its epilog works in a tree that has no `dist/` yet.
 - **The capture teardown grace is resolved and validated once, before the run
   starts.** `RUN_STOP_TIMEOUT_SEC` reached `$(( SECONDS + RUN_STOP_TIMEOUT_SEC ))`
   inside the `capture_stop_run` EXIT trap with no check, and each of the three

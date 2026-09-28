@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -215,6 +216,27 @@ def test_an_unrecorded_license_fails_loud() -> None:
     raise AssertionError(f"build_sbom emitted {name} with no license recorded")
 
 
+def test_the_cli_writes_its_documented_example_and_names_a_failed_one() -> None:
+    """`dep_sbom.py dist/app.cdx.json` has to work in a tree with no dist/.
+
+    The epilog promises exit 1 for an input that cannot be read or an output
+    that cannot be written; an unwritable destination used to reach the
+    operator as a write_text traceback instead, which is a different
+    interface from the one the help text describes.
+    """
+    with tempfile.TemporaryDirectory(prefix="dep-sbom-cli-") as td:
+        root = Path(td)
+        nested = root / "dist" / "app.cdx.json"
+        assert dep_sbom.main([str(nested)]) == 0, "missing parent directories are created"
+        assert nested.is_file(), "the documented example writes its file"
+        assert json.loads(nested.read_text(encoding="utf-8"))["bomFormat"] == "CycloneDX"
+
+        blocker = root / "not-a-directory"
+        blocker.write_text("a file where the parent directory should be", encoding="utf-8")
+        rc = dep_sbom.main([str(blocker / "app.cdx.json")])
+        assert rc == 1, f"an unwritable destination is exit 1, got {rc}"
+
+
 def test_the_committed_lockfiles_are_not_ignored() -> None:
     """A lockfile the ignore rules cover cannot be re-added after a regen.
 
@@ -251,6 +273,7 @@ TESTS = (
     test_an_unrecorded_license_fails_loud,
     test_serial_number_tracks_content,
     test_empty_inventory_fails_loud,
+    test_the_cli_writes_its_documented_example_and_names_a_failed_one,
 )
 
 

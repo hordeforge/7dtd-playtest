@@ -299,14 +299,15 @@ def main(argv: list[str]) -> int:
             "  dep_sbom.py dist/app.cdx.json    # same document, written to a file\n"
             "exit codes: 0 inventory written, 1 a committed input is missing or\n"
             "does not describe the tree it should (an unreadable lockfile, an\n"
-            "unrecorded license, a version the mod never declares), 2 bad usage"
+            "unrecorded license, a version the mod never declares) or the output\n"
+            "could not be written, 2 bad usage"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "output",
         nargs="?",
-        help="write the SBOM here instead of stdout",
+        help="write the SBOM here instead of stdout; missing parent directories are created",
     )
     args = parser.parse_args(argv)
 
@@ -316,13 +317,31 @@ def main(argv: list[str]) -> int:
             print(f"dep_sbom: missing {path}", file=sys.stderr)
             return 1
 
-    document = build_sbom(
-        as_object(tomllib.loads(UV_LOCK.read_text(encoding="utf-8")), "uv.lock"),
-        as_object(json.loads(NUGET_LOCK.read_text(encoding="utf-8")), "packages.lock.json"),
-    )
+    # Every failure below is a 1 with a message on stderr, as the epilog
+    # promises: build_sbom raises ValueError for a lockfile that does not
+    # describe the tree (a truncated TOML document, a package with no
+    # recorded license, a ModInfo.xml with no <Version>), and without this
+    # the traceback was the whole interface for the case the help text names.
+    try:
+        document = build_sbom(
+            as_object(tomllib.loads(UV_LOCK.read_text(encoding="utf-8")), "uv.lock"),
+            as_object(json.loads(NUGET_LOCK.read_text(encoding="utf-8")), "packages.lock.json"),
+        )
+    except (OSError, ValueError) as ex:
+        print(f"dep_sbom: {ex}", file=sys.stderr)
+        return 1
     text = json.dumps(document, indent=2, sort_keys=True) + "\n"
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        try:
+            # The documented example writes dist/app.cdx.json into a tree that
+            # has no dist/ until a build makes one, so the parent is created
+            # here the way mod_package.py and playtest_compare.py create theirs.
+            out = Path(args.output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+        except OSError as ex:
+            print(f"dep_sbom: cannot write {args.output}: {ex}", file=sys.stderr)
+            return 1
     else:
         sys.stdout.write(text)
     # A release log line a human can read without opening the file.

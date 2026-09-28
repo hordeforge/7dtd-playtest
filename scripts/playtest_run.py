@@ -2897,12 +2897,51 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="service host barriers emitted by an external provider suite",
     )
-    ap.add_argument("--loadgen-observe-cvar", action="append", default=[], metavar="NAME")
-    ap.add_argument("--loadgen-observe-buff", action="append", default=[], metavar="NAME")
-    ap.add_argument("--loadgen-expect-cvar", action="append", default=[], metavar="NAME=VALUE")
-    ap.add_argument("--loadgen-expect-cvar-positive", action="append", default=[], metavar="NAME")
-    ap.add_argument("--loadgen-expect-cvar-equal", action="append", default=[], metavar="NAME=NAME")
-    ap.add_argument("--loadgen-expect-buff", action="append", default=[], metavar="NAME=BOOL")
+    ap.add_argument(
+        "--loadgen-observe-cvar",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="ask the loadgen peer to report CVar NAME on its joined entity",
+    )
+    ap.add_argument(
+        "--loadgen-observe-buff",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="ask the loadgen peer to report buff NAME on its joined entity",
+    )
+    ap.add_argument(
+        "--loadgen-expect-cvar",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="fail the case unless the observed CVar equals VALUE",
+    )
+    ap.add_argument(
+        "--loadgen-expect-cvar-positive",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="fail the case unless the observed CVar is greater than zero",
+    )
+    ap.add_argument(
+        "--loadgen-expect-cvar-equal",
+        action="append",
+        default=[],
+        metavar="NAME=NAME",
+        help="fail the case unless the two observed CVars are equal",
+    )
+    ap.add_argument(
+        "--loadgen-expect-buff",
+        action="append",
+        default=[],
+        metavar="NAME=BOOL",
+        help=(
+            "fail the case unless the observed buff is active; BOOL is "
+            "0/false/no/off or 1/true/yes/on"
+        ),
+    )
     ap.add_argument(
         "--loadgen-server-cvar-oracle",
         action="store_true",
