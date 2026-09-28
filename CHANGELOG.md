@@ -176,6 +176,21 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- **`--no-server` attach still fell back to the published `retest` telnet
+  password.** The 0.8.0 entry that removed the static default only changed the
+  orchestrator-started path; an attach run, which writes no config and so
+  cannot mint a per-run secret, kept using the old default against whatever
+  host it joined, including a production one. `resolve_telnet_password` now
+  refuses an attach run with no `PLAYTEST_TELNET_PASSWORD` / `--telnet-password`
+  rather than connecting with a password an attacker can read in this
+  repository. A managed run is unaffected: unset still means a fresh
+  `secrets.token_urlsafe(15)`.
+- **The run report could not be reparsed as the suite that ran.**
+  `suite_to_report` carried a `source` key that `parse_suite_dict` rejects as
+  unknown, so the round trip its own docstring promised failed on every
+  document. Provenance is the loader's knowledge, not a field a document may
+  declare about itself, so `source` left the document mapping and the run
+  report records the file under `suite_file` beside it.
 - **An unbounded JSON integer in one client-log line cost the whole report.**
   The slowest-case table read `ms` out of every parsed result event and only
   caught `ValueError`; a JSON integer is arbitrary precision, so a `ms` past
