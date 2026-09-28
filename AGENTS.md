@@ -293,6 +293,7 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
 | `PLAYTEST_LOCK_HEARTBEAT_SEC` | How often the orchestrator refreshes heartbeat (default 30) |
 | `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (unset: ephemeral per-run secret rendered into the instance config; an attach run requires an explicit value) |
+| `PLAYTEST_CLIENT_LOG` | Client log the run and `scripts/capture_*.sh` watch. Unset resolves through `COMPAT`, then the discovered client install; `--print-client-log` prints it and exits, so no helper carries a hardcoded Steam root |
 
 `residual` expands to `mp,soak` only. `make playtest-residual` is a **different**
 multi-target host gate (persist + mp + apm + soak_long). See README.

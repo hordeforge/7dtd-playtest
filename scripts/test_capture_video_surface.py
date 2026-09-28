@@ -134,9 +134,27 @@ def main() -> int:
     check_stop_run(FRAMES_SCRIPT)
     check_log_gate(SCRIPT)
     check_log_gate(FRAMES_SCRIPT)
+    check_client_log_resolution(SCRIPT, FRAMES_SCRIPT)
 
     print("RESULT PASS")
     return 0
+
+
+def check_client_log_resolution(*scripts: Path) -> None:
+    """Both scripts must ask the orchestrator where the log is.
+
+    Each used to carry its own hardcoded Steam root
+    (`$HOME/Games/Steam/steamapps/compatdata/251570`), which is wrong on a
+    library on a second disk, a Flatpak Steam, and every managed Safehouse
+    client instance. The capture then watched a log no run was writing, and
+    reported a stale marker as this run's evidence.
+    """
+    for script in scripts:
+        text = script.read_text(encoding="utf-8")
+        assert "--print-client-log" in text, f"{script.name} does not resolve the log"
+        hardcoded = [line for line in text.splitlines() if "compatdata" in line]
+        assert not hardcoded, f"{script.name} hardcodes a Steam root again: {hardcoded}"
+    print("OK capture scripts resolve the client log through the orchestrator")
 
 
 def stop_fragment(script: Path) -> str:

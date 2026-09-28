@@ -27,6 +27,11 @@ jobs:
       # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          # The uv that wrote the committed uv.lock, matching
+          # required-version in pyproject.toml. A floating uv lets the
+          # resolver move under the gates without any commit.
+          version: "0.12.13"
       # setup-uv caches uv's wheel/install store automatically on GitHub-hosted
       # runners (enable-cache defaults to auto), keyed off the uv.lock file.
       # `make test` = ruff lint + mypy typecheck (both pinned in the dev
@@ -60,14 +65,29 @@ jobs:
       # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          # The uv that wrote the committed uv.lock, matching
+          # required-version in pyproject.toml. A floating uv lets the
+          # resolver move under the gates without any commit.
+          version: "0.12.13"
       - run: make coverage
       - run: uv run --locked --project "$PWD" python scripts/coverage_badge.py "$RUNNER_TEMP/coverage.svg"
       - name: Publish the badge to the badges branch
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          url="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # The token rides in an Authorization header, never in a remote URL.
+          # A URL reaches the process table of every git it is passed to and is
+          # written into badge-repo/.git/config, where a `git remote -v` or a
+          # config dump in a failure log prints it. GIT_CONFIG_* hands the
+          # header to git through the environment, so it lands in no argv and
+          # in no file on disk.
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_VALUE_0="$auth"
+          url="https://github.com/${GITHUB_REPOSITORY}.git"
           if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
             git clone --depth 1 --branch badges "$url" badge-repo
           else

@@ -247,6 +247,19 @@ def test_suite_to_report_shape() -> None:
     assert isinstance(server, dict)
     assert isinstance(cases, list)
     assert str(cases[0]["ref"]).startswith(REF_PREFIX)
+    # The report is a suite document, not a summary of one: a consumer must be
+    # able to reload a run's record with this loader and get the suite that
+    # ran. Provenance like `source` is not a declared field, so including it
+    # here fails the loader's unknown-field check and the published schema's
+    # additionalProperties: false.
+    reloaded = sl.parse_suite_dict(json.loads(json.dumps(report)), source=doc.source)
+    assert reloaded == doc
+    assert "source" not in report
+    schema = json.loads(
+        (ROOT / "schema" / "suite.schema.json").read_text(encoding="utf-8")
+    )
+    for key in report:
+        assert key in schema["properties"], f"report key {key!r} is not in the schema"
 
 
 def test_suite_report_carries_only_schema_fields() -> None:

@@ -1070,6 +1070,44 @@ def test_litenet_port_room_guard() -> None:
     print("PASS litenet_port_room ports without room for port+2 rejected")
 
 
+def test_default_client_log_resolution() -> None:
+    """The capture scripts watch the log this resolves, not a guessed root.
+
+    capture_video.sh and capture_frames.sh each hardcoded
+    `$HOME/Games/Steam/steamapps/compatdata/251570`, which is wrong on a
+    Steam library on a second disk, on Flatpak Steam, and on every managed
+    Safehouse client instance. The capture then read a stale marker and
+    reported it as this run's evidence, so both scripts now ask for the path
+    and the resolution has to match what a real run watches.
+    """
+    explicit = playtest_run.default_client_log({"PLAYTEST_CLIENT_LOG": "/pinned/log.txt"})
+    assert explicit == pathlib.Path("/pinned/log.txt"), explicit
+
+    compat = playtest_run.default_client_log({"COMPAT": "/pfx", "GAME": "/ignored"})
+    assert compat == playtest_run.client_log_for_compat(pathlib.Path("/pfx")), compat
+
+    # GAME alone: the install's own tree, not a hardcoded home path.
+    from_game = playtest_run.default_client_log({"GAME": "/libs/steamapps/common/Game"})
+    assert from_game == playtest_run.client_log_for_compat(
+        pathlib.Path(f"/libs/steamapps/compatdata/{playtest_run.STEAM_APPID}")
+    ), from_game
+
+    # Nothing configured and nothing discovered is a harness error naming the
+    # knobs, not a Path into a directory that does not exist.
+    with (
+        mock.patch.object(playtest_run, "client_game_dir", return_value=None),
+        contextlib.redirect_stderr(io.StringIO()) as err,
+    ):
+        try:
+            playtest_run.default_client_log({})
+        except SystemExit as ex:
+            assert ex.code == 2, f"expected the harness exit code, got {ex.code!r}"
+        else:
+            raise AssertionError("default_client_log guessed a path with no install")
+    assert "COMPAT" in err.getvalue() and "GAME" in err.getvalue(), err.getvalue()
+    print("PASS default_client_log resolves one path the capture scripts share")
+
+
 def test_telnet_port_range_guard() -> None:
     """The telnet port is a TCP port like the game one, and on the managed
     path it is read from instance.env rather than parsed by argparse."""
@@ -2360,6 +2398,7 @@ def main() -> int:
         ("slowest_cases_ms", test_slowest_cases_drops_unusable_ms),
         ("litenet_port_room", test_litenet_port_room_guard),
         ("telnet_port_range", test_telnet_port_range_guard),
+        ("default_client_log", test_default_client_log_resolution),
         ("default_port_preflight", test_main_default_port_reaches_preflight_refusal),
         ("peer_client_game", test_peer_client_game_follows_its_instance),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),

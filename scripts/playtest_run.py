@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import IO, Protocol
 from xml.sax.saxutils import escape as xml_escape
@@ -161,6 +161,32 @@ def client_log_for_compat(compat: Path) -> Path:
     )
 
 
+def default_client_log(env: Mapping[str, str] | None = None) -> Path:
+    """The client log a run on this machine watches.
+
+    One resolution, for the orchestrator and for the capture scripts: a caller
+    that pointed at its own hardcoded Steam root missed a library on a second
+    disk, a Flatpak Steam, or a managed Safehouse client instance, and then
+    watched a log the run was never writing. `COMPAT` and the discovered
+    install are the same inputs a real run uses.
+    """
+    environment = os.environ if env is None else env
+    configured = (environment.get("PLAYTEST_CLIENT_LOG") or "").strip()
+    if configured:
+        return Path(configured)
+    compat = (environment.get("COMPAT") or "").strip()
+    if not compat:
+        game = client_game_dir(env=environment)
+        if game is None:
+            err(
+                "no client install found: set GAME=<7 Days To Die install> or "
+                "COMPAT=<Proton prefix>; the launcher reads both"
+            )
+            raise SystemExit(2)
+        compat = str(client_compat_for_game(game, env=environment))
+    return client_log_for_compat(Path(compat))
+
+
 def steam_library_dirs(home: Path | None = None) -> list[Path]:
     """Every `steamapps` directory Steam knows about, in discovery order.
 
@@ -188,7 +214,7 @@ def steam_library_dirs(home: Path | None = None) -> list[Path]:
     return libraries
 
 
-def client_game_dir(env: dict[str, str] | None = None, home: Path | None = None) -> Path | None:
+def client_game_dir(env: Mapping[str, str] | None = None, home: Path | None = None) -> Path | None:
     """The client install launch_client.sh will use, resolved its way.
 
     `GAME` wins, because that is the variable the launcher reads. Otherwise the
@@ -215,7 +241,7 @@ def client_game_dir(env: dict[str, str] | None = None, home: Path | None = None)
     return None
 
 
-def client_compat_for_game(game: Path, env: dict[str, str] | None = None) -> Path:
+def client_compat_for_game(game: Path, env: Mapping[str, str] | None = None) -> Path:
     """The Proton prefix for a client install, derived as the launcher derives it."""
     environment = os.environ if env is None else env
     configured = (environment.get("COMPAT") or "").strip()
@@ -2326,6 +2352,16 @@ def main(argv: list[str] | None = None) -> int:
         version=f"playtest_run.py {mod_version()}",
     )
     ap.add_argument(
+        "--print-client-log",
+        action="store_true",
+        help=(
+            "print the client log path this machine's run would watch, then "
+            "exit. Resolved the way a run resolves it (PLAYTEST_CLIENT_LOG, "
+            "then COMPAT, then the client install), so the capture scripts "
+            "under scripts/ stop guessing a Steam root of their own"
+        ),
+    )
+    ap.add_argument(
         "--provision",
         choices=playtest_targets.PROVISIONS,
         default=provision_default,
@@ -2624,6 +2660,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = ap.parse_args(argv)
+    if args.print_client_log:
+        print(default_client_log())
+        return 0
     if mixed_visual_suites(args.suite):
         ap.error(
             "PLAYTEST_SUITE mixes a prefab-look suite (*_look) and a "

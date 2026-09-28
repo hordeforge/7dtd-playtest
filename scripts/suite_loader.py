@@ -448,8 +448,12 @@ def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
     document). Only schema-declared fields appear: the loader rejects every
     other key, so a provenance field written here would make the run's own
     record of the suite unloadable. The path a doc was loaded from is not one
-    of them: ``doc.source`` is provenance, not a suite key, so emitting it
-    would make the report a document the loader refuses to read back.
+    of them: ``source`` is provenance the loader sets from where it read the
+    file, not a field a document may declare, so emitting it fails the
+    loader's unknown-field check and the published schema's
+    ``additionalProperties: false``, which would make a run's own record
+    unreadable by the loader that wrote it. Callers that want the path take
+    ``doc.source``.
     """
     return {
         "id": doc.id,

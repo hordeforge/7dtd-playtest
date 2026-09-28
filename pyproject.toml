@@ -17,6 +17,11 @@ dev = [
 
 [tool.uv]
 package = false
+# The uv that wrote the committed uv.lock. A floating uv lets the resolver
+# change under the gates without any commit, the same reason the workflows pin
+# ubuntu-24.04 over ubuntu-latest. A contributor on a different minor fails
+# here with uv's own upgrade hint rather than silently re-resolving.
+required-version = ">=0.12.13,<0.13"
 
 # Lint gate (make lint): defect-oriented rules only. E/W/F/I/B/SIM/UP/RUF plus
 # the free strictness of C4/RET/A/DTZ/FA/PIE and the error-only subsets of pylint

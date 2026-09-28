@@ -73,8 +73,12 @@ CROP="${CAPTURE_CROP:-1286x992+0+0}"
 command -v spectacle >/dev/null || { echo "ERROR: spectacle is required" >&2; exit 2; }
 command -v magick >/dev/null || { echo "ERROR: ImageMagick (magick) is required" >&2; exit 2; }
 
-COMPAT_DEFAULT="$HOME/Games/Steam/steamapps/compatdata/251570"
-CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_7dtd_connect.txt}"
+# The log a run on this machine actually writes, resolved by the orchestrator
+# (PLAYTEST_CLIENT_LOG, then COMPAT, then the discovered client install). A
+# Steam root hardcoded here missed a library on a second disk, a Flatpak Steam,
+# and a managed Safehouse client instance alike, and then photographed a log
+# no run was writing.
+CLIENT_LOG="$("${PY[@]}" "$HERE/playtest_run.py" --print-client-log)"
 
 # Refuse to start on top of a live run: the previous run's client is still
 # writing that log, so a "newer than start" check passes against ITS marker and

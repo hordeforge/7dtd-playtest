@@ -205,6 +205,7 @@ in the log without rerunning with `--help`.
 | `PLAYTEST_CONCERN_SUITES` | empty | The exact multi-id `--suite` list that is one declared concern |
 | `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach requires an explicit value |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
+| `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the run and the `scripts/capture_*.sh` helpers watch (`--print-client-log` prints the resolved path and exits). Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
 
 Booleans (`PLAYTEST_READONLY`, `PLAYTEST_TRACE_ENTITY`, `CLIENT_MUTE`) take
 `1` / `true` / `yes` / `on` or `0` / `false` / `no` / `off`, case-insensitive

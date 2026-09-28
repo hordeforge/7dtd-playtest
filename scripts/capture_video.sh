@@ -73,8 +73,12 @@ command -v ffmpeg >/dev/null || {
 	exit 2
 }
 
-COMPAT_DEFAULT="$HOME/Games/Steam/steamapps/compatdata/251570"
-CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/logs/output_log_client_7dtd_connect.txt}"
+# The log a run on this machine actually writes, resolved by the orchestrator
+# (PLAYTEST_CLIENT_LOG, then COMPAT, then the discovered client install). A
+# Steam root hardcoded here missed a library on a second disk, a Flatpak Steam,
+# and a managed Safehouse client instance alike, and then muxed a clip
+# against a log no run was writing.
+CLIENT_LOG="$("${PY[@]}" "$HERE/playtest_run.py" --print-client-log)"
 
 # Refuse to start on top of a live run: the previous run's client is still
 # writing that log, so a "newer than start" check passes against ITS marker and
@@ -238,11 +242,14 @@ FRAME_COUNT="$(echo "$CLIP_LINE" | awk -F'frames=' '{print $2}' | awk '{print $1
 # the Proton prefix's playtest-shots lives under COMPAT (env, set by the
 # same run that launched the client). A hardcoded default library silently
 # breaks on a Steam library on another disk.
+# playtest-shots sits beside logs/ in the same Proton prefix the resolved
+# client log came from, so it is read off that path instead of guessed again
+# from a second Steam root. COMPAT still wins when the caller set it: the run
+# just launched may have used a prefix the discovery did not see.
 if [[ -n "${COMPAT:-}" ]]; then
     SHOTS_DIR="$COMPAT/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/playtest-shots"
 else
-    SHOTS_DIR="$HOME/AppData/Roaming/7DaysToDie/playtest-shots"
-    [[ -d "$SHOTS_DIR" ]] || SHOTS_DIR="$HOME/.steam/steam/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/playtest-shots"
+    SHOTS_DIR="$(dirname "$(dirname "$CLIENT_LOG")")/playtest-shots"
 fi
 if [[ ! -d "$SHOTS_DIR/clips/$CLIP_ID" ]]; then
     echo "ERROR: no frames found at $SHOTS_DIR/clips/$CLIP_ID; is COMPAT set to the Proton prefix this client ran in?" >&2
