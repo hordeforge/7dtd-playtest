@@ -31,6 +31,9 @@
 #   PLAYTEST_CLIENT_LOG the client log to watch
 #
 # The clip frames are material for a human verdict. Nothing here judges them.
+#
+# Exit codes: 0 the clip was muxed, 1 the run or the mux failed, 2 bad usage
+# or a missing host tool.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +57,7 @@ while [[ $# -gt 0 ]]; do
 			esac
 			shift 2
 			;;
-		-h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "capture_video: unknown argument $1" >&2; exit 2 ;;
 	esac
 done

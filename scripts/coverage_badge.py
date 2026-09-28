@@ -72,7 +72,11 @@ def main(argv: list[str]) -> int:
     args = argv[1:]
     if args and args[0] in ("-h", "--help"):
         print(USAGE)
-        print("\nExit codes: 0 badge written, 1 no coverage data, 2 bad usage.")
+        print(
+            "\nWrites the shields.io line-coverage badge SVG for the local"
+            " .coverage file."
+        )
+        print("Exit codes: 0 badge written, 1 no coverage data, 2 bad usage.")
         return 0
     if len(args) != 1:
         print(USAGE, file=sys.stderr)

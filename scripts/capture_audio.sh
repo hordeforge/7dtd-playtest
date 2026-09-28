@@ -22,6 +22,9 @@
 #                  `<cmd> --suite <id>`, so a project with its own wrapper
 #                  (deploys, .local.env, lock handling) passes that here.
 #                  Default: this repo's own scripts/playtest_run.py.
+#
+# Exit codes: 0 the recording was written, 1 the run or the recording failed,
+# 2 bad usage or a missing host tool.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +46,7 @@ while [[ $# -gt 0 ]]; do
 			esac
 			shift 2
 			;;
-		-h|--help) sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "capture_audio: unknown argument $1" >&2; exit 2 ;;
 	esac
 done

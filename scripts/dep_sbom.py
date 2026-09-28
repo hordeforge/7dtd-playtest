@@ -240,7 +240,17 @@ def build_sbom(uv_lock: JsonObject, nuget_lock: JsonObject) -> JsonObject:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        epilog=(
+            "examples:\n"
+            "  dep_sbom.py                      # CycloneDX JSON on stdout\n"
+            "  dep_sbom.py dist/app.cdx.json    # same document, written to a file\n"
+            "exit codes: 0 inventory written, 1 a committed input is missing or\n"
+            "unreadable, 2 bad usage"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "output",
         nargs="?",
@@ -250,8 +260,9 @@ def main(argv: list[str]) -> int:
 
     for path in (UV_LOCK, NUGET_LOCK, MOD_INFO):
         if not path.is_file():
+            # 1, not 2: nothing about the invocation was wrong, the tree is.
             print(f"dep_sbom: missing {path}", file=sys.stderr)
-            return 2
+            return 1
 
     document = build_sbom(
         as_object(tomllib.loads(UV_LOCK.read_text(encoding="utf-8")), "uv.lock"),

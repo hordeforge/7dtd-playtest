@@ -32,6 +32,9 @@
 #   PLAYTEST_CLIENT_LOG the client log to watch
 #
 # The frames are material for a human verdict. Nothing here judges them.
+#
+# Exit codes: 0 the frames were written, 1 the run or the capture failed,
+# 2 bad usage or a missing host tool.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,7 +58,7 @@ while [[ $# -gt 0 ]]; do
 			esac
 			shift 2
 			;;
-		-h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help) sed -n '2,37p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "capture_frames: unknown argument $1" >&2; exit 2 ;;
 	esac
 done

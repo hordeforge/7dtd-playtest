@@ -35,6 +35,22 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Changed
+
+- **Host CLI help and exit codes, aligned across the scripts.**
+  Every other CLI in `scripts/` already printed its exit codes from
+  `--help`; these did not, and one of them used the usage code for something
+  that is not a usage error. `dep_sbom.py` now documents its exit codes and
+  its stdout/stderr split (CycloneDX JSON on stdout, the component count on
+  stderr) and exits 1 rather than 2 when a committed lockfile or
+  `ModInfo.xml` is missing, since nothing about the invocation was wrong;
+  `dst_run.py` and `coverage_badge.py` document theirs, and
+  `playtest_lock.py --help` now says what `live` reports and what its
+  nonzero exit means, which the one-line usage previously left unsaid for
+  the probe the capture scripts gate on. `capture_frames.sh`,
+  `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
+  already used.
+
 ### Added
 
 - **Injectable clock for the orchestrator** (`playtest_run.use_clock()`).

@@ -131,6 +131,11 @@ def replay_command(seed: int, cfg: SimConfig, argv0: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__,
+        epilog=(
+            "a failure prints the seed, the replay command, and the tail of the\n"
+            "event history on stderr; the run verdict is the exit code.\n"
+            "exit codes: 0 every seed held its invariants, 1 a seed violated one"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--seed", type=int, default=None,

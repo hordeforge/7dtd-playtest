@@ -1024,6 +1024,16 @@ def main(argv: list[str] | None = None) -> int:
         "usage: playtest_lock.py wait [--timeout SEC] [--interval SEC] "
         "[--path FILE]\n"
         "       playtest_lock.py live\n"
+        "\n"
+        "  wait  block until a new session could acquire the playtest lock\n"
+        "  live  probe the shared 7 Days to Die client; the exit code is the\n"
+        "        whole interface, so it prints nothing. A dedicated or zdtd\n"
+        "        server is never consulted: it belongs to a Safehouse instance\n"
+        "        with its own port block, so it blocks nobody.\n"
+        "\n"
+        "  `playtest_lock.py wait --help` lists the wait options.\n"
+        "  exit codes: 0 usable now, 1 live client or wait timed out,\n"
+        "  2 bad usage (the probe itself failing counts as unusable, not free)\n"
     )
     if args and args[0] in ("-h", "--help"):
         sys.stdout.write(usage)
