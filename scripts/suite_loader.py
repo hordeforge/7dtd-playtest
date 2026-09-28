@@ -441,7 +441,11 @@ def resolve_mods(
 
 
 def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
-    """JSON-serializable summary for the run report."""
+    """JSON-serializable summary for the run report.
+
+    Every declared field is carried, so the report reparses as the suite that
+    ran (``parse_suite_dict`` on this mapping gives the same document).
+    """
     return {
         "id": doc.id,
         "provision": doc.provision,
@@ -462,5 +466,6 @@ def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
             }
             for c in doc.cases
         ],
+        "notes": list(doc.notes),
         "source": str(doc.source) if doc.source else None,
     }

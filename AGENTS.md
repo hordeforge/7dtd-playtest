@@ -434,7 +434,10 @@ the run order that both `make test` and `make coverage` expand):
 10. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
    and serverconfig XML attribute escaping plus parser survival on malformed
    JSON events, plus `scripts/report_summary.py` failing closed on a hostile
-   or malformed lap summary.
+   or malformed lap summary. Seeded grammar fuzzers drive the log parser, the
+   JUnit renderer, the loadgen event reader and the lap counter, asserting
+   structural invariants and determinism under input doubling, not just
+   absence of a crash.
 11. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
    fresh-save removes only every world's copy of the named game save
    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
@@ -454,7 +457,10 @@ the run order that both `make test` and `make coverage` expand):
     `server` block or `mods` list it does not own, `readonly` outside attach,
     an external suite shadowing a built-in id, an unknown key anywhere but the
     `server` block (a misspelled `provision` or `readonly` reads as unset, and
-    unset means a managed run that wipes the host).
+    unset means a managed run that wipes the host). A seeded grammar fuzzer drives
+    hostile suite documents (and raw/truncated/non-UTF-8 file bytes): each one
+    either fails closed with `SuiteLoadError` or, when accepted, holds every
+    cross-field rule and round-trips file -> `SuiteDoc` -> run report -> doc.
 17. declared-ref surface (`scripts/test_suite_refs.py`): every `ref` in
     `suites/*.json` resolves to a real Catalog case, every declared suite
     declares all its cases, the `catalog.SUITE.CASE` format is pinned on both

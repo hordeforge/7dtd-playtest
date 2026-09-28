@@ -910,6 +910,103 @@ def test_report_summary_prints_counts_and_fails_closed() -> None:
     print("PASS report_summary counts print, hostile summaries fail closed")
 
 
+_SUMMARY_COUNTS: list[object] = [
+    0,
+    1,
+    7,
+    -1,
+    2**70,
+    True,
+    False,
+    None,
+    1.5,
+    float("inf"),
+    float("nan"),
+    "3",
+    "",
+    [1],
+    {"n": 1},
+]
+
+# What a real lap writes, so the accepted branch is reached often enough to
+# check the printed counts rather than only the refusals.
+_SUMMARY_COUNTS_OK: list[object] = [0, 1, 7, 12, 2**40]
+
+_SUMMARY_RAW = [
+    "",
+    "{",
+    "[]",
+    "null",
+    "3",
+    '"summary"',
+    "﻿{\"summary\": {}}",
+    "\x00\x00binary\x00",
+    "ünïcödé 🧟 not json",
+    '{"summary": {"pass": ',
+    "{" * 200,
+]
+
+
+def _summary_fuzz_text(rng: random.Random) -> str:
+    roll = rng.random()
+    if roll < 0.55:
+        def count() -> object:
+            pool = _SUMMARY_COUNTS if rng.random() < 0.3 else _SUMMARY_COUNTS_OK
+            return rng.choice(pool)
+
+        summary: dict[str, object] = {
+            field: count() for field in ("pass", "fail", "skip") if rng.random() < 0.8
+        }
+        if rng.random() < 0.1:
+            summary[rng.choice(("Pass", "passes", ""))] = rng.choice(_SUMMARY_COUNTS)
+        return json.dumps({"summary": summary})
+    if roll < 0.7:
+        # A whole-file type swap: summary is not an object at all.
+        return json.dumps({"summary": rng.choice([None, [], [1, 2, 3], "all", 3, True])})
+    if roll < 0.85:
+        return rng.choice(_SUMMARY_RAW)
+    return json.dumps({"summary": {}})
+
+
+def test_fuzz_report_summary_never_launders_a_broken_lap() -> None:
+    """Seeded grammar fuzzer over the lap report the shell aggregator reads.
+
+    Invariants per generated report: main never raises, exit 0 arrives only
+    with three non-negative integer counts on stdout that are exactly the
+    summary values, any other exit prints nothing, and a truncated or
+    byte-level hostile report fails closed rather than counting as a clean
+    lap.
+    """
+    accepted = 0
+    with tempfile.TemporaryDirectory() as temporary:
+        path = Path(temporary) / "report-fuzz.json"
+        for seed in range(60):
+            rng = random.Random(4000 + seed)
+            text = _summary_fuzz_text(rng)
+            for payload in (text, text[: rng.randrange(0, len(text) + 1)]):
+                path.write_text(payload, encoding="utf-8")
+                code, stdout = _run_report_summary(path)
+                assert code in (0, 1), f"seed {seed}: exit {code} for {payload!r}"
+                if code == 0:
+                    fields = stdout.split()
+                    assert len(fields) == 3, f"seed {seed}: stdout {stdout!r}"
+                    counts = [int(f) for f in fields]
+                    assert all(c >= 0 for c in counts), f"seed {seed}: {counts}"
+                    summary = json.loads(payload).get("summary")
+                    want = [
+                        summary.get(f, 0) if isinstance(summary, dict) else 0 for f in
+                        ("pass", "fail", "skip")
+                    ]
+                    assert counts == want, f"seed {seed}: {counts} != {want}"
+                    accepted += 1
+                else:
+                    assert stdout == "", f"seed {seed}: {payload!r} printed {stdout!r}"
+            path.write_bytes(b"\x00\xff\xfe not utf-8 " + text.encode("utf-8"))
+            assert _run_report_summary(path) == (1, ""), "a decode failure must fail closed"
+    assert accepted >= 20, f"fuzzer counted only {accepted} reports: corpus is too weak"
+    print(f"PASS report_summary_fuzz 60 reports, {accepted} counted and held their invariants")
+
+
 def test_feed_line_counts_nre_hits_without_the_batch_helper() -> None:
     """The NRE scan belongs to feed_line, not to feed_lines.
 
@@ -954,6 +1051,7 @@ def main() -> int:
     test_collect_visual_reviews_maps_paths_and_never_verdicts()
     test_collect_visual_reviews_is_empty_without_a_directory()
     test_report_summary_prints_counts_and_fails_closed()
+    test_fuzz_report_summary_never_launders_a_broken_lap()
     print("RESULT PASS")
     return 0
 

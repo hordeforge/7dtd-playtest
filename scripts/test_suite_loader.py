@@ -5,10 +5,16 @@ No game binaries. Pins the schema surface (provision / backend / readonly /
 fresh / server / mods / host / cases) and every contradiction the loader must
 refuse: a managed run that is not fresh, an attach run that claims to be, an
 attach run that would write to a host it does not own, readonly outside attach.
+
+A mod repo's own suite file is external input, so a seeded grammar fuzzer also
+drives the loader: every hostile document either fails closed with a
+SuiteLoadError or, when accepted, holds the cross-field invariants and survives
+the file -> SuiteDoc -> run-report JSON -> SuiteDoc round trip.
 """
 from __future__ import annotations
 
 import json
+import random
 import sys
 import tempfile
 from pathlib import Path
@@ -274,6 +280,221 @@ def test_resolve_mods_refuses_an_unknown_side() -> None:
         raise AssertionError("expected SuiteLoadError for an unknown side")
 
 
+_FUZZ_STRINGS = [
+    "x",
+    "smoke",
+    "core",
+    "",
+    "   ",
+    " managed ",
+    "ünïcödé 🧟 é́ ﻿",
+    "a" * 300,
+    "smoke,core",
+    "id/with\x00nul",
+    "‮rtl‭",  # noqa: PLE2502 (bidi overrides are a deliberate fuzz input)
+]
+_FUZZ_AXES = [
+    "managed",
+    "attach",
+    "stock",
+    "zdtd",
+    "MANAGED",
+    "",
+    1,
+    True,
+    None,
+    [],
+    {},
+]
+_FUZZ_KINDS = ["live", "staged", "defer", "LIVE", "setup", "", 7, None, [], {}]
+_FUZZ_CASES = [
+    {"id": "c", "kind": "live", "ref": "catalog.x.c"},
+    {"id": "c", "kind": "defer", "ref": "catalog.x.c", "tags": ["a"], "barriers": []},
+    {"id": "c", "kind": "live", "ref": "r"},
+    {"id": "c", "kind": "live", "ref": "r"},
+    {"id": "", "kind": "live", "ref": "r"},
+    {"id": "c", "kind": "bogus", "ref": "r"},
+    {"id": "c", "kind": "live"},
+    {"id": "c", "ref": "r"},
+    {"kind": "live", "ref": "r"},
+    {"id": "c", "kind": "live", "ref": "r", "tags": ["ok", ""]},
+    {"id": "c", "kind": "live", "ref": "r", "tags": "notalist"},
+    {"id": "c", "kind": "live", "ref": "r", "barriers": [1]},
+    "not-an-object",
+    None,
+]
+_FUZZ_SERVERS = [
+    {},
+    {"GameWorld": "Navezgane"},
+    {"MaxSpawnedZombies": 0},
+    {"MaxPlayers": True, "Port": 26950, "Ratio": 1.5},
+    {"GameWorld": None},
+    {"GameWorld": ["a"]},
+    {"": "empty name"},
+    {"  ": "blank name"},
+    [1, 2],
+    "not-an-object",
+]
+_FUZZ_MODS = [
+    None,
+    ["playtest"],
+    ["playtest", "fastconnect", "../elsewhere/mod"],
+    [],
+    ["ok", ""],
+    "playtest",
+    [1],
+    {"playtest": True},
+]
+_FUZZ_HOSTS: list[object] = [
+    None,
+    {},
+    {"fixtures": True},
+    {"loadgen": False},
+    {"fixtures": "yes"},
+    {"fixtures": 1},
+    [],
+    "host",
+]
+_FUZZ_RAW = [
+    "",
+    "{",
+    "[]",
+    "null",
+    "42",
+    '"a string"',
+    "\x00\x00\xff\xfe binary-ish",
+    "﻿{\"id\": \"x\"}",
+    '{"id": "x", "cases": [',
+    "{" + '"a": {' * 200 + "}" * 200,
+    "ünïcödé 🧟 é́ not json at all",
+    '{"id": "\\ud800"}',
+    '{"id": "x", "notes": ["\\udcff"]}',
+]
+_FUZZ_BYTES = [
+    b"",
+    b"\x00\x00\xff\xfe\x00binary",
+    b'{"id": "x", "cases": [{"id": "c", "kind": "live", "ref": "r"}]}',
+    b'{"id": "\xe2\x82", "cases": []}',
+    b'{"id": "x\x9f\x92\xa9"}',
+    b"\xed\xa0\x80 lone surrogate",
+]
+
+
+_FUZZ_FIELDS = (
+    ("id", _FUZZ_STRINGS),
+    ("provision", _FUZZ_AXES),
+    ("backend", _FUZZ_AXES),
+    ("fresh", [True, False, "true", 1, None, []]),
+    ("readonly", [True, False, "true", 1, None, []]),
+    ("server", _FUZZ_SERVERS),
+    ("mods", _FUZZ_MODS),
+    ("server_mods", _FUZZ_MODS),
+    ("host", _FUZZ_HOSTS),
+    ("notes", _FUZZ_MODS),
+)
+
+
+def _fuzz_suite_doc(rng: random.Random) -> dict[str, object]:
+    """A valid document perturbed by a few hostile fields.
+
+    Starting from a document the loader accepts is what keeps the accepted
+    branch of the fuzzer deep; a purely random field draw is rejected at the
+    first missing id and never reaches the cross-field rules.
+    """
+    doc: dict[str, object] = json.loads(
+        json.dumps(
+            {
+                "id": "x",
+                "provision": rng.choice(["managed", "attach"]),
+                "cases": [{"id": "c", "kind": "live", "ref": "catalog.x.c"}],
+                "host": {"fixtures": rng.choice([True, False])},
+            }
+        )
+    )
+    for _ in range(rng.randrange(0, 3)):
+        key, pool = rng.choice(_FUZZ_FIELDS)
+        doc[key] = rng.choice(pool)
+    for _ in range(rng.randrange(0, 3)):
+        # Unknown keys the loader must ignore, however they are typed.
+        doc[rng.choice(_FUZZ_STRINGS)] = rng.choice(_FUZZ_STRINGS)
+    if rng.random() < 0.4:
+        doc["cases"] = [rng.choice(_FUZZ_CASES) for _ in range(rng.randrange(0, 4))]
+    return doc
+
+
+def _assert_doc_invariants(doc: sl.SuiteDoc, seed: int) -> None:
+    assert doc.provision in sl.ALLOWED_PROVISIONS, f"seed {seed}: provision {doc.provision}"
+    assert doc.backend in sl.ALLOWED_BACKENDS, f"seed {seed}: backend {doc.backend}"
+    assert doc.id.strip() == doc.id and doc.id, f"seed {seed}: id {doc.id!r}"
+    if doc.provision == "managed":
+        assert doc.fresh is True, f"seed {seed}: managed run not fresh"
+        assert not doc.readonly, f"seed {seed}: managed run claimed readonly"
+    else:
+        assert doc.fresh is False, f"seed {seed}: attach run claimed fresh"
+        assert not doc.server, f"seed {seed}: attach run carries a server block"
+        assert not doc.mods and not doc.server_mods, (
+            f"seed {seed}: attach run carries mods {doc.mods} {doc.server_mods}"
+        )
+    assert all(name and name.strip() == name for name in doc.server_config), (
+        f"seed {seed}: server keys {list(doc.server_config)}"
+    )
+    assert all(isinstance(v, str) for v in doc.server_config.values()), (
+        f"seed {seed}: server values {doc.server_config}"
+    )
+    ids = [c.id for c in doc.cases]
+    assert ids and len(set(ids)) == len(ids), f"seed {seed}: case ids {ids}"
+    assert all(c.kind in sl.ALLOWED_KINDS for c in doc.cases), f"seed {seed}: kinds"
+    assert all(c.id.strip() == c.id and c.ref.strip() == c.ref for c in doc.cases), (
+        f"seed {seed}: unstripped case id/ref"
+    )
+    assert doc.case_refs == tuple(c.ref for c in doc.cases), f"seed {seed}: case_refs"
+    assert list(doc.mods) == list(doc.mods) and all(m.strip() == m for m in doc.mods), (
+        f"seed {seed}: mods {doc.mods}"
+    )
+    # The report is what a downstream consumer reads; reloading it must give
+    # the same document, or a run's own record is not the suite it ran.
+    reloaded = sl.parse_suite_dict(
+        json.loads(json.dumps(sl.suite_to_report(doc))), source=doc.source
+    )
+    assert reloaded == doc, f"seed {seed}: report round trip drifted\n{reloaded}\n{doc}"
+
+
+def test_fuzz_suite_documents_fail_closed_or_hold_invariants() -> None:
+    """Seeded grammar fuzzer over suite documents and raw suite file bytes.
+
+    Invariants per generated document: the loader raises SuiteLoadError and
+    nothing else, an accepted document holds every cross-field rule the
+    orchestrator then acts on, and a truncation is never silently accepted.
+    """
+    accepted = 0
+    for seed in range(80):
+        rng = random.Random(3000 + seed)
+        payloads: list[object] = [
+            _fuzz_suite_doc(rng),
+            rng.choice(_FUZZ_RAW),
+            rng.choice(_FUZZ_BYTES),
+        ]
+        good = json.dumps(sl.suite_to_report(sl.parse_suite_dict(MANAGED)))
+        payloads.append(good[: rng.randrange(0, len(good) + 1)])
+        for payload in payloads:
+            with tempfile.TemporaryDirectory(prefix="suite-fuzz-") as td:
+                path = Path(td) / "s.json"
+                if isinstance(payload, bytes):
+                    path.write_bytes(payload)
+                elif isinstance(payload, str):
+                    path.write_text(payload, encoding="utf-8")
+                else:
+                    path.write_text(json.dumps(payload), encoding="utf-8")
+                try:
+                    doc = sl.load_suite_file(path)
+                except sl.SuiteLoadError:
+                    continue
+                _assert_doc_invariants(doc, seed)
+                accepted += 1
+    assert accepted >= 10, f"fuzzer accepted only {accepted} documents: corpus is too weak"
+    print(f"PASS suite_fuzz 80 documents, {accepted} accepted and held their invariants")
+
+
 TESTS = (
     ("discover_builtin_suites", test_discover_builtin_suites),
     ("load_suite_by_id_missing_is_none", test_load_suite_by_id_missing_is_none),
@@ -293,6 +514,7 @@ TESTS = (
     ("suite_to_report_shape", test_suite_to_report_shape),
     ("published_schema_matches_the_loader", test_published_schema_matches_the_loader),
     ("resolve_mods_refuses_an_unknown_side", test_resolve_mods_refuses_an_unknown_side),
+    ("fuzz_suite_documents", test_fuzz_suite_documents_fail_closed_or_hold_invariants),
 )
 
 
