@@ -45,7 +45,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help build install package uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke \
+.PHONY: help doctor build install package uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
@@ -54,8 +54,10 @@ endif
 
 help:
 	@echo "Offline dev loop (no game install needed):"
+	@echo "  make doctor                      name every missing host tool before a gate does"
 	@echo "  make test                        run all offline gates (lint + typecheck + suites)"
 	@echo "  make test-one GATE=test_dst.py   run one gate (file name under scripts/)"
+	@echo "  make test-one GATE=<f> ARGS=...  pass ARGS to that gate (pytest flags reach the pytest one)"
 	@echo "  make lint                        ruff + shellcheck over scripts/, yamllint over .github/"
 	@echo "  make typecheck                   mypy over scripts/ ([tool.mypy] in pyproject.toml)"
 	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
@@ -75,6 +77,45 @@ help:
 	@echo "  make playtest-zdtd | playtest-compare | playtest-repeat LAPS=3"
 	@echo "  make playtest-review-video SUITE=<id> [INTENT=<path> PROVIDER=<name>]"
 	@echo "  make playtest-residual           persist + mp + apm + soak_long"
+
+# Preflight for a clean clone. Each offline target already names the one tool
+# it cannot run without, but it stops at the first, so a host missing both
+# shellcheck and yamllint needs two failed `make test` runs to learn about two
+# tools. This reports every gap in one run and points at the install line for
+# each. It is pure shell on purpose: the tool it is here to report a missing
+# `uv` cannot be reached through `uv`.
+doctor:
+	@missing=0; \
+	for tool in uv shellcheck yamllint; do \
+		command -v $$tool >/dev/null 2>&1 || { \
+			missing=1; \
+			case $$tool in \
+			uv) printf '%s\n' \
+				"missing: uv  (every host Python command goes through it)" \
+				"  install: curl -LsSf https://astral.sh/uv/install.sh | sh" ;; \
+			shellcheck) printf '%s\n' \
+				"missing: shellcheck  (lints scripts/*.sh)" \
+				"  install: e.g. sudo apt install shellcheck" ;; \
+			yamllint) printf '%s\n' \
+				"missing: yamllint  (lints .github/**/*.yml; CI always runs it)" \
+				"  install: e.g. pipx install yamllint" \
+				"  or run the gate without it locally: make lint SKIP_YAML=1" ;; \
+			esac; \
+		}; \
+	done; \
+	if [ $$missing -eq 0 ]; then echo "host tools: uv, shellcheck, yamllint all present"; fi; \
+	if read -r pin < "$(ROOT)/.python-version"; then \
+		echo "python pinned: $$pin (uv fetches it on first use)"; \
+	fi; \
+	if command -v dotnet >/dev/null 2>&1; then \
+		echo "dotnet: $$(dotnet --version 2>/dev/null) (mod build; floor in global.json)"; \
+	else \
+		echo "dotnet: absent, so 'make build' and the live suites cannot run (the offline gates can)"; \
+	fi; \
+	if [ $$missing -ne 0 ]; then \
+		echo ""; echo "every gap above blocks a documented target; see README Requirements"; \
+		exit 2; \
+	fi
 
 build:
 	@test -f "$(GAME)/7DaysToDie.x86_64" -o -f "$(GAME)/7DaysToDie.exe" || { \
@@ -230,17 +271,20 @@ coverage: require-uv
 	$(COV) -m coverage report -m
 
 # One gate while iterating: make test-one GATE=test_dst.py
+# ARGS reaches the gate's own runner, so the pytest-backed gate can select
+# one test: make test-one GATE=test_playtest_compare.py ARGS="-k identical"
 GATE ?=
+ARGS ?=
 test-one: require-uv
 	@test -n "$(GATE)" || { \
-		echo "usage: make test-one GATE=<gate file name, e.g. GATE=test_dst.py>"; \
+		echo "usage: make test-one GATE=<gate file name, e.g. GATE=test_dst.py> [ARGS=...]"; \
 		exit 2; }
 	@test -f "$(ROOT)/scripts/$(GATE)" || { \
 		echo "unknown gate: scripts/$(GATE)"; \
 		echo "known gates:"; \
 		for gate in $(GATES); do echo "  $$gate"; done; \
 		exit 2; }
-	$(UV) "$(ROOT)/scripts/$(GATE)"
+	$(UV) "$(ROOT)/scripts/$(GATE)" $(ARGS)
 
 # CycloneDX inventory of the two committed lockfiles, so a release publishes
 # what it depends on. Reads uv.lock and Source/PlayTestMod/packages.lock.json

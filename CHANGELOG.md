@@ -238,6 +238,20 @@ Release model (inferred practice, now pinned by `make test`):
   `playtest` and `playtest-repeat` now check for `uv` up front and name it,
   instead of printing a bare "not found" from the interpreter call. A mistyped
   `make test-one GATE=` lists the known gates.
+- **One test inside a gate is reachable.** `scripts/test_playtest_compare.py`
+  ran `pytest.main([__file__, "-q"])` and dropped its own argv, so
+  `make test-one GATE=test_playtest_compare.py ARGS="-k identical_sides"`
+  reported 20 passing dots and looked filtered while running the whole gate.
+  The gate forwards argv to pytest now, and `make test-one` passes `ARGS` to
+  whichever gate it is running. CONTRIBUTING's setup step also names
+  `yamllint` alongside `shellcheck` and `uv`: `make test` runs the YAML gate,
+  so a host set up from the old list failed its first gate.
+- **`make doctor`: every missing host tool in one run.** Each offline target
+  already names the tool it cannot run without, but it stops at the first, so
+  a host missing both `shellcheck` and `yamllint` needs two failed `make test`
+  runs to learn about two tools. `doctor` reports all three gaps with their
+  install lines, plus the pinned Python and the dotnet SDK, in pure shell (the
+  tool it reports a missing `uv` for cannot be reached through `uv`).
 
 ### Changed
 

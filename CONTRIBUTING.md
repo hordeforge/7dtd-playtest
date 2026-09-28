@@ -6,15 +6,29 @@ is the repo's own gate surface; nothing here needs a game install.
 ## Setup
 
 1. Linux x86_64 host with `make` and `git`.
-2. Install [uv](https://docs.astral.sh/uv/) and `shellcheck`
-   (e.g. `sudo apt install shellcheck`). These are the only two host tools
-   the offline gates need beyond make/git: uv fetches the interpreter pinned
-   by `.python-version` and every locked dev dependency on first use.
-3. Run every offline gate:
+2. Install [uv](https://docs.astral.sh/uv/), `shellcheck` and `yamllint`
+   (e.g. `sudo apt install shellcheck yamllint`). These three are the only
+   host tools the offline gates need beyond make/git: uv fetches the
+   interpreter pinned by `.python-version` and every locked dev dependency on
+   first use, shellcheck lints `scripts/*.sh`, and yamllint lints the shipped
+   workflow YAML under `.github/`.
+3. Check the host in one run, which names every missing tool and how to
+   install it:
+
+```bash
+make doctor
+```
+
+4. Run every offline gate:
 
 ```bash
 make test
 ```
+
+`make lint` names a missing tool and how to install it instead of failing
+somewhere inside the gate. A host that cannot install `yamllint` runs
+`make lint SKIP_YAML=1`; CI never sets it, so the skipped gate still blocks
+the merge.
 
 For the mod build and live suites you additionally need dotnet SDK 8.0.400
 or newer (`global.json`) and the game at `GAME=`; see README Requirements.
@@ -25,6 +39,7 @@ or newer (`global.json`) and the game at `GAME=`; see README Requirements.
 |---|---|
 | `make test` | All offline gates (lint, typecheck, every suite script) |
 | `make test-one GATE=test_dst.py` | One gate file while iterating |
+| `make test-one GATE=test_playtest_compare.py ARGS="-k identical"` | One test inside the pytest-backed gate |
 | `make lint` / `make typecheck` | The analysis gates alone |
 | `make coverage` | Line coverage of `scripts/` under the same gates |
 | `make check` | Exactly what CI runs (`test` + 200-seed DST sweep) |

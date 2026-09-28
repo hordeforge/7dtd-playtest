@@ -87,10 +87,24 @@ Run every offline gate:
 make test
 ```
 
+Name every host tool the gates need, and how to install a missing one, in
+one run before a gate reports it one at a time:
+
+```bash
+make doctor
+```
+
 Run one gate while iterating:
 
 ```bash
 make test-one GATE=test_dst.py
+```
+
+Narrow further with `ARGS`, which the gate's own runner receives (the
+pytest-backed gate turns it into a test selection):
+
+```bash
+make test-one GATE=test_playtest_compare.py ARGS="-k identical_sides"
 ```
 
 Run the full local CI equivalent:

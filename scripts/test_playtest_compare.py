@@ -618,4 +618,8 @@ def test_fuzz_compare_survives_hostile_report_pairs(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-q"]))
+    # A contributor iterating on one case needs to reach it: bare argv is
+    # forwarded to pytest, so `scripts/test_playtest_compare.py -k
+    # identical_sides` runs that one test. Silently dropping it would look
+    # like a filter (exit 0, all 20 dots) while running the whole gate.
+    sys.exit(pytest.main([__file__, "-q", *sys.argv[1:]]))
