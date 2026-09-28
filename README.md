@@ -808,7 +808,9 @@ once the hold (or an on-demand `EndClip`) ends with the real frame count
 (never a padded one); `clip abandoned` marks a clip a failed case left
 active, which is never the completion marker. Every `clip` id above is the
 asset name `Helpers.AssetName` derives: NFC-normalized, ASCII letters, digits,
-`-` and `_` kept, anything else `_`. The marker, the `scene staged` name and
+`-` and `_` kept, anything else `_`, and a name Windows reserves (`AUX`, `nul`,
+`COM1` ... `LPT9`, extension or not) prefixed with `_` because there it is the
+device and not a file. The marker, the `scene staged` name and
 the frames directory are that one string, so a host reading a directory out of
 `clip complete` always reads the directory the frames were written to.
 Optional host

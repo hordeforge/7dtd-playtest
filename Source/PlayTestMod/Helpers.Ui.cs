@@ -320,6 +320,17 @@ namespace ZdtdPlaytest
         /// path segment can be smuggled in, and the name is byte-identical on
         /// every host that stores it. The mapping is idempotent, so applying
         /// it to an already-safe name is a no-op.</para>
+        ///
+        /// <para>The client is a Windows process, and a name Windows itself
+        /// refuses is not a file, so the mapping is only the first half. A
+        /// reserved device name is the device: <c>aux</c>, <c>AUX</c> and
+        /// <c>aux.png</c> all name the auxiliary device, so
+        /// <c>CreateDirectory</c> on one fails and the case photographs
+        /// nothing. Windows compares these with the extension ignored, which
+        /// is why the bare stem is enough. Both refusals keep the name rather
+        /// than dropping it, because a collector reads the directory back out
+        /// of the marker line and the marker and the directory derive it here
+        /// and nowhere else.</para>
         /// </remarks>
         public static string AssetName(string name)
         {
@@ -328,7 +339,24 @@ namespace ZdtdPlaytest
             var sb = new System.Text.StringBuilder(normalized.Length);
             foreach (char c in normalized)
                 sb.Append((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
-            return sb.ToString();
+            string safe = sb.ToString();
+            string lower = safe.ToLowerInvariant();
+            for (int i = 0; i < ReservedDeviceNames.Length; i++)
+            {
+                string device = ReservedDeviceNames[i];
+                if (lower == device || lower.StartsWith(device + ".", StringComparison.Ordinal))
+                    return "_" + safe;
+            }
+            return safe;
         }
+
+        // The devices DOS reserved and every version of Windows still does,
+        // lower-cased. COM0/LPT0 are not among them: those are ordinary names.
+        static readonly string[] ReservedDeviceNames =
+        {
+            "con", "prn", "aux", "nul",
+            "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+            "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
+        };
     }
 }

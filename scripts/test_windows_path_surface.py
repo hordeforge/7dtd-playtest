@@ -58,21 +58,21 @@ def test_reserved_device_names_are_listed() -> None:
 
 def test_sanitizer_refuses_device_names_and_empty() -> None:
     src = UI.read_text(encoding="utf-8")
-    body = method_body(src, r"static string SafeFileName\(string name\)")
+    body = method_body(src, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)")
     assert "ToLowerInvariant" in body, (
-        "SafeFileName must compare case-insensitively: Windows device names "
+        "AssetName must compare case-insensitively: Windows device names "
         "match any casing"
     )
-    assert "ReservedDeviceNames" in body, "SafeFileName never consults ReservedDeviceNames"
+    assert "ReservedDeviceNames" in body, "AssetName never consults ReservedDeviceNames"
     assert '"_" +' in body, (
-        "SafeFileName must prefix a device name, otherwise `aux` and `aux.png` "
+        "AssetName must prefix a device name, otherwise `aux` and `aux.png` "
         "still name the device and CreateDirectory fails"
     )
-    assert re.search(r"if \(safe\.Length == 0\)\s*return", body), (
-        "SafeFileName must not return an empty name: it collapses onto the "
+    assert re.search(r"if \(string\.IsNullOrEmpty\(name\)\)\s*return", body), (
+        "AssetName must not return an empty name: it collapses onto the "
         "parent directory and the collector never finds the frame"
     )
-    print("OK SafeFileName refuses empty names and Windows device names")
+    print("OK AssetName refuses empty names and Windows device names")
 
 
 def test_paths_are_built_by_the_path_api() -> None:
