@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 import traceback
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Protocol
@@ -1962,10 +1962,21 @@ def clear_run_ended_marker(logdir: Path) -> None:
         warn(f"could not clear the previous run-ended marker in {logdir}: {ex}")
 
 
-def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
-    """Keep only the newest `keep` report/junit files per pattern."""
+def prune_run_artifacts(
+    logdir: Path, keep: int = REPORT_KEEP, protect: Iterable[Path] = ()
+) -> None:
+    """Keep only the newest `keep` report/junit files per pattern.
+
+    ``protect`` names what the caller has just written, and those paths are
+    never prune candidates. The stamp in a name is the wall clock, so an NTP
+    step backwards (or a restored VM snapshot) between two runs makes this
+    run's own report the lexicographically oldest entry in the directory:
+    without this the prune deletes the evidence of the run that is still
+    writing it, and keeps reports the clock now claims are older.
+    """
     if keep <= 0:
         return
+    protected = {os.fspath(Path(p)) for p in protect}
     for pattern in ("report-*.json", "junit-*.xml"):
         try:
             entries = sorted(p for p in logdir.glob(pattern) if p.is_file())
@@ -1973,6 +1984,8 @@ def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
             warn(f"artifact prune skipped ({ex}); old {pattern} will accumulate")
             continue
         for old in entries[:-keep]:
+            if os.fspath(old) in protected:
+                continue
             try:
                 old.unlink()
             except OSError as ex:
@@ -1982,19 +1995,30 @@ def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
                 warn(f"could not prune {old}: {ex}")
 
 
-def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
+def prune_quarantine(
+    qroot: Path, keep: int = QUARANTINE_KEEP, protect: Iterable[Path] = ()
+) -> None:
     """Keep only the newest `keep` quarantine entries (dirs or files).
 
     An entry older than the window is the last copy of whatever a run swept
     aside, so its recorded restore paths are named in the run log before it
     goes: the prune is bounded, but a pruned world is gone.
+
+    ``protect`` carries the entry the caller has just created. Entry names
+    open with a UTC wall-clock stamp, so a backwards clock step makes the
+    entry holding this run's swept-aside world sort as the oldest, and the
+    prune would then delete that world at once while warning about a
+    different one.
     """
+    protected = {os.fspath(Path(p)) for p in protect}
     try:
         entries = sorted(qroot.iterdir())
     except OSError as ex:
         warn(f"quarantine prune skipped ({ex}); old entries will accumulate")
         return
     for old in entries[:-keep]:
+        if os.fspath(old) in protected:
+            continue
         if old.is_dir():
             recorded = quarantine_restore.read_manifest(old)
             if recorded:
@@ -2031,7 +2055,7 @@ def _quarantine_entry(qroot: Path, label: str) -> Path | None:
     except OSError as ex:
         warn(f"quarantine unavailable ({ex}); keeping data in place")
         return None
-    prune_quarantine(qroot)
+    prune_quarantine(qroot, protect=(entry,))
     return entry
 
 
@@ -3902,7 +3926,7 @@ def main(argv: list[str] | None = None) -> int:
                     },
                 )
                 write_junit(junit_path, args.suite, results)
-                prune_run_artifacts(args.logdir)
+                prune_run_artifacts(args.logdir, protect=(report_path, junit_path))
                 if setup_done and setup_fail > 0:
                     # A completed setup phase that reported FAIL rows is "one
                     # or more case failures" (exit 1 per the README table),
@@ -4448,7 +4472,7 @@ def main(argv: list[str] | None = None) -> int:
         # A user-provided --junit path outside logdir is deliberate evidence
         # placement and is never pruned; only the timestamped logdir defaults
         # are bounded.
-        prune_run_artifacts(args.logdir)
+        prune_run_artifacts(args.logdir, protect=(report_path, junit_path))
 
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"

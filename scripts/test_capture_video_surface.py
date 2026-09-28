@@ -49,8 +49,10 @@ AUDIO_SCRIPT = Path(__file__).resolve().parent / "capture_audio.sh"
 
 # The three capture scripts share the log gate and the stop_run teardown; the
 # shared copy is what these checks execute, so a script cannot pass by keeping
-# a private one.
-STOP_START = "capture_stop_run() {"
+# a private one. The stop_run fragment starts at the monotonic-clock helper it
+# depends on, so a helper capture_stop_run cannot call fails here rather than at
+# the first capture on a host.
+STOP_START = "uptime_centis() {"
 
 # The log gate: the baseline taken before the run starts, plus the reader.
 LOG_GATE_START = "capture_log_gate_init() {"
@@ -277,7 +279,10 @@ def check_client_log_resolution(*scripts: Path) -> None:
 def stop_fragment() -> str:
     text = COMMON.read_text(encoding="utf-8")
     start = text.index(STOP_START)
-    end = text.index("\n}", start) + 2
+    # Through the end of capture_stop_run, not of the first function in the
+    # slice: the monotonic-clock helper it times the grace period with comes
+    # first, and a fragment that dropped it would not run.
+    end = text.index("\n}", text.index("capture_stop_run() {", start)) + 2
     return text[start:end]
 
 

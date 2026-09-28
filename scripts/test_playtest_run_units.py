@@ -448,13 +448,92 @@ def test_prune_run_artifacts_wired_into_main() -> None:
     or the bound silently stops covering new writers (rejoin-abort path and
     the final report path both land there)."""
     text = PLAYTEST_RUN.read_text(encoding="utf-8")
-    calls = len(re.findall(r"prune_run_artifacts\(args\.logdir\)", text))
+    calls = len(re.findall(r"prune_run_artifacts\(args\.logdir, protect=", text))
     # One definition reference inside main() per artifact-writing exit path;
     # the def line itself does not match this exact call shape.
     assert calls == 2, (
         f"expected prune after both report-writing paths, found {calls} calls"
     )
+    # Every call must protect the pair it just wrote: a backwards clock step
+    # makes those names sort as the oldest in the directory.
+    for line in text.splitlines():
+        if "prune_run_artifacts(args.logdir" in line:
+            assert "report_path" in line and "junit_path" in line, (
+                f"prune call does not protect the artifacts just written: {line.strip()}"
+            )
     print("PASS prune_run_artifacts wired after both report-writing paths")
+
+
+def test_prune_never_deletes_what_this_run_just_wrote() -> None:
+    """A wall-clock step backwards must not cost a run its own evidence.
+
+    Artifact names carry a wall-clock stamp, and the prune keeps the newest
+    names. Step the clock back between two runs (NTP correction, a restored
+    VM snapshot) and this run's report sorts as the oldest entry in the
+    directory, so an unprotected prune deletes the report the operator is
+    about to read and keeps the ones the clock now calls older.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-artifacts-") as td:
+        logdir = Path(td) / "cache"
+        logdir.mkdir()
+        # Six reports written before the clock step, all stamped ahead of the
+        # one the stepped-back clock produces next.
+        for i in range(6):
+            (logdir / f"report-{1700003600 + i}.json").write_text("{}", encoding="utf-8")
+        (logdir / "junit-1700003600.xml").write_text("<x/>", encoding="utf-8")
+        mine = logdir / "report-1700000000.json"
+        mine_junit = logdir / "junit-1700000000.xml"
+        mine.write_text("{}", encoding="utf-8")
+        mine_junit.write_text("<x/>", encoding="utf-8")
+
+        playtest_run.prune_run_artifacts(logdir, keep=2, protect=(mine, mine_junit))
+
+        assert mine.is_file(), "the report this run just wrote was pruned"
+        assert mine_junit.is_file(), "its junit twin was pruned"
+        # The window is `keep` plus the paths this run just wrote: protection
+        # is what stops the clock step from deleting this run's evidence, and
+        # it must not become a way to keep the directory unbounded.
+        left = sorted(p.name for p in logdir.glob("report-*.json"))
+        assert left == [
+            "report-1700000000.json",
+            "report-1700003604.json",
+            "report-1700003605.json",
+        ], f"unexpected survivors: {left}"
+        assert sorted(p.name for p in logdir.glob("junit-*.xml")) == [
+            "junit-1700000000.xml",
+            "junit-1700003600.xml",
+        ]
+        print("PASS prune_run_artifacts keeps a stepped-back run's own artifacts")
+
+
+def test_prune_quarantine_keeps_the_entry_it_just_created() -> None:
+    """Same backwards clock step, on the only copy of a swept-aside world.
+
+    Quarantine entry names open with a UTC wall-clock stamp, so an entry
+    created after a backwards step sorts as the oldest and the prune removes
+    the data it exists to preserve, while warning about a different entry.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-fresh-") as td:
+        qroot = Path(td) / "q"
+        qroot.mkdir()
+        for i in range(5):
+            (qroot / f"20260928T0{i}0000Z-world").mkdir()
+        mine = qroot / "20260927T230000Z-world"
+        mine.mkdir()
+        (mine / "world").write_text("the only copy", encoding="utf-8")
+
+        errbuf = io.StringIO()
+        with contextlib.redirect_stderr(errbuf):
+            playtest_run.prune_quarantine(qroot, keep=2, protect=(mine,))
+
+        assert (mine / "world").is_file(), "quarantine pruned the entry it created"
+        assert len(list(qroot.iterdir())) == 3, (
+            "the window is keep plus the entry this run created, not unbounded"
+        )
+        assert "only copy" not in errbuf.getvalue(), (
+            f"the protected entry must not be reported as pruned: {errbuf.getvalue()!r}"
+        )
+        print("PASS prune_quarantine protects the entry this run created")
 
 
 def _main_source() -> str:
@@ -2789,6 +2868,14 @@ def main() -> int:
             test_prune_run_artifacts_keeps_newest_per_pattern,
         ),
         ("prune_run_artifacts_wiring", test_prune_run_artifacts_wired_into_main),
+        (
+            "prune_own_artifacts",
+            test_prune_never_deletes_what_this_run_just_wrote,
+        ),
+        (
+            "prune_own_quarantine_entry",
+            test_prune_quarantine_keeps_the_entry_it_just_created,
+        ),
         (
             "prune_run_artifacts_failure",
             test_prune_run_artifacts_warns_on_a_failed_delete,
