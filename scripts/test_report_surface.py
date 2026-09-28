@@ -1165,6 +1165,91 @@ def test_artifacts_publish_by_rename_and_roll_back() -> None:
     print("PASS artifacts_atomic publish-by-rename with rollback on failure")
 
 
+def test_log_tail_runs_on_an_injected_byte_source() -> None:
+    """The log's bytes need not be a file.
+
+    Every decision the orchestrator makes about timing is made against bytes
+    that arrived through ``LogTail.poll``: a barrier fired, a result line, the
+    DONE marker, a line held back until its newline. While the tail reached
+    ``Path.stat`` and ``Path.open`` itself, the only way to reach that logic
+    was to write a real file and hope the bytes landed on the intended poll
+    boundary, so the split-line and split-character paths were only reachable
+    by hand-timing an append. An injected ``LogBytes`` makes the arrival
+    schedule the caller's, which is what a simulator needs to drive log
+    arrival as an event instead of a real write.
+
+    Both sources are exercised over the same arrival schedule and must
+    produce the same polls: the seam is a substitution, not a second
+    implementation."""
+    # The third and fourth chunks split a line *and* a character: the astral
+    # face is four bytes and only two of them arrive in the poll before it,
+    # the case a per-poll decode would permanently ruin.
+    face = "\N{GRINNING FACE}".encode("utf-8")
+    split_line = b"[7dtd-playtest] PASS mp/chat detail=tok " + face + b"\n"
+    cut = len(split_line) - len(face) - 1 + 2
+    chunks = [
+        b"[7dtd-playtest] barrier spawn_zombie\n",
+        b"[7dtd-playtest] PASS s/two detail=x\n",
+        split_line[:cut],
+        split_line[cut:],
+        b"[7dtd-playtest] DONE exit_hint=0\n",
+    ]
+
+    class Memory:
+        def __init__(self) -> None:
+            self.data = b""
+
+        def size(self) -> int:
+            return len(self.data)
+
+        def read(self, offset: int, length: int) -> bytes:
+            return self.data[offset : offset + length]
+
+    with tempfile.TemporaryDirectory() as td:
+        log_path = Path(td) / "client.log"
+        mem = Memory()
+        on_disk = playtest_log.LogTail(log_path)
+        in_memory = playtest_log.LogTail(source=mem)
+        polls: list[str] = []
+        for chunk in chunks:
+            with log_path.open("ab") as fh:
+                fh.write(chunk)
+            mem.data += chunk
+            from_file = on_disk.poll()
+            from_memory = in_memory.poll()
+            assert from_file == from_memory, (
+                f"injected source diverged from the file on {chunk!r}: "
+                f"{from_file!r} vs {from_memory!r}"
+            )
+            polls.append(from_memory)
+        seen = "".join(polls)
+        assert "\N{GRINNING FACE}" in seen, (
+            f"the character split across two polls did not survive: {seen!r}"
+        )
+        assert "\ufffd" not in seen, f"a torn character was decoded: {seen!r}"
+        assert in_memory.poll() == "", "a settled log must keep polling empty"
+
+        # The truncate that ends one generation and starts the next: a real
+        # restart shortens the file under the tail.
+        log_path.write_bytes(b"[7dtd-playtest] barrier saveworld\n")
+        mem.data = b"[7dtd-playtest] barrier saveworld\n"
+        assert on_disk.poll() == in_memory.poll(), "shrink handling diverged"
+        assert in_memory.generations == 1, in_memory.generations
+
+    # An unreadable source is a poll that has to be retried, not an empty log
+    # mistaken for the end of one.
+    class Vanished:
+        def size(self) -> int | None:
+            return None
+
+        def read(self, offset: int, length: int) -> bytes | None:
+            return None
+
+    absent = playtest_log.LogTail(source=Vanished())
+    assert absent.poll() == "", "an unreadable source must poll empty, not raise"
+    print("PASS logtail_injected_source one tail, two byte sources, same polls")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -1179,6 +1264,7 @@ def main() -> int:
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
+    test_log_tail_runs_on_an_injected_byte_source()
     test_nre_sample_lines_are_bounded()
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
     test_fuzz_loadgen_events_survive_hostile_jsonl()

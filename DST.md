@@ -66,6 +66,18 @@ polls, progress crumbs, the soak window - without spending a real second. That
 makes the deadline arithmetic reachable from a test or a simulation, but it is
 not yet simulated; see below.
 
+The orchestrator's log reader has the same shape. `playtest_log.LogTail` reads
+its bytes through a `playtest_log.LogBytes` port (`size()` and
+`read(offset, length)`, each answering `None` for "cannot be read right now",
+which is what a `stat`/`open` `OSError` always meant to the caller). Production
+is `PathLogBytes` over the log path, so a poll that finds no file yet is still a
+poll to retry rather than an empty log mistaken for the end of one. The tail
+logic above the port is one implementation: the split newline, the multi-byte
+character torn across two polls, the shrink that restarts the generation. What
+the port buys is the *arrival schedule* as the caller's, so those paths are
+driven by appending bytes in a chosen order rather than by hand-timing a write
+to a real file. It is still not simulated; only the bytes are injectable.
+
 ## Faults
 
 All seed-driven, so a scenario is replayed rather than re-rolled
@@ -148,11 +160,14 @@ about time and log content. The time half now has its seam; what is left:
    one: the clock alone makes the barrier and deadline logic reachable, but the
    run's decisions are mostly about which processes are up.
 2. A telnet port, so `TelnetAdmin` retries and partial reads can be modelled.
-3. A `LogTail` in-memory source, so log arrival is a simulated event rather
-   than a real file a test appends to.
+3. A simulated writer behind `LogTail`'s `LogBytes` port, so log arrival is a
+   scheduled event rather than an injection the caller has to drive. The port
+   is in place (see above); what is missing is the simulated source and a
+   scenario that steps the orchestrator's poll loop on it.
 
 Until then the log-contract parser (`parse_client_log`, `barrier_hits_prefix`,
 in `scripts/playtest_log.py`) and the compare diff stay covered by the ordinary
-offline gates, and the orchestrator's timing is covered by
-`test_playtest_run_units.py`, which drives a real poll loop on a clock that
-only moves when slept on.
+offline gates (`test_report_surface.py`, which now drives the tail's arrival
+schedule through `LogBytes` and checks both sources agree poll for poll), and
+the orchestrator's timing is covered by `test_playtest_run_units.py`, which
+drives a real poll loop on a clock that only moves when slept on.

@@ -6,10 +6,12 @@ is a Windows process (Proton runs it as one). Two Windows-only rules decide
 whether a staged frame or a clip directory exists at all, and neither shows up
 in a Linux-side review:
 
-* A reserved device name is the device, not a file. `AUX`, `aux`, and `aux.png`
-  all name the auxiliary device, so `CreateDirectory` on one fails and the case
-  photographs nothing. `COM1`-`COM9` and `LPT1`-`LPT9` are the numbered
-  members; `COM0` is not one.
+* A reserved device name is the device, not a file. `AUX` and `aux` name the
+  auxiliary device, so `CreateDirectory` on one fails and the case photographs
+  nothing. `COM1`-`COM9` and `LPT1`-`LPT9` are the numbered members; `COM0` is
+  not one. The extension cannot carry a device name past the character
+  mapping, because `.` is one of the characters it rewrites (`aux.png`
+  becomes `aux_png`), so the check runs on the already-mapped name.
 * A name that sanitizes to nothing collapses onto its parent directory, so the
   frame lands in the shots root under a name the collector never looks for.
 
@@ -59,6 +61,10 @@ def test_reserved_device_names_are_listed() -> None:
 def test_sanitizer_refuses_device_names_and_empty() -> None:
     src = UI.read_text(encoding="utf-8")
     body = method_body(src, r"static string AssetName\(string name\)")
+    assert "ToLowerInvariant" in body, (
+        "AssetName must compare case-insensitively: Windows device names "
+        "match any casing"
+    )
     assert "ReservedDeviceNames" in body, "AssetName never consults ReservedDeviceNames"
     assert '"_" +' in body, (
         "AssetName must prefix a device name, otherwise `aux` still names the "

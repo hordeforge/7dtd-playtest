@@ -63,11 +63,11 @@ Release model (inferred practice, now pinned by `make test`):
   `Helpers.AssetName` (the client, a Windows process under Proton) filters a
   staged frame or clip id to a safe character set, but a name that filters to
   nothing collapsed onto its parent directory, and a reserved device name
-  (`AUX`, `nul`, `COM1` ... `LPT9`, with any casing and with the appended
-  `.png`) is the device rather than a file, so `CreateDirectory` failed and the
-  case photographed nothing. Both now get a name the client filesystem
-  accepts, and `scripts/test_windows_path_surface.py` pins the rules offline
-  (the mod cannot be compiled without the game assemblies).
+  (`AUX`, `nul`, `COM1` ... `LPT9`, with any casing) is the device rather than
+  a file, so `CreateDirectory` failed and the case photographed nothing. Both
+  now get a name the client filesystem accepts, and
+  `scripts/test_windows_path_surface.py` pins the rules offline (the mod
+  cannot be compiled without the game assemblies).
 
 - **Host CLI help and exit codes, aligned across the scripts.**
   Every other CLI in `scripts/` already printed its exit codes from
@@ -123,6 +123,19 @@ Release model (inferred practice, now pinned by `make test`):
   needs first. Production behaviour is unchanged: the default is the real
   clock. Gated by `test_playtest_run_units.py`, which drives a real poll loop
   on a virtual clock and fails if any `time` call reappears outside the seam.
+
+- **Injectable byte source for the log reader**
+  (`playtest_log.LogBytes` / `PathLogBytes`). `LogTail` read its bytes with
+  `Path.stat` and `Path.open` directly, so the only way to reach the logic
+  that matters to the orchestrator - a line held back until its newline, a
+  UTF-8 character torn across two polls, a truncate that restarts the
+  generation - was to write a real file and hand-time the append. The tail
+  now reads through a two-method port whose production implementation is the
+  file it always read; a caller with the bytes in hand supplies its own. A
+  `None` from either method is what an `OSError` always meant: skip this poll
+  and retry, not an empty log. Production behaviour is unchanged, and
+  `test_report_surface.py` drives one tail over the same arrival schedule
+  through both sources and fails if a single poll diverges.
 
 - **`make sbom` and the release-time dependency inventory.**
   `scripts/dep_sbom.py` writes a CycloneDX 1.6 SBOM from the two committed,

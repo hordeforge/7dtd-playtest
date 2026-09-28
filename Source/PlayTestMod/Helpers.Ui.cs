@@ -319,7 +319,9 @@ namespace ZdtdPlaytest
         /// everything else becomes <c>_</c>: no separator, drive letter or
         /// path segment can be smuggled in, and the name is byte-identical on
         /// every host that stores it. The mapping is idempotent, so applying
-        /// it to an already-safe name is a no-op.</para>
+        /// it to an already-safe name is a no-op. It also rewrites the
+        /// extension separator, so a name that would reach a device still
+        /// carrying one cannot.</para>
         ///
         /// <para>The client is a Windows process, and a name Windows itself
         /// refuses is not a file, so the mapping is only the first half. The
@@ -329,7 +331,10 @@ namespace ZdtdPlaytest
         /// exactly one of them in lowercase still does, so the survivor takes
         /// a <c>_</c> prefix rather than being dropped: a collector reads the
         /// directory back out of the marker line, and the marker and the
-        /// directory derive it here and nowhere else.</para>
+        /// directory derive it here and nowhere else. The comparison is
+        /// case-insensitive as well, because a device name matches in any
+        /// casing. The mapping is idempotent, so prefixing the device name
+        /// with <c>_</c> survives a second pass.</para>
         /// </remarks>
         public static string AssetName(string name)
         {
@@ -340,16 +345,22 @@ namespace ZdtdPlaytest
                 sb.Append((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
             string safe = sb.ToString();
             if (safe.Length == 0) return "unnamed";
-            return Array.IndexOf(ReservedDeviceNames, safe) >= 0 ? "_" + safe : safe;
+            foreach (string device in ReservedDeviceNames)
+            {
+                if (string.Equals(safe, device, StringComparison.ToLowerInvariant))
+                    return "_" + safe;
+            }
+            return safe;
         }
 
         /// <summary>
-        /// The Windows device names. A path whose final segment is one of
-        /// these is the device, not a file, so <c>CreateDirectory</c> on one
-        /// fails and the case photographs nothing. Only the exact lowercase
+        /// The Windows device names, lowercase. A path whose final segment is
+        /// one of these is the device, not a file, so <c>CreateDirectory</c> on
+        /// one fails and the case photographs nothing. Only the lowercase
         /// spelling can reach a path: <see cref="AssetName"/> maps every other
-        /// casing and every extension to underscores first. COM0 and LPT0 are
-        /// not among them; those are ordinary names.
+        /// casing and every extension to underscores first, and the comparison
+        /// itself is case-insensitive. COM0 and LPT0 are not among them; those
+        /// are ordinary names.
         /// </summary>
         static readonly string[] ReservedDeviceNames =
         {

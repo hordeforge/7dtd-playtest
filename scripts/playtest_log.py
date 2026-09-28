@@ -324,6 +324,48 @@ class TailSource(Protocol):
         ...
 
 
+class LogBytes(Protocol):
+    """The two reads a tail needs, so the log's bytes need not be a file.
+
+    A tail's decisions (a partial line held until its newline, a multi-byte
+    character split across polls, a truncate that restarts the stream) are
+    worth testing and simulating on their own, and none of them are reachable
+    while the bytes come from ``Path.stat`` and ``Path.open`` directly. Both
+    answer ``None`` for "cannot be read right now", which is what a
+    ``stat``/``open`` ``OSError`` means to a caller: skip this poll and try
+    again, rather than treat it as an empty log.
+    """
+
+    def size(self) -> int | None:
+        """Current length in bytes, or None when it cannot be read."""
+        ...
+
+    def read(self, offset: int, length: int) -> bytes | None:
+        """Bytes from ``offset``, or None when they cannot be read."""
+        ...
+
+
+class PathLogBytes:
+    """Production :class:`LogBytes`: a real append-only file."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def size(self) -> int | None:
+        try:
+            return self._path.stat().st_size
+        except OSError:
+            return None
+
+    def read(self, offset: int, length: int) -> bytes | None:
+        try:
+            with self._path.open("rb") as fh:
+                fh.seek(offset)
+                return fh.read(length)
+        except OSError:
+            return None
+
+
 class LogTail:
     """Incremental reader for an append-only UTF-8 log.
 
@@ -344,25 +386,37 @@ class LogTail:
     A consumer that accumulates parsed state across polls must reset it when
     this advances, or events from the previous generation would answer for
     the new one.
+
+    ``source`` replaces the file. The production path is a :class:`PathLogBytes`
+    over ``path``; a caller with the bytes already in hand (a test, a
+    simulation) passes its own :class:`LogBytes` and the tail logic above is
+    the same code either way.
     """
 
-    def __init__(self, path: Path, *, from_end: bool = False) -> None:
-        self._path = path
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        from_end: bool = False,
+        source: LogBytes | None = None,
+    ) -> None:
+        if source is None:
+            if path is None:
+                raise ValueError("LogTail needs a path or a source")
+            source = PathLogBytes(path)
+        self._source = source
+        self._offset = 0
         if from_end:
-            try:
-                self._offset = path.stat().st_size
-            except OSError:
-                self._offset = 0
-        else:
-            self._offset = 0
+            size = source.size()
+            if size is not None:
+                self._offset = size
         self._pending = b""
         self.generations = 0
 
     def poll(self) -> str:
         """Return newly appended complete-line text since the previous call."""
-        try:
-            size = self._path.stat().st_size
-        except OSError:
+        size = self._source.size()
+        if size is None:
             return ""
         if size < self._offset:
             self._offset = 0
@@ -370,12 +424,7 @@ class LogTail:
             self.generations += 1
         if size <= self._offset:
             return ""
-        try:
-            with self._path.open("rb") as fh:
-                fh.seek(self._offset)
-                raw = fh.read(size - self._offset)
-        except OSError:
-            return ""
+        raw = self._source.read(self._offset, size - self._offset)
         if not raw:
             return ""
         self._offset += len(raw)
