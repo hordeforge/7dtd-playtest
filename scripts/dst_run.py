@@ -36,7 +36,18 @@ def load_regression_seeds(path: Path = SEEDS_FILE) -> list[int]:
     if not path.is_file():
         return []
     seeds: list[int] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as ex:
+        # A regression list this run cannot read is a silently shorter replay
+        # set, so a seed that once broke the lock can stop being replayed and
+        # the failure returns as "new". Say so instead of replaying nothing.
+        print(
+            f"[dst] error: cannot read the regression seed list {path}: {ex}",
+            file=sys.stderr,
+        )
+        raise
+    for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue

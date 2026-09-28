@@ -581,6 +581,41 @@ def test_log_tail_from_end_starts_at_current_size() -> None:
     print("PASS logtail_from_end pre-existing bytes skipped, appends still read")
 
 
+def test_log_tail_counts_read_failures_and_explains_an_empty_run() -> None:
+    """A poll that cannot reach the file returns no bytes, which is
+    indistinguishable from a log that has not grown. A log that goes
+    unreadable mid-run (removed, permissions, EIO) would then look like a
+    client that never wrote DONE, so the failure is counted and named."""
+    with tempfile.TemporaryDirectory() as td:
+        log_path = Path(td) / "client.log"
+        log_path.write_text("[7dtd-playtest] PASS s/a ok\n", encoding="utf-8")
+        tail = playtest_log.LogTail(log_path)
+        assert tail.poll() != "", "precondition: the existing line is read"
+        assert tail.read_errors == 0
+
+        # A not-yet-created log is the normal pre-first-write state, not a
+        # read failure, so it must not inflate the count the run reports.
+        absent = playtest_log.LogTail(Path(td) / "absent.log")
+        assert absent.poll() == ""
+        assert absent.read_errors == 0, "an absent log is not a read error"
+
+        # A real I/O failure is counted, and names the file it could not read.
+        with mock.patch.object(
+            Path, "stat", side_effect=OSError(5, "I/O error")
+        ):
+            assert tail.poll() == ""
+        assert tail.read_errors == 1, tail.read_errors
+        assert "client.log" in (tail.last_error or ""), tail.last_error
+
+        # The orchestrator's no-DONE path must report the count, or the
+        # operator is left with a hang and no reason for it.
+        src = (Path(__file__).resolve().parent / "playtest_run.py").read_text(
+            encoding="utf-8"
+        )
+        assert "read_errors" in src, "the no-DONE path never reports tail read errors"
+    print("PASS logtail_read_errors counted, named, and reported on a missing DONE")
+
+
 def test_nre_sample_lines_are_bounded() -> None:
     """A sampled exception line lands in report-*.json, which leaves the
     machine, and remote LAN chat text reaches this log (R2 in
@@ -1179,6 +1214,7 @@ def main() -> int:
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
+    test_log_tail_counts_read_failures_and_explains_an_empty_run()
     test_nre_sample_lines_are_bounded()
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
     test_fuzz_loadgen_events_survive_hostile_jsonl()

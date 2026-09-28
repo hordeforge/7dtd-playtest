@@ -322,6 +322,33 @@ def test_non_utf8_instance_env_is_named_not_ignored() -> None:
             raise AssertionError("expected TargetError for a non-UTF-8 instance.env")
 
 
+def test_unreadable_instance_env_is_named_not_ignored() -> None:
+    """An instance.env that exists but cannot be read must not read as "no
+    instance" either: {} would silently drop this instance's ports and the run
+    would resolve against the lab defaults. chmod is the only portable way to
+    make a read fail here, and root ignores the mode bits, so a run that can
+    still read it asserts nothing."""
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
+        root = Path(td)
+        inst = root / "instances" / "srv-x"
+        inst.mkdir(parents=True)
+        env_file = inst / "instance.env"
+        env_file.write_text("SERVER_PORT=27105\n", encoding="utf-8")
+        env_file.chmod(0o000)
+        try:
+            loaded = pt.load_sandbox_env(root, "srv-x")
+        except pt.TargetError as ex:
+            assert "cannot read the instance contract" in str(ex), ex
+            assert "instance.env" in str(ex), ex
+        else:
+            assert loaded == {"SERVER_PORT": "27105"}, (
+                "this process can read the file despite the mode, so the "
+                "unreadable path did not run"
+            )
+        finally:
+            env_file.chmod(0o644)
+
+
 def test_malformed_port_in_instance_env_is_named_not_ignored() -> None:
     """A port that does not parse must not read as "not allocated": the run
     would keep the pre-`sb up` placeholder and report an unusable number."""
@@ -384,6 +411,10 @@ def main() -> int:
         (
             "non_utf8_instance_env_is_named_not_ignored",
             test_non_utf8_instance_env_is_named_not_ignored,
+        ),
+        (
+            "unreadable_instance_env_is_named_not_ignored",
+            test_unreadable_instance_env_is_named_not_ignored,
         ),
         (
             "resolving_a_target_never_creates_an_instance",

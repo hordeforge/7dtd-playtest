@@ -344,6 +344,13 @@ class LogTail:
     A consumer that accumulates parsed state across polls must reset it when
     this advances, or events from the previous generation would answer for
     the new one.
+
+    ``read_errors`` counts polls that could not reach the file (EIO, the log
+    removed under the reader, a permission change). A poll that fails returns
+    "", which a consumer cannot tell from a log that simply has not grown, so
+    the count is how an unreadable run's missing DONE gets explained instead
+    of being reported as a client that never answered. ``last_error`` is that
+    failure's text, for the same report.
     """
 
     def __init__(self, path: Path, *, from_end: bool = False) -> None:
@@ -357,13 +364,24 @@ class LogTail:
             self._offset = 0
         self._pending = b""
         self.generations = 0
+        self.read_errors = 0
+        self.last_error: str | None = None
+
+    def _failed(self, ex: OSError) -> str:
+        self.read_errors += 1
+        self.last_error = f"{self._path}: {ex}"
+        return ""
 
     def poll(self) -> str:
         """Return newly appended complete-line text since the previous call."""
         try:
             size = self._path.stat().st_size
-        except OSError:
+        except FileNotFoundError:
+            # The client has not created its log yet. Expected before the
+            # first write, so it is not a read error to report.
             return ""
+        except OSError as ex:
+            return self._failed(ex)
         if size < self._offset:
             self._offset = 0
             self._pending = b""
@@ -374,8 +392,12 @@ class LogTail:
             with self._path.open("rb") as fh:
                 fh.seek(self._offset)
                 raw = fh.read(size - self._offset)
-        except OSError:
+        except FileNotFoundError:
+            # Removed between the stat and the open. Nothing to read, and the
+            # next poll sees the same absence; not a failure to count twice.
             return ""
+        except OSError as ex:
+            return self._failed(ex)
         if not raw:
             return ""
         self._offset += len(raw)

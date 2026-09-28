@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS = ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -246,6 +248,43 @@ def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
     assert r.returncode == 4, r.stderr
     assert "cannot write comparison outputs" in r.stderr
     assert "Traceback" not in r.stderr
+
+
+def test_unreadable_input_refuses_diff_instead_of_reading_as_empty(tmp_path: Path) -> None:
+    """A side that cannot be read is a refused input, not an empty one.
+
+    main() only checks is_file(), so a file that exists but cannot be read
+    (permissions, a vanished file, EIO) reaches load_results. Degrading that
+    to an empty side reported the run as "neither side had a playtest result
+    line" (exit 1), which reads as evidence the playtest produced nothing
+    rather than evidence that its log could not be read.
+    """
+    s = tmp_path / "stock.log"
+    z = tmp_path / "zdtd.log"
+    s.write_text(STOCK_LOG, encoding="utf-8")
+    z.write_text(ZDTD_LOG, encoding="utf-8")
+    s.chmod(0o000)
+    try:
+        r = _run_bad_input(tmp_path, "--stock", str(s), "--zdtd", str(z))
+        # Root ignores the mode bits, so an unreadable-by-mode file is still
+        # readable here; only assert the refusal when it actually is not.
+        if r.returncode == 0:
+            return
+        assert r.returncode == 2, r.stderr
+        assert "cannot read" in r.stderr and str(s) in r.stderr
+        assert "Traceback" not in r.stderr
+        assert not (tmp_path / "out" / "playtest-compare.json").exists()
+    finally:
+        s.chmod(0o644)
+
+
+def test_load_results_raises_on_unreadable_path(tmp_path: Path) -> None:
+    """The refusal is raised at the read, so any consumer of load_results
+    cannot silently diff an input it never saw."""
+    missing = tmp_path / "gone.json"
+    with pytest.raises(playtest_compare.CompareError) as excinfo:
+        playtest_compare.load_results(missing)
+    assert str(missing) in str(excinfo.value)
 
 
 def test_ran_at_surfaces_in_report(tmp_path: Path) -> None:
@@ -573,5 +612,4 @@ def test_fuzz_compare_survives_hostile_report_pairs(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    import pytest
     sys.exit(pytest.main([__file__, "-q"]))

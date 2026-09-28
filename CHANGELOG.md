@@ -241,6 +241,40 @@ Migration, by symbol:
 
 ### Fixed
 
+- **An unreadable comparison input is refused, not read as an empty side.**
+  `playtest_compare.load_results` degraded a failed `read_text` to `""` and
+  carried on, so a report that existed but could not be read (permissions, a
+  vanished file, EIO) exited 1 with "neither side had a playtest result line",
+  which reads as evidence the playtest produced nothing rather than that its
+  evidence could not be read. It now raises `CompareError`, and `main()`
+  reports exit 2 with the offending path named.
+- **An unreadable client log is distinguished from a silent one.** `LogTail.poll`
+  returned `""` for a file it could not stat or open, the same value a log that
+  has not grown returns, so a log that went unreadable mid-run produced a
+  "no DONE from primary playtest mod" harness failure with no reason attached.
+  `LogTail` now counts read failures and names the file, and the orchestrator's
+  no-DONE path reports both. A not-yet-created log is still not an error.
+- **An unreadable `instance.env` is no longer an absent one.**
+  `playtest_targets.load_sandbox_env` raised `TargetError` on a non-UTF-8
+  contract but returned `{}` on an `OSError`, silently dropping the instance's
+  ports and game dir so the run resolved against the lab defaults. Both now
+  fail with the path named.
+- **A failed artifact write names its destination.** `dep_sbom.py` and
+  `coverage_badge.py` wrote their output file outside any handler, so an
+  unwritable destination exited 1 with a traceback naming neither the path nor
+  the documented cause. Both report it and keep their own exit codes;
+  `dep_sbom.py` also names an unparseable lockfile rather than letting
+  `tomllib`/`json` raise past it. `coverage_badge.py` also bounds `coverage
+  json`, which had no timeout and could hold the badge step, and the CI job
+  waiting on it, open indefinitely.
+- **`dst_run.py` cannot silently shorten a regression replay.** An unreadable
+  `dst_seeds.txt` raised past the verdict, and a non-integer line warned and
+  skipped; the read now says what it could not read, because a shorter replay
+  set is how a captured failure stops being replayed.
+- **A loadgen events file that cannot be read is named.** The final observer
+  read degraded an `OSError` to `[]`, which the verdict reports as "no
+  structured joined event": the loadgen was blamed for a read failure. A
+  missing file is still a missing stream; a real read failure is now reported.
 - **A clip marker named a directory that was never created.** Frames were
   written to `playtest-shots/clips/<id>` under a sanitized name while the
   `clip complete` line, the `scene staged` name and the on-demand recorder's

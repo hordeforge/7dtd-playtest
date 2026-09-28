@@ -297,8 +297,8 @@ def main(argv: list[str]) -> int:
             "examples:\n"
             "  dep_sbom.py                      # CycloneDX JSON on stdout\n"
             "  dep_sbom.py dist/app.cdx.json    # same document, written to a file\n"
-            "exit codes: 0 inventory written, 1 a committed input is missing or\n"
-            "unreadable, 2 bad usage"
+            "exit codes: 0 inventory written, 1 a committed input is missing,\n"
+            "unreadable or unparseable, or the output could not be written, 2 bad usage"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -315,13 +315,35 @@ def main(argv: list[str]) -> int:
             print(f"dep_sbom: missing {path}", file=sys.stderr)
             return 1
 
-    document = build_sbom(
-        as_object(tomllib.loads(UV_LOCK.read_text(encoding="utf-8")), "uv.lock"),
-        as_object(json.loads(NUGET_LOCK.read_text(encoding="utf-8")), "packages.lock.json"),
-    )
+    # is_file() only proves a name exists. The read can still fail (mode,
+    # a vanished file, EIO) and either lockfile can be unparseable, and a
+    # traceback out of here would carry Python's default exit 1, the same
+    # code as a missing input, with the offending file named nowhere. Name it.
+    try:
+        document = build_sbom(
+            as_object(tomllib.loads(UV_LOCK.read_text(encoding="utf-8")), "uv.lock"),
+            as_object(
+                json.loads(NUGET_LOCK.read_text(encoding="utf-8")), "packages.lock.json"
+            ),
+        )
+    except OSError as ex:
+        print(f"dep_sbom: cannot read a committed input: {ex}", file=sys.stderr)
+        return 1
+    except (tomllib.TOMLDecodeError, json.JSONDecodeError, UnicodeDecodeError) as ex:
+        print(f"dep_sbom: a committed input is not parseable: {ex}", file=sys.stderr)
+        return 1
+    except ValueError as ex:
+        print(f"dep_sbom: {ex}", file=sys.stderr)
+        return 1
     text = json.dumps(document, indent=2, sort_keys=True) + "\n"
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        # The release workflow attaches this file to the tag, so a destination
+        # it could not write is a failed inventory, not a silent success.
+        try:
+            Path(args.output).write_text(text, encoding="utf-8")
+        except OSError as ex:
+            print(f"dep_sbom: cannot write {args.output}: {ex}", file=sys.stderr)
+            return 1
     else:
         sys.stdout.write(text)
     # A release log line a human can read without opening the file.

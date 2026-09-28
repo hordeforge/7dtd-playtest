@@ -249,8 +249,12 @@ def load_sandbox_env(sandbox_root: Path, name: str) -> dict[str, str]:
             # reading it as if it were absent would hand the run someone
             # else's ports. Name it instead.
             raise TargetError(f"{inst_env} is not valid UTF-8: {ex}") from ex
-        except OSError:
-            return {}
+        except OSError as ex:
+            # Same reasoning as the decode failure: an unreadable contract is
+            # not an absent one. Returning {} here would silently drop the
+            # instance's ports and game dir, and the run would resolve against
+            # the lab defaults or the pre-`sb up` placeholder.
+            raise TargetError(f"cannot read the instance contract {inst_env}: {ex}") from ex
         return parse_sb_env_output(text)
     return {}
 

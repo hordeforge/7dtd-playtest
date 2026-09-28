@@ -15,6 +15,11 @@ from pathlib import Path
 
 USAGE = "usage: coverage_badge.py OUTPUT.svg"
 
+# A cold run under `coverage run` still measured every gate, so `coverage json`
+# only has to re-read the data file. Without a timeout a wedged child holds the
+# badge step (and the CI job waiting on it) open indefinitely.
+COVERAGE_JSON_TIMEOUT_SEC = 300.0
+
 
 def percentage() -> int:
     out = Path(".coverage.json")
@@ -26,6 +31,7 @@ def percentage() -> int:
             [sys.executable, "-m", "coverage", "json", "-q", "-o", str(out)],
             check=True,
             stdout=subprocess.DEVNULL,
+            timeout=COVERAGE_JSON_TIMEOUT_SEC,
         )
         data = json.loads(out.read_text(encoding="utf-8"))
     finally:
@@ -76,7 +82,10 @@ def main(argv: list[str]) -> int:
             "\nWrites the shields.io line-coverage badge SVG for the local"
             " .coverage file."
         )
-        print("Exit codes: 0 badge written, 1 no coverage data, 2 bad usage.")
+        print(
+            "Exit codes: 0 badge written, 1 no coverage data or an unwritable"
+            " output, 2 bad usage."
+        )
         return 0
     if len(args) != 1:
         print(USAGE, file=sys.stderr)
@@ -86,6 +95,13 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError, KeyError) as exc:
         print(f"coverage_badge: cannot compute coverage: {exc}", file=sys.stderr)
         return 1
+    except subprocess.TimeoutExpired:
+        print(
+            "coverage_badge: `coverage json` did not finish within "
+            f"{COVERAGE_JSON_TIMEOUT_SEC:g}s",
+            file=sys.stderr,
+        )
+        return 1
     except subprocess.CalledProcessError as exc:
         print(
             "coverage_badge: `coverage json` failed; run it under the project's "
@@ -93,7 +109,14 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    Path(args[0]).write_text(badge(pct, colour(pct)), encoding="utf-8")
+    # A destination the caller cannot write is a failed badge, not a
+    # successful run: a traceback here exits 1, the documented "no coverage
+    # data" code, naming neither the output path nor the cause.
+    try:
+        Path(args[0]).write_text(badge(pct, colour(pct)), encoding="utf-8")
+    except OSError as exc:
+        print(f"coverage_badge: cannot write {args[0]}: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

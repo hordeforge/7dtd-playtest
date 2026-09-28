@@ -118,11 +118,17 @@ def load_results(path: Path) -> dict:
     # One read feeds both decoders: a second read after the JSON attempt can
     # fail (file replaced/removed between reads) and crash the diff on input
     # the first read already saw.
+    #
+    # A read that fails is an input this tool refuses to diff, not an empty
+    # side. main() already refuses an unreadable path with the flag named, but
+    # permissions, a vanished file and EIO all pass that is_file() check and
+    # land here; degrading to "" reported the unreadable run as "neither side
+    # had a playtest result line" (exit 1), which reads as evidence that the
+    # playtest produced nothing rather than that it could not be read.
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as ex:
-        print(f"ERROR: cannot read {path}: {ex}", file=sys.stderr)
-        text = ""
+        raise CompareError(f"cannot read {path}: {ex}") from ex
     payload = None
     if text:
         try:

@@ -953,7 +953,17 @@ def read_loadgen_events(path: Path) -> list[dict]:
     """
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+    except FileNotFoundError:
+        # No stream: loadgen never started, or the barrier never fired. That
+        # is a verdict the caller already judges ("no structured joined
+        # event"), not a failure of this read.
+        return []
+    except OSError as ex:
+        # A stream that exists but cannot be read is a different verdict with
+        # a different cause. [] here reads downstream as "loadgen emitted
+        # nothing", so name the read failure instead of reporting the
+        # observer as silent.
+        warn(f"loadgen events unreadable at {path}: {ex}")
         return []
     return parse_loadgen_event_lines(lines)
 
@@ -4311,6 +4321,19 @@ def main(argv: list[str] | None = None) -> int:
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"
             err(f"FAIL harness: no DONE from {missing} playtest mod")
+            # A tail that could not read its log returns no new bytes, so a
+            # broken log and a client that never answered look identical from
+            # here. Name the read failures rather than leaving the operator to
+            # conclude the mod hung.
+            for label, tail in (
+                ("client", client_tail),
+                ("peer", peer_tail),
+            ):
+                if tail is not None and tail.read_errors:
+                    err(
+                        f"{label} log unreadable during the run: "
+                        f"{tail.read_errors} failed poll(s), last={tail.last_error}"
+                    )
             if summary:
                 log(f"partial summary={summary}")
             for row in results:
