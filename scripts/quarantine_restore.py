@@ -133,6 +133,11 @@ def _read_manifest(entry: Path) -> tuple[list[tuple[Path, Path]], int]:
     than guessed at: restoring to a path this file did not record is a
     write the operator did not ask for. The caller reports the skip count.
 
+    A recorded path carrying a NUL is skipped for the same reason, and
+    because `os.stat` and `shutil.copy2` raise `ValueError` on one: kept,
+    it aborts the whole restore with a traceback and the pairs after it
+    never come back.
+
     A manifest that exists but will not read raises
     :class:`ManifestUnreadableError` rather than returning no pairs: the
     difference between "nothing was recorded" and "the record is
@@ -159,7 +164,14 @@ def _read_manifest(entry: Path) -> tuple[list[tuple[Path, Path]], int]:
             dropped += 1
             continue
         src, dest = (row.get(_SRC), row.get(_DEST)) if isinstance(row, dict) else (None, None)
-        if isinstance(src, str) and isinstance(dest, str) and src and dest:
+        if (
+            isinstance(src, str)
+            and isinstance(dest, str)
+            and src
+            and dest
+            and "\0" not in src
+            and "\0" not in dest
+        ):
             pairs.append((Path(src), Path(dest)))
         else:
             dropped += 1
