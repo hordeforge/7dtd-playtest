@@ -224,8 +224,11 @@ namespace ZdtdPlaytest
                     ctx.IntA = ok ? 1 : 0;
                     ctx.FloatA = Time.unscaledTime;
                     // Immediately, not at result time: a screenshot loop keyed on
-                    // the result photographs the disconnect dialog.
-                    Report.Staged(id, ctx.Detail);
+                    // the result photographs the disconnect dialog. The staged
+                    // name is the asset name, the directory CaptureFrame below
+                    // writes into, so the scene a reviewer is told about and the
+                    // file a collector looks up are the same string.
+                    Report.Staged(Helpers.AssetName(id), ctx.Detail);
                 },
                 wait: ctx =>
                 {
@@ -565,7 +568,7 @@ namespace ZdtdPlaytest
                     double yMax = ctx.LongB / 100.0;
                     Report.Info(id + ": spawned_id=" + ctx.IntA
                         + " travelled=" + ctx.FloatB + "m y[" + yMin.ToString("0.00")
-                        + ".." + yMax.ToString("0.00") + "] clip=playtest-shots/clips/" + id);
+                        + ".." + yMax.ToString("0.00") + "] clip=playtest-shots/clips/" + Helpers.AssetName(id));
                     // A walk is only a walk if the creature rendered. The old
                     // assert checked only that a spawn returned an id and the
                     // position moved >0.5 m, so a creature that never drew (or

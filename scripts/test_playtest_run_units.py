@@ -597,6 +597,44 @@ def test_run_ended_marker_is_per_run() -> None:
     print("PASS run-ended marker is per-run: cleared at start, written at the end")
 
 
+def test_run_ended_marker_covers_every_terminal_path() -> None:
+    """Every way out of the run body must leave the end marker behind.
+
+    main() returns from a dozen places after it clears the marker (sandbox
+    bring-up, a port still bound, a dedicated that would not start, the rejoin
+    aborts, an exception unwinding), and a capture loop ends on the marker
+    rather than on a timeout of its own. So the marker is published in the
+    finally, once this run has cleared it, and the poll loop's own reason
+    supersedes it. It also goes out after the report and junit it announces:
+    a consumer that wakes on it and reads report-*.json must not find the
+    previous run's evidence.
+    """
+    main_src = _main_source()
+    assert 'run_ended["cleared"] = True' in main_src, (
+        "main() never records that it cleared the marker, so the finally "
+        "cannot tell a refused start from an owned run"
+    )
+    finally_block = main_src[main_src.rindex("\n    finally:"):]
+    assert 'run_ended["cleared"] and not run_ended["written"]' in finally_block, (
+        "the finally must publish run-ended for the paths that return from "
+        "the run body before the poll loop decided the reason"
+    )
+    assert 'write_run_ended_marker(args.logdir, "error")' in finally_block, (
+        "the fallback must name its own reason; a marker a consumer reads as "
+        "`done` would be a lie"
+    )
+    assert "clear_run_ended_marker(args.logdir)" in main_src
+
+    write = main_src.index("write_run_ended(run_end_reason)")
+    report = main_src.index("write_report(report_path, payload)")
+    junit = main_src.index("write_junit(junit_path")
+    assert report < write and junit < write, (
+        "run-ended must be published after the report and the junit it "
+        "announces, or a capture loop wakes on it and reads last run's file"
+    )
+    print("PASS run-ended covers every terminal path and lands after the report")
+
+
 def test_loadgen_events_truncated_before_this_run_reads_them() -> None:
     """The observer verdict is a whole-file read of loadgen_events.jsonl, and
     nothing else empties that file. Left in place it answers with the previous
@@ -3089,6 +3127,10 @@ def main() -> int:
         ),
         ("run_artifacts_owner_only", test_run_artifacts_are_written_owner_only),
         ("run_ended_marker_per_run", test_run_ended_marker_is_per_run),
+        (
+            "run_ended_marker_covers_terminal_paths",
+            test_run_ended_marker_covers_every_terminal_path,
+        ),
         (
             "loadgen_events_truncated_per_run",
             test_loadgen_events_truncated_before_this_run_reads_them,

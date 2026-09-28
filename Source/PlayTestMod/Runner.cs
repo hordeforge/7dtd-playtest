@@ -127,6 +127,10 @@ namespace ZdtdPlaytest
             if (!_armed) return;
 
             Report.Reset();
+            // Arming is the one place that resets every other piece of run
+            // state, so a staged instance still standing from an earlier arm
+            // would outlive the run that put it there.
+            try { CaseDef.ClearStaged(); } catch { /* */ }
             Report.Info("armed suites=" + string.Join(",", _suites)
                 + " laps=" + _benchmarkLaps + " trace_entity=" + TraceEntity
                 + " v" + ModIdentity.Version);
@@ -677,6 +681,14 @@ namespace ZdtdPlaytest
         {
             // Never leave motor drive stuck between cases.
             try { LocomotionDrive.Stop(_ctx?.Player); } catch { /* */ }
+            // Same for the first-person view. A look, clip or walk case that
+            // timed out, threw, or lost the player mid-case never reached its
+            // own AttachCamera, so the FP cameras stay disabled and the static
+            // capture camera stays alive: every later CaptureFrame then
+            // photographs the detached world view while the case reports
+            // normally. AttachCamera is the undo for Helpers.DetachCamera and
+            // is a no-op when nothing detached.
+            try { Helpers.AttachCamera(_ctx?.Player); } catch { /* */ }
             // Staged instances are this case's, not the run's. A hold that
             // completed already cleared them, but a case that threw in stage,
             // timed out, or lost the player leaves them standing for the rest

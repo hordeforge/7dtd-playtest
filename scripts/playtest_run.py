@@ -3392,6 +3392,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     lock_held = False
     lock_heartbeat: playtest_lock.HeartbeatThread | None = None
+    # Whether this run owns the run-ended marker, and whether it has published
+    # it. `cleared` is set only once this run holds the lock, so a refused start
+    # leaves the running holder's marker alone; `written` lets the finally
+    # publish one for every terminal path the run body returns from without
+    # naming the reason twice.
+    run_ended = {"cleared": False, "written": False}
 
     install_signal_handlers()
 
@@ -3450,6 +3456,7 @@ def main(argv: list[str] | None = None) -> int:
         # This run now owns the machine, so the previous run's end marker is
         # stale: from here on its presence means this run ended.
         clear_run_ended_marker(args.logdir)
+        run_ended["cleared"] = True
 
         # Now that this run owns the client, build it. Creating or wiping an
         # instance seeds a Proton prefix, so a run that was going to be refused
@@ -3475,6 +3482,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def write_run_ended(reason: str) -> None:
             """Record why the orchestrator's poll loop ended (log contract)."""
+            run_ended["written"] = True
             write_run_ended_marker(args.logdir, reason)
 
         def abort_if_lock_lost() -> bool:
@@ -4495,10 +4503,9 @@ def main(argv: list[str] | None = None) -> int:
             log(f"timeout after {monotonic_now() - t0:.0f}s waiting for DONE")
 
         # The run is decided: DONE parsed, the client exited, or the budget
-        # ran out. Record it for any consumer watching this run (the capture
-        # loop ends when this file appears) instead of leaving them to wait
-        # out their own timeout.
-        write_run_ended(run_end_reason)
+        # ran out. Recorded for any consumer watching this run (the capture
+        # loop ends when this file appears) below, once the evidence it
+        # announces is on disk.
 
         # Final parse from everything drained so far, plus any bytes appended
         # between the last poll and here.
@@ -4522,18 +4529,26 @@ def main(argv: list[str] | None = None) -> int:
 
         plan = getattr(args, "_target_plan", None)
         suite_doc = getattr(args, "_suite_doc", None)
+        applied_config = getattr(args, "_applied_server_config", {})
         payload = {
             "target": plan.label if plan is not None else "managed/stock",
             "server": args.server,
             "suite": args.suite,
-            "world_name": args.world_name if args.server == "stock" else str(args.world),
+            # The world that ran, not the one the flag named: a suite
+            # document may declare its own GameWorld, and the flag only fills
+            # in for a suite that declares none. Reporting the flag's value
+            # would name a world this run never used.
+            "world_name": (
+                applied_config.get("GameWorld")
+                or (args.world_name if args.server == "stock" else str(args.world))
+            ),
             "port": args.port,
             "target_plan": (
                 playtest_targets.target_report_fields(plan) if plan is not None else None
             ),
             # The serverconfig properties this run applied, minus the per-run
             # telnet secret. A report without them cannot be reproduced.
-            "server_config": getattr(args, "_applied_server_config", {}),
+            "server_config": applied_config,
             "suite_doc": (
                 suite_loader.suite_to_report(suite_doc) if suite_doc is not None else None
             ),
@@ -4602,6 +4617,11 @@ def main(argv: list[str] | None = None) -> int:
             f"run ended reason={run_end_reason} wall_s={wall_s:.1f} "
             f"report={report_path} junit={junit_path}"
         )
+        # Published last, after the report and junit it announces: a capture
+        # loop that wakes on the marker and reads report-*.json must find this
+        # run's evidence, not the previous run's, or the run it is collecting
+        # for has no results.
+        write_run_ended(run_end_reason)
 
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"
@@ -4748,6 +4768,15 @@ def main(argv: list[str] | None = None) -> int:
         log(f"exit={exit_code}")
         return exit_code
     finally:
+        # Every terminal path out of the run body has to leave the end marker
+        # behind: a sandbox bring-up failure, a port still bound, a dedicated
+        # that would not start, a rejoin abort, an exception unwinding main().
+        # Without it a capture loop keyed on the marker waits out its own full
+        # timeout on a run that ended long ago. Only once this run cleared the
+        # marker, so a refused start never publishes over a live holder's.
+        if run_ended["cleared"] and not run_ended["written"]:
+            run_ended["written"] = True
+            write_run_ended_marker(args.logdir, "error")
         # Disarm first. A TERM/HUP delivered while these cleanup steps run
         # must be ignored, not converted into a SystemExit that aborts the
         # remaining steps: skipping stop_proc/release strands a live runtime

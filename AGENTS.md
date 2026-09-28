@@ -332,10 +332,15 @@ import) carries the timestamp and nothing else.
 - Terminal: `SUMMARY ...` then `DONE exit_hint=0|1`
 - Run ended: `<logdir>/run-ended` written when the orchestrator's poll loop
   ends, containing the reason on one line: `done`, `timeout`, `client_exit`,
-  or `lock_lost` (heartbeat saw a foreign holder take the claim; the run
+  `error` (a terminal path out of the run body before the poll loop decided
+  the run: bring-up failure, port still bound, dedicated that would not
+  start, rejoin abort, an exception unwinding `main()`), or `lock_lost`
+  (heartbeat saw a foreign holder take the claim; the run
   aborts instead of sharing the machine). The marker is cleared once the run
   holds the exclusivity lock, so its presence always means *this* run ended
-  and a run killed before its poll loop ends cannot poison a rerun. This is
+  and a run killed before its poll loop ends cannot poison a rerun. It is
+  published after the report and junit it announces, so a consumer that wakes
+  on it and reads `report-*.json` finds this run's evidence. This is
   the deterministic end of
   the run for consumers that
   key on the staged marker (a screenshot loop exits when it appears instead
