@@ -15,39 +15,16 @@ against the raw file and say so where they are used.
 """
 from __future__ import annotations
 
-import io
 import sys
-import tokenize
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from csharp_surface import without_comments
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = (ROOT / "scripts" / "playtest_run.py").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
-
-
-def without_comments(src: str) -> str:
-    """Blank out every comment, preserving line numbers and column offsets.
-
-    Blanking rather than deleting keeps ``.index`` and ``.splitlines`` results
-    pointing at the same place in either text, so a failure names the line the
-    live code is on.
-    """
-    lines = src.splitlines(keepends=True)
-    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-        if tok.type != tokenize.COMMENT:
-            continue
-        (start_row, start_col), (end_row, end_col) = tok.start, tok.end
-        for row in range(start_row, end_row + 1):
-            line = lines[row - 1]
-            if row == start_row:
-                line = line[:start_col] + (line[end_col:] if row == end_row else "")
-            elif row == end_row:
-                line = " " * end_col + line[end_col:]
-            else:
-                line = " " * len(line)
-            lines[row - 1] = line
-    return "".join(lines)
-
 
 RUNNER_CODE = without_comments(RUNNER)
 
@@ -77,9 +54,8 @@ def test_peer_spacing_past_engine_rate_limit() -> None:
     the primary to be in the world, with the sleep kept as a floor for the case
     where that marker never arrives.
     """
-    # The rationale the spacing rests on is prose in a comment by design; only
-    # the two mechanical facts below are pinned against live code.
-    assert "rejects same-IP connection attempts" in RUNNER
+    # The rationale the spacing rests on is prose in a comment by design, so
+    # only the mechanical facts are pinned against live code.
     assert "PEER_STAGGER_MARKER" in RUNNER_CODE
     # Client-side: this is read out of the primary's own log, and the server's
     # word for the same moment (PlayerSpawnedInWorld) never appears there, so

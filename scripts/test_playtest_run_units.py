@@ -2644,9 +2644,34 @@ def test_rejoin_setup_suite_that_will_not_load_is_reported() -> None:
 
 
 def test_start_server_does_not_flip_no_server() -> None:
+    """No assignment to the ``no_server`` attribute anywhere in the module.
+
+    A substring scan misses ``args.no_server=True`` (no space) and
+    ``setattr(args, "no_server", True)``, both of which make the rejoin
+    ``start_server`` a no-op.
+    """
     src = PLAYTEST_RUN.read_text(encoding="utf-8")
-    assert "args.no_server = True" not in src, (
-        "setting no_server after sandbox up makes rejoin start_server a no-op"
+    offenders: list[str] = []
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr == "no_server"
+                ):
+                    offenders.append(f"line {node.lineno}: assignment")
+                elif (
+                    isinstance(target, ast.Call)
+                    and isinstance(target.func, ast.Name)
+                    and target.func.id == "setattr"
+                    and len(target.args) == 3
+                    and isinstance(target.args[1], ast.Constant)
+                    and target.args[1].value == "no_server"
+                ):
+                    offenders.append(f"line {node.lineno}: setattr")
+    assert not offenders, (
+        "setting no_server after sandbox up makes rejoin start_server a "
+        f"no-op: {offenders}"
     )
     print("PASS start_server_does_not_flip_no_server")
 
@@ -2708,9 +2733,17 @@ def test_server_backend_env_matches_documented_name() -> None:
     stock dedicated.
     """
     src = PLAYTEST_RUN.read_text(encoding="utf-8")
-    assert "PLAYTEST_SERVER" not in src, (
+    undocumented = sorted(
+        node.value
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value == "PLAYTEST_SERVER"
+    )
+    assert not undocumented, (
         "an undocumented env name still selects --server; the documented one is "
-        "PLAYTEST_BACKEND and the two spellings cannot both be honoured"
+        f"PLAYTEST_BACKEND and the two spellings cannot both be honoured "
+        f"({len(undocumented)} literal(s))"
     )
     assert 'os.environ.get("PLAYTEST_BACKEND")' in src, (
         "--server must resolve from PLAYTEST_BACKEND so the documented export "

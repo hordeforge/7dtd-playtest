@@ -381,9 +381,9 @@ def main() -> int:
         "SetBlockRpc",
         "FreeBagSlots",
     ):
-        assert "public static" in helpers and name in helpers, (
-            f"Helpers must expose {name} for providers"
-        )
+        assert re.search(
+            rf"public\s+static\s+[^\n;{{}}]*\b{re.escape(name)}\s*\(", helpers
+        ), f"Helpers must expose a public static {name} for providers"
 
     probe = (ROOT / "Source" / "PlayTestMod" / "MiningProbe.cs").read_text(
         encoding="utf-8"
@@ -473,9 +473,9 @@ def main() -> int:
         "residual",
         "playtest-residual",
     ):
-        assert needle in readme or needle.lower() in readme.lower(), (
-            f"README must document provider contract: {needle}"
-        )
+        # Exact match only: a case-insensitive fallback lets any prose
+        # sentence containing the words satisfy a camelCase symbol.
+        assert needle in readme, f"README must document provider contract: {needle}"
     assert "ZDTD_PLAYTEST_SUITE" in agents
     assert "residual" in scenarios.lower() and "playtest-residual" in scenarios
 

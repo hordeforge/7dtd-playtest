@@ -263,8 +263,9 @@ def main() -> int:
         f"(typo or removed suite): {unknown_fixture}"
     )
 
-    # Barrier names the orchestrator must route, pinned as quoted literals so a
-    # match in prose or a comment cannot stand in for a table entry.
+    # Barrier names the orchestrator must route, checked against the parsed
+    # BARRIER_NAMES table so a match in prose or a comment cannot stand in for
+    # a table entry.
     for name in (
         "kill_fixture_zombie",
         "spawn_zombie",
@@ -278,7 +279,9 @@ def main() -> int:
         "apm_dump",
         "chat_echo",
     ):
-        assert f'"{name}"' in orch, f"orchestrator missing the {name} barrier name"
+        assert name in barrier_names, (
+            f"orchestrator BARRIER_NAMES is missing the {name} barrier name"
+        )
 
     # Host-side fixture handlers the same barriers depend on, pinned as
     # definitions rather than as a bare substring.

@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from csharp_surface import method_body
+from csharp_surface import method_body, without_comments
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "Source" / "PlayTestMod" / "MiningProbe.cs"
@@ -30,8 +30,17 @@ def forbidden_in(body: str, needles: tuple[str, ...]) -> list[str]:
     return sorted({n for n in needles if n in body})
 
 
+def declared(body: str, name: str) -> bool:
+    """``name`` is a public field or property of the class body ``body``.
+
+    A bare substring match also fires on a comment, a local, or a member of a
+    neighbouring class, so a deleted public field would pass the gate.
+    """
+    return re.search(rf"public\s+[\w<>\[\]\.]+\s+{re.escape(name)}\s*[\;{{=]", body) is not None
+
+
 def main() -> int:
-    src = PROBE.read_text(encoding="utf-8")
+    src = without_comments(PROBE.read_text(encoding="utf-8"))
     catalog = CATALOG.read_text(encoding="utf-8")
     # Helpers is one public static class split across partial-class files;
     # assert against the joined text.
@@ -46,6 +55,7 @@ def main() -> int:
     assert "public sealed class MiningProbe" in src
     assert "public sealed class MiningResult" in src
     assert "public enum MiningPhase" in src
+    spec_body = method_body(src, r"public\s+sealed\s+class\s+MiningSpec")
     for field in (
         "BlockName",
         "ToolName",
@@ -54,7 +64,8 @@ def main() -> int:
         "TimeoutSeconds",
         "MaxAttempts",
     ):
-        assert field in src, f"MiningSpec missing {field}"
+        assert declared(spec_body, field), f"MiningSpec missing field {field}"
+    result_body = method_body(src, r"public\s+sealed\s+class\s+MiningResult")
     for field in (
         "Target",
         "InitialDamage",
@@ -66,7 +77,7 @@ def main() -> int:
         "Phase",
         "Detail",
     ):
-        assert field in src, f"MiningResult missing {field}"
+        assert declared(result_body, field), f"MiningResult missing field {field}"
 
     assert re.search(r"public\s+void\s+Act\s*\(\s*CaseCtx\s+ctx\s*\)", src)
     assert re.search(r"public\s+bool\s+Wait\s*\(\s*CaseCtx\s+ctx\s*\)", src)

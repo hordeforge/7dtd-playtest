@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from csharp_surface import method_body
+from csharp_surface import method_body, without_comments
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / "Source" / "PlayTestMod" / "Helpers.Ui.cs"
@@ -63,8 +63,12 @@ def test_reserved_device_names_are_listed() -> None:
 
 
 def test_sanitizer_refuses_device_names_and_empty() -> None:
-    src = UI.read_text(encoding="utf-8")
-    body = method_body(src, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)")
+    # Comments are blanked first: prose describing what AssetName does would
+    # otherwise satisfy every substring check below.
+    body = method_body(
+        without_comments(UI.read_text(encoding="utf-8")),
+        r"static string AssetName\(string name\)",
+    )
     assert "ToLowerInvariant" in body, (
         "AssetName must compare case-insensitively: Windows device names "
         "match any casing"
@@ -87,8 +91,10 @@ def test_sanitizer_refuses_device_names_and_empty() -> None:
 
 
 def test_asset_name_is_lowercase_only() -> None:
-    src = UI.read_text(encoding="utf-8")
-    body = method_body(src, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)")
+    body = method_body(
+        without_comments(UI.read_text(encoding="utf-8")),
+        r"static string AssetName\(string name\)",
+    )
     assert re.search(r"c >= 'a' && c <= 'z'", body), (
         "AssetName must not let an uppercase letter survive: the reserved "
         "device names match any casing, and the exact lowercase set below is "
@@ -97,15 +103,38 @@ def test_asset_name_is_lowercase_only() -> None:
     print("OK AssetName survives lowercase letters only")
 
 
+def _call_arguments(src: str, start: int) -> str:
+    """The balanced argument list of the call whose ``(`` is at ``start``."""
+    depth = 0
+    for i in range(start, len(src)):
+        if src[i] == "(":
+            depth += 1
+        elif src[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return src[start + 1 : i]
+    raise AssertionError(f"unclosed call at offset {start}")
+
+
 def test_paths_are_built_by_the_path_api() -> None:
-    src = UI.read_text(encoding="utf-8")
-    lines = src.splitlines()
-    hardcoded = [
-        (i, line.strip())
-        for i, line in enumerate(lines, 1)
-        if re.search(r'["\'][^"\']*[/\\][^"\']*["\']', line)
-        and ("Path.Combine" in line or "String.Format" in line)
-    ]
+    """No hardcoded separator inside a path built by the path API.
+
+    Scanned across the whole balanced call, not one source line: a
+    ``Path.Combine(`` and its separator-bearing argument routinely land on
+    different lines, and a line-scoped check passes all of them.
+    """
+    src = without_comments(UI.read_text(encoding="utf-8"))
+    hardcoded: list[str] = []
+    for match in re.finditer(r"\b(?:Path\.Combine|String\.Format)\s*\(", src):
+        args = _call_arguments(src, match.end() - 1)
+        literal = re.search(r'[$@]?"[^"\n]*[/\\][^"\n]*"', args)
+        if literal:
+            line = src.count("\n", 0, match.start()) + 1
+            hardcoded.append(f"line {line}: {literal.group(0)}")
+    # `dir + "/" + name` never mentions Path.Combine, so it needs its own rule.
+    for match in re.finditer(r'\+\s*"[/\\\\][^"\n]*"\s*\+', src):
+        line = src.count("\n", 0, match.start()) + 1
+        hardcoded.append(f"line {line}: string concatenation with a separator")
     assert not hardcoded, (
         "a path built with a hardcoded separator instead of Path.Combine "
         f"segments: {hardcoded}"

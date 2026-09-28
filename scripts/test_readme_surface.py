@@ -9,7 +9,10 @@ only inside the author's own build and reads as a real API until then, so the
 documented surface is pinned here against the C# sources.
 
 Only member *accesses* are checked (`Helpers.X`, `probe.Result` and friends
-are provider API; the rest of a snippet is ordinary C#).
+are provider API; the rest of a snippet is ordinary C#). A `Type.Member` call
+naming neither a public mod type nor `NON_MOD_TYPES` fails the gate, so a
+snippet that calls into a type that was renamed away is caught instead of
+being skipped as "not ours".
 """
 from __future__ import annotations
 
@@ -31,6 +34,11 @@ NAMED_ARG = re.compile(r"(?<![:?\w])(\w+)\s*:")
 STRING_LITERAL = re.compile(r'"[^"\n]*"')
 FENCE = re.compile(r"```csharp\n(.*?)```", re.DOTALL)
 INLINE_CODE = re.compile(r"`([^`\n]+)`")
+
+# Types a snippet may call that are not part of the mod assembly. `Object` is
+# Unity's, `World` is the game's terrain class. Anything else must resolve to a
+# public mod type, or the gate cannot tell a typo from a deliberate call.
+NON_MOD_TYPES = {"Object", "World"}
 
 
 def public_types() -> dict[str, str]:
@@ -101,6 +109,10 @@ def check_snippets(snippets: list[tuple[str, str]], types: dict[str, str]) -> No
     for origin, snippet in snippets:
         for call in TYPE_REF.finditer(snippet):
             type_name, member = call.group(1), call.group(2)
+            assert type_name in types or type_name in NON_MOD_TYPES, (
+                f"{origin}: {type_name}.{member} names a type that is neither "
+                f"public in Source/PlayTestMod nor listed in NON_MOD_TYPES"
+            )
             if type_name not in types:
                 continue
             src = types[type_name]
@@ -141,14 +153,24 @@ def check_object_initializers(snippets: list[tuple[str, str]], types: dict[str, 
     pattern = re.compile(r"new\s+(\w+)\s*\{(.*?)\}", re.DOTALL)
     for origin, snippet in snippets:
         for type_name, body in pattern.findall(snippet):
-            if type_name not in types:
-                continue
+            assert type_name in types, (
+                f"{origin}: object initializer for {type_name}, which is not a "
+                f"public type in Source/PlayTestMod"
+            )
             declared = members(types[type_name])
             for field in re.findall(r"(?:^|[{;\n])\s*(\w+)\s*=", body):
                 assert field in declared, (
                     f"{origin}: {type_name} has no public field '{field}' set by "
                     f"this initializer"
                 )
+
+
+def non_mod_types_used(readme: str) -> set[str]:
+    """The exempted types the README's snippets actually call into."""
+    used: set[str] = set()
+    for snippet in FENCE.findall(readme) + INLINE_CODE.findall(readme):
+        used.update(name for name, _ in TYPE_REF.findall(snippet))
+    return used & NON_MOD_TYPES
 
 
 def main() -> int:
@@ -170,6 +192,11 @@ def main() -> int:
 
     assert "IScenarioProvider" in types, (
         "the documented provider interface must be public in the mod assembly"
+    )
+    called = non_mod_types_used(readme)
+    assert called == NON_MOD_TYPES, (
+        f"NON_MOD_TYPES lists {sorted(NON_MOD_TYPES)} but the README calls "
+        f"{sorted(called)}; keep the exemption list to what is still used"
     )
     print(f"OK every documented call resolves ({len(blocks)} snippets, {len(prose)} inline)")
     print("OK documented named arguments exist on the method they are passed to")

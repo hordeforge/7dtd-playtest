@@ -24,7 +24,6 @@ SCENARIOS = ROOT / "SCENARIOS.md"
 def main() -> int:
     probe = CHAT_PROBE.read_text(encoding="utf-8")
     catalog = CATALOG.read_text(encoding="utf-8")
-
     assert "public static string Last" not in probe, (
         "ChatProbe.Last must not be public: it is remote-player text and a "
         "detail string built from it is persisted in every report artifact"
@@ -36,9 +35,21 @@ def main() -> int:
     assert "string Last = \"\";" in probe, (
         "the captured text must be a private field of ChatProbe"
     )
-    # Every reader of the captured text is a consumer inside the probe itself.
-    assert not re.search(r"ChatProbe\.Last\b(?!ength)", catalog), (
-        "Catalog must not read ChatProbe.Last; use ChatProbe.LastLength"
+    # Every reader of the captured text is a consumer inside the probe itself,
+    # whichever source file that reader lives in.
+    mod_sources = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(MOD.glob("*.cs"))
+        if path.name != CHAT_PROBE.name
+    }
+    leaked = sorted(
+        name
+        for name, src in mod_sources.items()
+        if re.search(r"ChatProbe\.Last\b(?!ength)", src)
+    )
+    assert not leaked, (
+        "these sources read ChatProbe.Last; use ChatProbe.LastLength: "
+        + ", ".join(leaked)
     )
     # The two chat cases still report what they saw, without its content.
     assert catalog.count('" chat_len=" + ChatProbe.LastLength') == 3, (

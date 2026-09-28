@@ -32,6 +32,10 @@ from catalog_surface import (
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
 
+# The stock-fidelity suites every checkout must be able to discover. If these
+# are gone the four tests below iterate an empty dict and pass vacuously.
+REQUIRED_SUITE_IDS = {"smoke", "core", "parachute"}
+
 # Cases that exist for a suite the declarative layer does not own yet. Each entry
 # is a suite id still built only from Catalog.cs; drop it when the suite gets a
 # suites/*.json document.
@@ -131,6 +135,21 @@ def test_every_declared_suite_declares_all_its_cases() -> None:
     print("PASS every_declared_suite_declares_all_its_cases")
 
 
+def test_discovery_finds_the_stock_fidelity_suites() -> None:
+    """``suites/`` must actually be discovered.
+
+    The other four tests iterate ``discover_suites()``; a renamed or missing
+    directory makes that dict empty and they pass while checking nothing. The
+    two stock-fidelity suites are the floor.
+    """
+    found = set(suite_loader.discover_suites())
+    assert found >= REQUIRED_SUITE_IDS, (
+        f"suite discovery found {sorted(found)}, missing the stock-fidelity "
+        f"ids {sorted(REQUIRED_SUITE_IDS - found)}"
+    )
+    print("PASS discovery_finds_the_stock_fidelity_suites")
+
+
 def test_undeclared_suites_are_listed() -> None:
     """Every catalog suite is either declared in JSON or listed as not yet.
 
@@ -204,6 +223,7 @@ def test_declared_kind_matches_the_implementation() -> None:
 
 TESTS = (
     test_ref_format_is_pinned_on_both_sides,
+    test_discovery_finds_the_stock_fidelity_suites,
     test_every_declared_ref_has_an_implementation,
     test_every_declared_suite_declares_all_its_cases,
     test_declared_kind_matches_the_implementation,

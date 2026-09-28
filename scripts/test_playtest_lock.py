@@ -259,6 +259,29 @@ def _fake_process(proc_root: Path, pid: str, exe: str, cmdline: str = "") -> Non
     (process / "cmdline").write_bytes(cmdline.encode("utf-8"))
 
 
+def test_client_running_semantics(tmp: Path) -> None:
+    """The exit code ``playtest_lock.py live`` returns is only worth anything if
+    the probe itself is right. Deriving the expected code from the same probe
+    cannot catch a semantic regression, so pin the probe on a synthetic /proc:
+    a stock client blocks, a dedicated does not, an unrelated process does not.
+    """
+    proc = tmp / "proc"
+    proc.mkdir(parents=True)
+    _assert(not pl.client_running(proc_root=proc), "empty /proc is not a client")
+    _fake_process(proc, "200", "/games/7DaysToDieServer.x86_64")
+    _assert(
+        not pl.client_running(proc_root=proc),
+        "a dedicated belongs to its own Safehouse instance and must not block",
+    )
+    _fake_process(proc, "201", "/usr/bin/vim")
+    _assert(
+        not pl.client_running(proc_root=proc),
+        "an unrelated process must not block",
+    )
+    _fake_process(proc, "202", "/games/7DaysToDie.exe")
+    _assert(pl.client_running(proc_root=proc), "a stock client must block")
+
+
 def test_runtime_detection_checks_executables_not_shell_text(tmp: Path) -> None:
     proc = tmp / "proc"
     proc.mkdir(parents=True)
@@ -534,10 +557,10 @@ def test_wait_until_can_start(tmp: Path) -> None:
             "CLI wait on a free path exits 0: " + proc.stderr,
         )
 
-    # The capture scripts consume only the exit code, so it must track the
-    # probe exactly: 1 with the shared client up, 0 without. A dedicated server
-    # is deliberately not consulted; it belongs to a Safehouse instance.
-    expected_live_rc = 1 if pl.client_running() else 0
+    # The capture scripts consume only the exit code, so `live` must map the
+    # probe onto 0/1. What the probe means is pinned separately, against a
+    # synthetic /proc, in test_client_running_semantics; here only the
+    # plumbing is in reach, because a subprocess cannot be handed one.
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS / "playtest_lock.py"), "live"],
         check=False,
@@ -547,9 +570,8 @@ def test_wait_until_can_start(tmp: Path) -> None:
         errors="replace",
     )
     _assert(
-        proc.returncode == expected_live_rc,
-        f"CLI live exit {proc.returncode} must match probed state "
-        f"{expected_live_rc}: {proc.stderr}",
+        proc.returncode in (0, 1),
+        f"CLI live exit {proc.returncode} must be 0 or 1: {proc.stderr}",
     )
 
 
@@ -996,6 +1018,10 @@ def main() -> int:
             (
                 "non_utf8_lock_bytes_survive_read",
                 lambda: test_non_utf8_lock_bytes_survive_read(tmp / "nonutf8"),
+            ),
+            (
+                "client_running_semantics",
+                lambda: test_client_running_semantics(tmp / "clientsem"),
             ),
         ]
         for name, fn in cases:

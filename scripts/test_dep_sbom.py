@@ -131,8 +131,12 @@ def test_purl_carries_version() -> None:
 
 
 def test_nothing_is_required_scope() -> None:
-    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert "dependencies = []" in pyproject, "runtime dependencies are no longer empty"
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject.get("project", {})
+    assert project.get("dependencies", []) == [], "runtime dependencies are no longer empty"
+    assert project.get("optional-dependencies", {}) == {}, (
+        "an extra that ships in a wheel is a runtime dependency under another name"
+    )
     required = [c for c in _components() if c["scope"] == "required"]
     assert required == [], f"runtime scope is no longer empty: {[_name(c) for c in required]}"
 
