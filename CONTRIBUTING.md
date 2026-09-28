@@ -16,8 +16,8 @@ is the repo's own gate surface; nothing here needs a game install.
 make test
 ```
 
-For the mod build and live suites you additionally need dotnet SDK 8.0.x
-(pinned by `global.json`) and the game at `GAME=`; see README Requirements.
+For the mod build and live suites you additionally need dotnet SDK 8.0.400
+or newer (`global.json`) and the game at `GAME=`; see README Requirements.
 
 ## The edit-test loop
 

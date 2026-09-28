@@ -65,8 +65,11 @@ suite JSON; **server-container** ships production, which playtest reaches
   (uv fetches it automatically; gates must not rely on a newer interpreter)
 - `shellcheck` for the lint gate (`make lint`; preinstalled on GitHub
   runners, install locally with your package manager)
-- dotnet SDK 8.0.x for the mod build (pinned by `global.json`; found on
-  `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`)
+- dotnet SDK 8.0.400 or newer for the mod build (`global.json` sets that
+  floor and rolls forward, so any installed newer major works; found on
+  `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`). The C#
+  language version and the analyzer set are pinned in the csproj, so the
+  dll bytes do not follow the host's SDK.
 
 ## Offline dev loop (no game install)
 

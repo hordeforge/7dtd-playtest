@@ -45,7 +45,8 @@ endif
 	playtest-core \
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
-	playtest-residual install-pair playtest-compare playtest-repeat
+	playtest-residual install-pair playtest-compare playtest-repeat \
+	playtest-review-video
 
 help:
 	@echo "Offline dev loop (no game install needed):"
@@ -74,6 +75,14 @@ build:
 		echo "game not found at GAME=$(GAME)"; \
 		echo "set GAME=/path/to/7 Days To Die (csproj needs its DLLs to reference)"; \
 		exit 2; }
+	@for dll in "$(GAME)/7DaysToDie_Data/Managed/Assembly-CSharp.dll" \
+		"$(GAME)/Mods/0_TFP_Harmony/0Harmony.dll"; do \
+		test -f "$$dll" || { \
+			echo "missing build reference: $$dll"; \
+			echo "the game install must be complete (0_TFP_Harmony too) before make build"; \
+			exit 2; }; \
+	done
+	DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
 	dotnet build "$(ROOT)/Source/PlayTestMod/PlayTestMod.csproj" -c Release -v q \
 		-p:GameRoot="$(GAME)" -p:RestoreLockedMode=true
 	cp -f "$(ROOT)/ModInfo.xml" "$(DIST)/"
@@ -173,7 +182,7 @@ test: lint typecheck
 COV := $(UV)
 
 coverage: require-uv
-	rm -f .coverage .coverage.*
+	@cd "$(ROOT)" && rm -f .coverage .coverage.*
 	@for gate in $(GATES); do \
 		echo "coverage run scripts/$$gate"; \
 		$(COV) -m coverage run --append --source=scripts \
@@ -280,7 +289,7 @@ playtest-soak-long:
 # the deadeye gateway. One self-contained folder under .local/capture/: the
 # clip's mp4, contact sheet, client.log, and the review evidence. Repeated
 # runs of the same SUITE replace the fixed target directory.
-playtest-review-video:
+playtest-review-video: require-uv
 	@test -n "$(SUITE)" || { echo "playtest-review-video: SUITE=<id> is required" >&2; exit 2; }
 	@$(ROOT)/scripts/capture_video.sh --suite "$(SUITE)" --out "$(OUT)"
 	@if [ -n "$(INTENT)" ]; then \
@@ -295,7 +304,7 @@ playtest-review-video:
 # is clean. LAPS defaults to 1 (pass LAPS=3 for real flake detection);
 # SUITE?=demo; extra orchestrator args via EXTRA_ARGS.
 playtest-repeat: require-uv
-	bash scripts/playtest_repeat.sh --laps "$(LAPS)" --suite "$(SUITE)" $(EXTRA_ARGS)
+	bash "$(ROOT)/scripts/playtest_repeat.sh" --laps "$(LAPS)" --suite "$(SUITE)" $(EXTRA_ARGS)
 
 # zdtd APM dump attach.
 playtest-apm:
@@ -312,7 +321,7 @@ playtest-apm:
 # re-diffing stale logs from a previous session. The stale evidence is removed
 # on failure so a phantom "compared" result cannot survive. The per-side `||
 # true` only tolerates suites whose cases FAIL, not sides that never ran.
-playtest-compare: install-pair
+playtest-compare: install-pair require-uv
 	@rm -rf "$(ROOT)/workspace/comparison-playtest/$(SUITE)"
 	@mkdir -p "$(ROOT)/workspace/comparison-playtest/$(SUITE)/stock" \
 		"$(ROOT)/workspace/comparison-playtest/$(SUITE)/zdtd"

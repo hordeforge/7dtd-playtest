@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <!-- Pinned, not `latest`. global.json rolls forward to whatever major SDK
+         is installed, so `latest` would compile this source under a different
+         C# version (and a different analyzer set) per host, and the dll bytes
+         would differ between them. These are the values of the recorded floor
+         SDK, 8.0.400: C# 12 and the 8.0 analysis rules. -->
+    <LangVersion>12.0</LangVersion>
     <!-- Nullable analysis is on for annotation checks; full `enable` is the
           next step once the ~72 remaining CS86xx findings are worked off. -->
     <Nullable>annotations</Nullable>
@@ -10,7 +15,7 @@
          diagnostic cannot slip into the dll unnoticed. -->
     <WarningLevel>5</WarningLevel>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisLevel>8.0</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <AssemblyName>7dtd-playtest</AssemblyName>

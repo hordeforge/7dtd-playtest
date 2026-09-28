@@ -102,6 +102,26 @@ Release model (inferred practice, now pinned by `make test`):
 - **`--quiet` that was not quiet.** `dst_run.py --quiet` still printed the
   start-seed and regression-replay banners, which its own help says it
   suppresses.
+- **The mod dll was not reproducible across hosts.** `global.json` rolls
+  forward to whatever major SDK is installed, so `<LangVersion>latest</LangVersion>`
+  and `<AnalysisLevel>latest</AnalysisLevel>` picked the C# version and the
+  analyzer rule set from that host's SDK: two machines built from the same
+  source produced different dll bytes, and a new SDK could fail the
+  `TreatWarningsAsErrors` gate on a diagnostic nobody opted into. Both are
+  pinned to the recorded floor SDK (C# 12, 8.0 analysis rules).
+- **`make build` failed deep in the compiler on an incomplete game install.**
+  The preflight only checked for the game executable, so a missing
+  `7DaysToDie_Data/Managed/Assembly-CSharp.dll` or `0_TFP_Harmony/0Harmony.dll`
+  surfaced as a wall of CS0246. Both reference assemblies are named up front.
+- **Targets that reached the build without their preflight or their path.**
+  `playtest-review-video` was missing from `.PHONY` (a file of that name would
+  make make treat it as up to date), `playtest-review-video` and
+  `playtest-compare` invoke `uv` without the `require-uv` preflight, and
+  `playtest-repeat` called `scripts/playtest_repeat.sh` by a path relative to
+  the caller's working directory while every other target uses `$(ROOT)`.
+  `make coverage` also wrote `.coverage` to the caller's directory rather than
+  the repo root. `dotnet build` now runs with telemetry and the first-run
+  banner off, so a build does not write first-run sentinels to `$HOME`.
 
 ## [0.13.0] - 2026-09-21
 

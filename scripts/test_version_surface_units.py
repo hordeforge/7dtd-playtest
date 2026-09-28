@@ -61,6 +61,37 @@ def assert_nuget_pins() -> None:
     assert "ubuntu-24.04" in release, "release.yml must pin ubuntu-24.04 like CI"
 
 
+def assert_toolchain_pins() -> None:
+    """The mod dll's bytes are a function of the tree, not of the host's SDK.
+
+    global.json rolls forward to any installed major SDK on purpose (a
+    distribution may ship a lower band), so every knob that decides what the
+    compiler emits has to be pinned in the csproj instead. `latest` for the
+    language version or the analyzer set silently re-points both at whatever
+    SDK answered the build, and a different Roslyn means different dll bytes
+    for the same source.
+    """
+    csproj = (_ROOT / "Source" / "PlayTestMod" / "PlayTestMod.csproj").read_text(
+        encoding="utf-8"
+    )
+    for tag, value in (
+        ("LangVersion", "12.0"),
+        ("AnalysisLevel", "8.0"),
+        ("Deterministic", "true"),
+        ("EnableSourceControlManagerQueries", "false"),
+    ):
+        assert re.search(
+            rf"<{tag}>{re.escape(value)}</{tag}>", csproj
+        ), f"csproj must pin <{tag}> to {value}, not `latest` or a default"
+    assert "<PathMap>$(MSBuildThisFileDirectory)=" in csproj, (
+        "csproj must map the checkout path out of the dll/pdb via PathMap"
+    )
+    global_json = json.loads((_ROOT / "global.json").read_text(encoding="utf-8"))
+    assert global_json["sdk"]["allowPrerelease"] is False, (
+        "global.json must not resolve a prerelease SDK"
+    )
+
+
 def make_git_dir(git_dir: Path, loose: dict[str, str], packed: list[tuple[str, str]]) -> None:
     tags = git_dir / "refs" / "tags"
     tags.mkdir(parents=True)
@@ -113,6 +144,9 @@ def run_gate(root: Path) -> subprocess.CompletedProcess[str]:
 def main() -> int:
     assert_nuget_pins()
     print("OK net48 reference assemblies are exact-pinned and restore is nuget.org-only")
+
+    assert_toolchain_pins()
+    print("OK language version, analyzer set and build paths are pinned in the csproj")
 
     with tempfile.TemporaryDirectory(prefix="version-surface-units-") as td:
         base = Path(td)
