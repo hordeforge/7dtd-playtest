@@ -20,6 +20,7 @@ import math
 import re
 import shutil
 import subprocess
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -37,6 +38,55 @@ GATEWAY_INSTALL_HINT = (
 )
 
 MAX_PRINTED_CHARS = 500
+
+# Code points that continue the grapheme cluster before them, so cutting
+# between one and its follower prints half a glyph: a bare accent mark, the
+# right half of an emoji ZWJ sequence, a variation selector. U+200D is the
+# joiner itself. A regional indicator (one half of a flag) needs its partner
+# too, but by count rather than by class, so it is checked at the cut.
+_COMBINING_CATEGORIES = frozenset({"Mn", "Me", "Mc"})
+_ZWJ = "‍"
+_VARIATION_SELECTOR_CODEPOINTS = frozenset(range(0xFE00, 0xFE10)) | frozenset(
+    range(0xE0100, 0xE01F0)
+)
+_REGIONAL_INDICATOR_FIRST = 0x1F1E6
+_REGIONAL_INDICATOR_LAST = 0x1F1FF
+
+
+def _is_cluster_tail(character: str) -> bool:
+    """Whether ``character`` can only appear joined to the code point before it."""
+    return (
+        character == _ZWJ
+        or ord(character) in _VARIATION_SELECTOR_CODEPOINTS
+        or unicodedata.category(character) in _COMBINING_CATEGORIES
+    )
+
+
+def _truncate_at_cluster(text: str, limit: int) -> str:
+    """The first ``limit`` code points of ``text``, minus a half cluster.
+
+    A model verdict is prose, and prose is where the emoji, the accents and
+    the flags live; a cut straight at the limit can land inside one and leave
+    a lone combining mark or an orphan ZWJ on the operator's terminal. Walk
+    back over a trailing run of cluster tails, and off a flag left holding
+    one regional indicator instead of two.
+
+    This is not UAX #29 segmentation (nothing in the standard library is):
+    it covers the clusters that actually occur in a review sentence, and the
+    worst a cluster it does not model can do is lose its last code point,
+    which the ellipsis marks as cut text either way.
+    """
+    head = text[:limit]
+    while head and _is_cluster_tail(head[-1]):
+        head = head[:-1]
+    flags = sum(
+        1
+        for character in head
+        if _REGIONAL_INDICATOR_FIRST <= ord(character) <= _REGIONAL_INDICATOR_LAST
+    )
+    if flags % 2:
+        head = head[:-1]
+    return head
 
 # Intent caps. The intent is the one author-supplied text this repository
 # hands the gateway, and the gateway puts it in the review prompt verbatim, so
@@ -427,7 +477,7 @@ def terminal_safe(text: str) -> str:
     )
     collapsed = " ".join(flattened.split())
     if len(collapsed) > MAX_PRINTED_CHARS:
-        return collapsed[:MAX_PRINTED_CHARS] + "..."
+        return _truncate_at_cluster(collapsed, MAX_PRINTED_CHARS) + "..."
     return collapsed
 
 

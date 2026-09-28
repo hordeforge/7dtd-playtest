@@ -46,6 +46,7 @@ from playtest_log import (  # noqa: E402
     barrier_hits_prefix,
     barrier_line_hits,
     empty_client_log,
+    split_log_lines,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -557,7 +558,7 @@ def redact_player_names(text: str, player_ids: Collection[str] | None = None) ->
     if not text:
         return text
     lines: list[str] = []
-    for line in text.splitlines():
+    for line in split_log_lines(text):
         m = _ENTITY_ID_RE.search(line)
         if m and (player_ids is None or m.group(1) in player_ids):
             line = f"{REDACTED_NAME} {line[m.start():m.end()]}"
@@ -573,7 +574,7 @@ def player_entity_ids(out: str, ai_keywords: Collection[str]) -> set[str]:
     caller logs a slice of it.
     """
     ids: set[str] = set()
-    for line in out.splitlines():
+    for line in split_log_lines(out):
         low = line.lower()
         if any(k in low for k in ai_keywords):
             continue
@@ -1044,7 +1045,7 @@ def read_loadgen_events(path: Path) -> list[dict]:
     only newly appended lines through the same filter.
     """
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = split_log_lines(path.read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return []
     return parse_loadgen_event_lines(lines)
@@ -1106,7 +1107,7 @@ class LoadgenEventReader:
         if self._tail.generations != generation_before:
             self.events.clear()
         if chunk:
-            self.events.extend(parse_loadgen_event_lines(chunk.splitlines()))
+            self.events.extend(parse_loadgen_event_lines(split_log_lines(chunk)))
         return self.events
 
 
@@ -1657,7 +1658,7 @@ class TelnetAdmin:
     def _ai_entity_ids(self, out: str) -> list[str]:
         """Entity ids from listents lines matching the shared AI keyword table."""
         ids: list[str] = []
-        for line in out.splitlines():
+        for line in split_log_lines(out):
             low = line.lower()
             if not any(k in low for k in self.AI_LINE_KEYWORDS):
                 continue
@@ -2458,7 +2459,7 @@ def pump_log_tail(tail: TailSource, scan: ClientLogScan) -> str:
     chunk = tail.poll()
     if not chunk:
         return ""
-    scan.feed_lines(chunk.splitlines())
+    scan.feed_lines(split_log_lines(chunk))
     return chunk
 
 
@@ -2482,7 +2483,7 @@ def latest_playtest_crumb(chunk: str) -> str:
     """
     crumbs = [
         ln
-        for ln in chunk.splitlines()
+        for ln in split_log_lines(chunk)
         if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
     ]
     return scrub(crumbs[-1][-160:]) if crumbs else ""
@@ -4462,9 +4463,9 @@ def main(argv: list[str] | None = None) -> int:
                 # One split shared by every key grep: a failed run's client log
                 # can reach tens of MB, and re-splitting per key multiplies it.
                 try:
-                    cl_lines = args.client_log.read_text(
-                        encoding="utf-8", errors="replace"
-                    ).splitlines()
+                    cl_lines = split_log_lines(
+                        args.client_log.read_text(encoding="utf-8", errors="replace")
+                    )
                 except OSError as ex:
                     # The report/junit above are already written; a log that
                     # vanished (rotation, EIO) must not turn the structured

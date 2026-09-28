@@ -353,6 +353,18 @@ characters XML 1.0 cannot represent) and the telnet reader all take it as it
 arrives. A file that will not decode is a load error naming the file, not a
 traceback past the caller's `SuiteLoadError` / `TargetError` handler.
 
+Lines are split with `playtest_log.split_log_lines`, never `str.splitlines()`.
+`splitlines()` also breaks on U+000B, U+000C, U+001C-U+001E, NEL, U+2028 and
+U+2029, none of which the game's logger emits: a peer who types one of those
+inside a single chat message had its tail promoted to a line of its own, and
+the contract-line anchor (which holds against CR/LF only) then accepted it as
+a genuine emission. The same split backs the redaction of a peer's chosen
+character name and the AI/player classification of a `listents` reply, so it
+is one call rather than a habit per parser. A limit stated in characters is
+a code point, not a grapheme: a truncation that would cut a cluster backs
+over the combining mark, joiner or lone flag half it lands in
+(`video_review._truncate_at_cluster`).
+
 ### One concern per run. Do not mix tests.
 
 A playtest invocation proves **one concern**. Do not pile unrelated cases

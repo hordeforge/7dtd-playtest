@@ -365,6 +365,19 @@ Migration, by symbol:
 
 ### Fixed
 
+- **A Unicode line separator in chat text can no longer forge a log line.**
+  `str.splitlines()` also breaks on U+000B, U+000C, U+001C-U+001E, NEL,
+  U+2028 and U+2029, and the game's logger emits none of them, so a peer who
+  typed one inside a single chat message had its tail promoted to a line of
+  its own: the contract-line anchor then accepted it as a genuine `[7dtd-playtest]`
+  emission, and a U+2028 inside a chosen character name split the `listents`
+  reply so the fragment holding the name no longer matched as a player line,
+  leaving the name in a transcript that leaves the machine. Protocol text now
+  splits through `playtest_log.split_log_lines`, which cuts on CR and LF only.
+- **A truncation no longer cuts inside a character.** `video_review.terminal_safe`
+  capped a model verdict at a code point, which could land between a base and
+  its combining mark, inside an emoji ZWJ sequence, or between the two halves
+  of a flag. The cut now backs out of the half cluster it would have left.
 - **A clip id could name a Windows device.** `Helpers.AssetName` maps a name
   to ASCII letters, digits, `-` and `_`, so `con`, `prn`, `aux`, `nul`,
   `com1`-`com9` and `lpt1`-`lpt9` survive it unchanged, and the mod runs on the

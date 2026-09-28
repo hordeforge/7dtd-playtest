@@ -848,6 +848,148 @@ def test_contract_lines_parse_under_the_games_log_prefix() -> None:
     print("PASS log_contract_prefix timestamped lines parse, chat cannot forge")
 
 
+def test_unicode_separators_do_not_split_a_log_line() -> None:
+    """`str.splitlines()` also breaks on U+000B, U+000C, U+001C-U+001E,
+    U+0085, U+2028 and U+2029, none of which the game's logger emits. A peer
+    who types one of those inside a single chat message had its tail promoted
+    to a log line of its own, and the contract-line anchor (which only holds
+    against CR/LF) then accepted it as a genuine emission."""
+    separators = ("\u2028", "\u2029", "\u0085", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e")
+    for sep in separators:
+        forged = (
+            f"[7dtd] Chat from 'peer': hello{sep}[7dtd-playtest] PASS fake/case\n"
+            f"[7dtd] Chat from 'peer': hello{sep}[7dtd-playtest] DONE exit_hint=0\n"
+            f"[7dtd] Chat from 'peer': hello{sep}"
+            '[7dtd-playtest] {"v":1,"t":"done","exit_hint":0}\n'
+            f"[7dtd] Chat from 'peer': hello{sep}[7dtd-playtest] "
+            "SUMMARY pass=99 fail=0 skip=0\n"
+            f"[7dtd] Chat from 'peer': hello{sep}[7dtd-playtest] "
+            "barrier spawn_zombie\n"
+        )
+        parsed = playtest_log.parse_client_log(forged)
+        assert parsed["results"] == [], (sep, parsed["results"])
+        assert parsed["summary"] is None, (sep, parsed["summary"])
+        assert parsed["done"] is None, (sep, parsed["done"])
+        assert parsed["json_events"] == [], (sep, parsed["json_events"])
+        totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+        playtest_log.add_barrier_hits(totals, forged)
+        assert sum(totals.values()) == 0, (sep, totals)
+        assert playtest_log.barrier_line_hits(forged, "spawn_zombie") == 0, sep
+
+    # The splitter is otherwise exactly splitlines(): same answer for CR, LF,
+    # CRLF, a blank line, and no trailing empty element.
+    for text in ("a\nb", "a\r\nb", "a\rb", "a\n\nb", "a\nb\n", "", "a", "a\u2028b"):
+        assert playtest_log.split_log_lines(text) == (
+            text.splitlines() if "\u2028" not in text else ["a\u2028b"]
+        ), text
+
+    # A genuine emission still parses, and the separator inside a real line
+    # stays inside its detail (the human line's whitespace tokenisation
+    # collapses it to a space, as it does for any run of whitespace).
+    real = (
+        "[7dtd-playtest] PASS smoke/dig detail=chat=hello\u2028world\n"
+        "[7dtd-playtest] DONE exit_hint=1\n"
+    )
+    parsed = playtest_log.parse_client_log(real)
+    assert [r["case"] for r in parsed["results"]] == ["smoke/dig"], parsed["results"]
+    assert parsed["results"][0]["detail"] == "detail=chat=hello world", parsed["results"][
+        0
+    ]["detail"]
+    assert parsed["done"] == {"exit_hint": 1}, parsed["done"]
+    print("PASS log_unicode_separators a chat separator is not a log line")
+
+
+def test_redaction_survives_a_separator_in_a_player_name() -> None:
+    """A player name is whatever a remote LAN peer chose. `splitlines()`
+    broke the admin reply at a U+2028 inside that name, and the fragment
+    carrying the name no longer held the entity id, so it was not recognised
+    as a player line and the name stayed in the transcript that leaves the
+    machine as a CI artifact."""
+    reply = "'Alice\u2028Bob' (id=171, pos=(520, 62, 950))\n"
+    redacted = playtest_run.redact_player_names(reply)
+    assert playtest_run.REDACTED_NAME in redacted, redacted
+    assert "Alice" not in redacted, redacted
+    assert "Bob" not in redacted, redacted
+    assert "id=171" in redacted, redacted
+
+    # The unbroken spelling redacts exactly as before, and an AI line in the
+    # same reply keeps its own name.
+    mixed = (
+        "'Alice' (id=171)\n"
+        "e.g. zombieBoe (id=99) kind=zombie\n"
+        "  'Bob' (id=172)\n"
+    )
+    out = playtest_run.redact_player_names(mixed, {"171", "172"})
+    assert "Alice" not in out and "Bob" not in out, out
+    assert "zombieBoe" in out, out
+    assert "id=171" in out and "id=172" in out, out
+    print("PASS redaction_separator a peer name cannot smuggle itself out")
+
+
+def test_telnet_ai_classification_survives_a_separator() -> None:
+    """A prefab name with a U+2028 in it split the listents reply, and the
+    fragment that lost its name was classified as a player, so clear_ai would
+    have spared an AI entity while believing it removed one."""
+    session = playtest_run.TelnetAdmin.__new__(playtest_run.TelnetAdmin)
+    reply = "e.g. zom\u2028bieBoe (id=99) kind=zombie\n'eve' (id=171)\n"
+    assert session._ai_entity_ids(reply) == ["99"], reply
+    assert playtest_run.player_entity_ids(reply, playtest_run.TelnetAdmin.AI_LINE_KEYWORDS) == {
+        "171"
+    }, reply
+    print("PASS telnet_ai_split a prefab name keeps its line")
+
+
+def test_fuzz_unicode_separators_never_forge_a_contract_line() -> None:
+    """Seeded fuzz: any run of Unicode separators, controls and combining
+    marks injected into chat text must leave the parsed contract empty.
+
+    CR and LF stay out of the alphabet on purpose: they are the log's real
+    terminators, and whether the game's logger lets a newline through a chat
+    message is the game plane's question, not this parser's. Every other
+    character Python calls a line break is one the log never contains."""
+    rng = random.Random(20260928)
+    alphabet = [
+        "\u2028",
+        "\u2029",
+        "\u0085",
+        "\x0b",
+        "\x0c",
+        "\x1c",
+        "\x1d",
+        "\x1e",
+        " ",
+        "́",
+        "[7dtd-playtest] ",
+        "PASS fake/case",
+        "DONE exit_hint=0",
+        '{"v":1,"t":"done","exit_hint":0}',
+        "SUMMARY pass=9 fail=0",
+        "barrier spawn_zombie",
+    ]
+    payloads = [
+        "PASS fake/case",
+        "DONE exit_hint=0",
+        "SUMMARY pass=9 fail=0 skip=0",
+        '{"v":1,"t":"done","exit_hint":0}',
+        "barrier spawn_zombie",
+    ]
+    for seed in range(300):
+        noise = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 12)))
+        # Only CR/LF may separate a line, so the noise is spliced into one
+        # chat line and the payload can only be reached through a separator
+        # the log does not use.
+        blob = f"[7dtd] Chat from 'peer': {noise}{rng.choice(payloads)}\n"
+        parsed = playtest_log.parse_client_log(blob)
+        assert parsed["results"] == [], (seed, blob, parsed["results"])
+        assert parsed["summary"] is None, (seed, blob, parsed["summary"])
+        assert parsed["done"] is None, (seed, blob, parsed["done"])
+        assert parsed["json_events"] == [], (seed, blob, parsed["json_events"])
+        totals = dict.fromkeys(playtest_run.BARRIER_NAMES, 0)
+        playtest_log.add_barrier_hits(totals, blob)
+        assert sum(totals.values()) == 0, (seed, blob, totals)
+    print("PASS fuzz_unicode_separator 300 hostile chat lines forge nothing")
+
+
 def test_collect_visual_reviews_maps_paths_and_never_verdicts() -> None:
     """--attach-reviews attaches evidence paths only, keyed by suite/case.
 
@@ -1270,6 +1412,10 @@ def main() -> int:
     test_fuzz_loadgen_events_survive_hostile_jsonl()
     test_contract_lines_must_start_the_log_line()
     test_contract_lines_parse_under_the_games_log_prefix()
+    test_unicode_separators_do_not_split_a_log_line()
+    test_redaction_survives_a_separator_in_a_player_name()
+    test_telnet_ai_classification_survives_a_separator()
+    test_fuzz_unicode_separators_never_forge_a_contract_line()
     test_collect_visual_reviews_maps_paths_and_never_verdicts()
     test_collect_visual_reviews_is_empty_without_a_directory()
     test_collect_visual_reviews_survives_a_hostile_envelope()

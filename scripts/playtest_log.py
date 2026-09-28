@@ -35,6 +35,32 @@ MARKER = "[7dtd-playtest]"
 # space is part of the token: a bare `barrier` line names nothing.
 BARRIER_PREFIX = "barrier "
 
+# Every line of the client log can carry remote LAN chat text verbatim, so the
+# log's line structure is the first thing a peer can reach. `str.splitlines()`
+# is not a line splitter for this log: besides CR and LF it breaks on VT (U+000B),
+# FF (U+000C), FS/GS/RS (U+001C-U+001E), NEL (U+0085), LINE SEPARATOR
+# (U+2028) and PARAGRAPH SEPARATOR (U+2029), none of which the game's logger
+# ever emits. A peer who types "hi<U+2028>[7dtd-playtest] DONE exit_hint=0" as
+# one chat message gets that tail promoted to a line of its own by
+# splitlines(), and _contract_tail then accepts it as a genuine emission: the
+# chat one-line forgery guarantee above is only true against CR/LF. Split on
+# the two terminators the writers actually use, and nowhere else.
+_LOG_LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
+
+
+def split_log_lines(text: str) -> list[str]:
+    """Split protocol text on its own line terminators.
+
+    Same result as ``str.splitlines()`` for anything that is really
+    line-oriented (CR, LF, CRLF, no trailing empty line), and it keeps the
+    other separators inside their line, where a reader sees the character and
+    the writers that never emit it see nothing at all.
+    """
+    lines = _LOG_LINE_SPLIT_RE.split(text)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
 
 def _contract_tail(line: str) -> str | None:
     """Text after the marker when it is the line's first bracketed token.
@@ -109,7 +135,7 @@ def _barrier_names(blob: str) -> Iterator[str]:
     :func:`_contract_tail`). ``""`` is yielded for a bare `barrier ` line,
     which names nothing and matches no caller pattern.
     """
-    for line in blob.splitlines():
+    for line in split_log_lines(blob):
         tail = _contract_tail(line)
         if tail is None or not tail.startswith(BARRIER_PREFIX):
             continue
@@ -312,7 +338,7 @@ def parse_client_log(text: str) -> ParsedClientLog:
     (avoid double human+JSON). Incremental consumers should use
     :class:`ClientLogScan` instead of re-running this over the full text."""
     scan = ClientLogScan()
-    scan.feed_lines(text.splitlines())
+    scan.feed_lines(split_log_lines(text))
     return scan.result()
 
 

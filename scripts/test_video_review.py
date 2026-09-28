@@ -401,6 +401,46 @@ def test_terminal_safe_defangs_model_output() -> None:
     assert terminal_safe("keeps\nreadable text") == "keeps readable text"
 
 
+def test_terminal_safe_cuts_between_graphemes_not_inside_one() -> None:
+    """The truncation limit is counted in code points, and a code point is
+    not a character: cutting at it can leave a bare combining accent, an
+    orphan ZWJ, or half a flag on the operator's terminal."""
+    limit = video_review.MAX_PRINTED_CHARS
+    zwj = "\u200d"
+    combining_acute = "\u0301"
+
+    # A family emoji straddling the cut: the ZWJ and the last figure go with
+    # the half already printed, never left dangling after the ellipsis.
+    family = "\U0001f468" + zwj + "\U0001f469" + zwj + "\U0001f467"
+    rendered = terminal_safe("a" * (limit - 1) + family + "tail")
+    assert rendered.endswith("..."), rendered[-20:]
+    assert zwj not in rendered, "an orphan ZWJ survived the cut"
+    assert not rendered.startswith("a" * limit), "the cut kept a partial cluster"
+
+    # A combining mark is the simplest case: on its own it is invisible, and
+    # the only reason the code point before it is there.
+    accented = terminal_safe("a" * (limit - 1) + "e" + combining_acute + "tail")
+    assert not accented.startswith("a" * limit), accented[-5:]
+    assert combining_acute not in accented, accented[-5:]
+
+    # A flag is two regional indicators; one on its own is a letter box.
+    flagged = terminal_safe("a" * (limit - 1) + "\U0001f1ef\U0001f1f5tail")
+    assert "\U0001f1f5" not in flagged, flagged[-5:]
+
+    # An even count is a whole number of flags: nothing is dropped.
+    whole = "a" * (limit - 2) + "\U0001f1ef\U0001f1f5\U0001f1fa\U0001f1f8tail"
+    assert whole.startswith("a" * (limit - 2)), "an intact pair was dropped"
+
+    # ASCII is untouched, and text that needs no cut is returned whole.
+    assert len(terminal_safe("x" * 5000)) == limit + 3
+    assert terminal_safe("short and sweet") == "short and sweet"
+    assert video_review._truncate_at_cluster("abc", 10) == "abc"
+    assert video_review._truncate_at_cluster("abc", 0) == ""
+    assert video_review._truncate_at_cluster(combining_acute, 1) == ""
+    assert video_review._truncate_at_cluster("e" + combining_acute, 1) == "e"
+    assert terminal_safe(combining_acute * (limit + 40)).endswith("...")
+
+
 def test_the_cli_prints_sanitized_model_text() -> None:
     """The human-readable path is the one that renders model output raw."""
     import io
@@ -620,6 +660,7 @@ def main() -> int:
         test_an_invalid_result_leaves_no_evidence_behind(root)
         test_a_refused_review_keeps_an_earlier_evidence_file(root)
         test_terminal_safe_defangs_model_output()
+        test_terminal_safe_cuts_between_graphemes_not_inside_one()
         test_the_cli_prints_sanitized_model_text()
         test_gateway_output_is_decoded_as_utf8()
         test_fuzz_validate_result_never_crashes_on_hostile_gateway_output()
