@@ -15,20 +15,16 @@ built by ``Runner.CaseRef``.
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import suite_loader
-from test_catalog_surface import append_suite_map
+from catalog_surface import CATALOG, REF_PREFIX, add_method_case_ids, append_suite_map
 
 ROOT = Path(__file__).resolve().parents[1]
-CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
-
-REF_PREFIX = "catalog."
 
 # Cases that exist for a suite the declarative layer does not own yet. Each entry
 # is a suite id still built only from Catalog.cs; drop it when the suite gets a
@@ -51,36 +47,6 @@ UNDECLARED_SUITES = {
     "bot",
     "benchmark",
 }
-
-
-def add_method_case_ids(src: str) -> dict[str, set[str]]:
-    """Attribute every Live/Defer case id in Catalog.cs to its Add method.
-
-    Same ownership rule as the barrier attribution in test_catalog_surface: the
-    Add* methods are declared sequentially, so the nearest preceding header owns
-    the emission.
-    """
-    headers = [
-        (m.start(), m.group(1))
-        for m in re.finditer(r"\bstatic void Add([A-Z]\w*)\s*\(", src)
-    ]
-    assert headers, "Catalog.cs lost every Add method header"
-    cases = [
-        (m.start(), m.group(1))
-        for m in re.finditer(r'\b(?:Live|Defer)\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"', src)
-    ]
-    assert cases, "Catalog.cs lost every Live/Defer case"
-    out: dict[str, set[str]] = {}
-    for pos, case_id in cases:
-        owner = None
-        for hpos, name in headers:
-            if hpos < pos:
-                owner = name
-            else:
-                break
-        assert owner, f"case {case_id!r} declared before any Add method header"
-        out.setdefault(owner, set()).add(case_id)
-    return out
 
 
 def catalog_refs() -> dict[str, set[str]]:

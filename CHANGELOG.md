@@ -34,6 +34,15 @@ Release model (inferred practice, now pinned by `make test`):
   instead of printing a bare "not found" from the interpreter call. A mistyped
   `make test-one GATE=` lists the known gates.
 
+### Changed
+
+- **Shared Catalog.cs readers moved out of a gate.** The two offline gates
+  that read `Catalog.cs` now import the readers from `scripts/catalog_surface.py`
+  instead of one of them importing the other (`test_suite_refs` pulled
+  `append_suite_map` out of `test_catalog_surface`, and both pinned the
+  `catalog.` ref prefix separately). The ref prefix that `Runner.CaseRef`
+  builds lives beside the parsers now. No gate assertion changed.
+
 ### Fixed
 
 - **Reruns no longer answer with the previous run's state.** A run that died

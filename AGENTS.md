@@ -397,7 +397,9 @@ the run order that both `make test` and `make coverage` expand):
 
 1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
    + counts total must equal Catalog.cs. A catalog addition that skips
-   SCENARIOS.md fails CI.
+   SCENARIOS.md fails CI. The Catalog.cs readers both this gate and gate 17
+   need live in `scripts/catalog_surface.py`, so a gate imports a parser
+   rather than another gate.
 2. mod version surface (`scripts/test_version_surface.py`): ModInfo.xml ==
    ModIdentity.Version == dist manifest, every visible `vX.Y.Z` tag has a
    CHANGELOG entry (units in `scripts/test_version_surface_units.py`), and
@@ -405,35 +407,37 @@ the run order that both `make test` and `make coverage` expand):
    entry.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
 4. mining-probe provider surface (`scripts/test_mining_probe_surface.py`)
-5. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
-6. host lock (`scripts/test_playtest_lock.py`)
-7. deterministic simulation (`scripts/test_dst.py`)
-8. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
+5. player-survivability surface
+   (`scripts/test_player_survivability_surface.py`)
+6. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
+7. host lock (`scripts/test_playtest_lock.py`)
+8. deterministic simulation (`scripts/test_dst.py`)
+9. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
    catches the read-before-assignment crash class that once shipped in
    `playtest_run.py` main(); only fires with real game binaries present.
-9. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
-   and serverconfig XML attribute escaping plus parser survival on malformed
-   JSON events, plus `scripts/report_summary.py` failing closed on a hostile
-   or malformed lap summary.
-10. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
-   fresh-save removes only every world's copy of the named game save
-   (quarantined under `<logdir>/quarantine`, newest 5 kept, never
-   hard-deleted).
-11. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
-12. capture-clip marker surface (`scripts/test_capture_video_surface.py`):
+10. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
+    and serverconfig XML attribute escaping plus parser survival on malformed
+    JSON events, plus `scripts/report_summary.py` failing closed on a hostile
+    or malformed lap summary.
+11. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
+    fresh-save removes only every world's copy of the named game save
+    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
+    hard-deleted).
+12. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
+13. capture-clip marker surface (`scripts/test_capture_video_surface.py`):
     the `scene staged` line `capture_frames.sh` keys on parses the clip id
     from the trailing directory, CRLF-safe.
-13. video-review surface (`scripts/test_video_review.py`): intent parsing and
+14. video-review surface (`scripts/test_video_review.py`): intent parsing and
     the deadeye review runner fail closed on malformed input.
-14. playtest target adapters (`scripts/test_playtest_targets.py`): resolve /
+15. playtest target adapters (`scripts/test_playtest_targets.py`): resolve /
     apply / report fields for `stock|sandbox|attach|zdtd|live`, Safehouse
     path defaults, and missing-`sb` failure.
-15. declarative suite loader (`scripts/test_suite_loader.py`): `suites/*.json`
+16. declarative suite loader (`scripts/test_suite_loader.py`): `suites/*.json`
     discover/load/report, and every contradiction refused: a managed run that
     is not fresh, an attach run that claims to be, an attach run carrying a
     `server` block or `mods` list it does not own, `readonly` outside attach,
     an external suite shadowing a built-in id.
-16. declared-ref surface (`scripts/test_suite_refs.py`): every `ref` in
+17. declared-ref surface (`scripts/test_suite_refs.py`): every `ref` in
     `suites/*.json` resolves to a real Catalog case, every declared suite
     declares all its cases, the `catalog.SUITE.CASE` format is pinned on both
     sides (loader and `Runner.CaseRef`), and every catalog suite is either

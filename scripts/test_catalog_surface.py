@@ -5,13 +5,23 @@ from __future__ import annotations
 
 import re
 import sys
-from itertools import pairwise
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
-SCENARIOS = ROOT / "SCENARIOS.md"
-ORCH = ROOT / "scripts" / "playtest_run.py"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from catalog_surface import (
+    CATALOG,
+    add_method_barriers,
+    append_suite_map,
+    defer_case_ids,
+    defer_reasons,
+    expand_alias_ids,
+    live_case_ids,
+    suite_names,
+)
+
+SCENARIOS = Path(__file__).resolve().parents[1] / "SCENARIOS.md"
+ORCH = Path(__file__).resolve().parent / "playtest_run.py"
 
 REQUIRED_LIVE = (
     "world_time_advances",
@@ -100,27 +110,6 @@ RESIDUAL_MUST_BE_LIVE = (
 )
 
 
-def live_case_ids_from_catalog(src: str) -> set[str]:
-    return set(re.findall(r'\bLive\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"', src))
-
-
-def defer_case_ids(src: str) -> set[str]:
-    return set(
-        re.findall(
-            r'\bDefer\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"',
-            src,
-        )
-    )
-
-
-def defer_reasons(src: str) -> list[tuple[str, str]]:
-    return re.findall(
-        r'\bDefer\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"\s*,\s*new\s*\[\s*\]\s*\{[^}]*\}\s*,\s*"([^"]*)"\s*\)',
-        src,
-        flags=re.S,
-    )
-
-
 def persist_pad_from_catalog(src: str) -> tuple[int, int, int] | None:
     m = re.search(
         r"PersistPlayerPos\s*=\s*new Vector3\(\s*([\d.]+)f?\s*,"
@@ -141,69 +130,6 @@ def persist_pad_from_orchestrator(src: str) -> tuple[int, int, int] | None:
         return None
     x, y, z = (int(g) for g in m.groups())
     return (x, y, z)
-
-
-def suite_names_from_catalog(src: str) -> set[str]:
-    m = re.search(r"static readonly string\[\] SuiteNames\s*=\s*\{([^}]*)\}", src, re.S)
-    assert m, "Catalog.cs lost the SuiteNames table"
-    return set(re.findall(r'"([a-z0-9_]+)"', m.group(1)))
-
-
-def expand_alias_ids_from_catalog(src: str) -> set[str]:
-    """Alias labels accepted by Catalog.ExpandSuites (case labels in its switch)."""
-    start = src.index("public static string[] ExpandSuites")
-    end = src.index("static void AddUnique", start)
-    body = src[start:end]
-    return set(re.findall(r'case "([a-z0-9_]+)":', body))
-
-
-def append_suite_map(src: str) -> dict[str, list[str]]:
-    """Map each concrete AppendSuite case to the Add* methods it composes.
-
-    Most cases call one Add method; benchmark composes four. The default arm
-    (external scenario providers) has no built-in body and is omitted.
-    """
-    start = src.index("public static void AppendSuite")
-    end = src.index("static CaseDef Live", start)
-    body = src[start:end]
-    marks = [(m.start(), m.group(1)) for m in re.finditer(r'case "([a-z0-9_]+)":', body)]
-    marks.append((len(body), ""))
-    result: dict[str, list[str]] = {}
-    for (s, suite), (e, _) in pairwise(marks):
-        adds = re.findall(r"\bAdd([A-Z]\w*)\s*\(", body[s:e])
-        if adds:
-            result[suite] = adds
-    return result
-
-
-def add_method_barriers(src: str) -> dict[str, set[str]]:
-    """Attribute every Report.Barrier literal in Catalog.cs to its Add method.
-
-    Catalog.cs declares the Add* methods sequentially and only case bodies
-    emit barriers, so the nearest preceding `static void AddX(` header is the
-    owner. Prefix only (before any ':' or concatenation): parameterized names
-    like "chat_echo:<token>" still match their host BARRIER_NAMES entry.
-    """
-    headers = [
-        (m.start(), m.group(1))
-        for m in re.finditer(r"\bstatic void Add([A-Z]\w*)\s*\(", src)
-    ]
-    emissions = [
-        (m.start(), m.group(1))
-        for m in re.finditer(r'Report\.Barrier\(\s*"([A-Za-z0-9_]+)', src)
-    ]
-    assert emissions, "Catalog.cs lost every Report.Barrier emission"
-    out: dict[str, set[str]] = {}
-    for pos, prefix in emissions:
-        owner = None
-        for hpos, name in headers:
-            if hpos < pos:
-                owner = name
-            else:
-                break
-        assert owner, f"Report.Barrier({prefix!r}) before any Add method header"
-        out.setdefault(owner, set()).add(prefix)
-    return out
 
 
 def quoted_ids_after_assignment(src: str, var: str) -> set[str]:
@@ -227,7 +153,7 @@ def main() -> int:
         and '"economy", "quest", "vehicle", "power", "finale"' in cat
     ), "demo alias must expand to vehicle+power+finale"
 
-    live = live_case_ids_from_catalog(cat)
+    live = live_case_ids(cat)
     deferred = defer_case_ids(cat)
     missing = [c for c in REQUIRED_LIVE if c not in live]
     assert not missing, f"Catalog.cs missing Live cases: {missing}"
@@ -319,8 +245,8 @@ def main() -> int:
         f"playtest_run.py FIXTURE_SUITE_IDS (their barriers would never fire): "
         f"{unlisted}"
     )
-    known_suites = suite_names_from_catalog(cat)
-    aliases = expand_alias_ids_from_catalog(cat)
+    known_suites = suite_names(cat)
+    aliases = expand_alias_ids(cat)
     unknown_fixture = sorted(fixture_ids - known_suites - aliases)
     assert not unknown_fixture, (
         f"playtest_run.py FIXTURE_SUITE_IDS lists ids unknown to Catalog.cs "

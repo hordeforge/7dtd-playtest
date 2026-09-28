@@ -18,6 +18,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import suite_loader as sl  # noqa: E402
+from catalog_surface import REF_PREFIX  # noqa: E402
 
 ROOT = _SCRIPTS.parent
 SUITES = ROOT / "suites"
@@ -196,7 +197,7 @@ def test_suite_to_report_shape() -> None:
     cases = report["cases"]
     assert isinstance(server, dict)
     assert isinstance(cases, list)
-    assert str(cases[0]["ref"]).startswith("catalog.")
+    assert str(cases[0]["ref"]).startswith(REF_PREFIX)
 
 
 def test_published_schema_matches_the_loader() -> None:
