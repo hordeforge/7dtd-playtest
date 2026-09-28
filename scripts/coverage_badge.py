@@ -13,15 +13,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+USAGE = "usage: coverage_badge.py OUTPUT.svg"
+
 
 def percentage() -> int:
     out = Path(".coverage.json")
-    subprocess.run(
-        [sys.executable, "-m", "coverage", "json", "-q", "-o", str(out)],
-        check=True,
-    )
-    data = json.loads(out.read_text(encoding="utf-8"))
-    out.unlink()
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "coverage", "json", "-q", "-o", str(out)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        data = json.loads(out.read_text(encoding="utf-8"))
+    finally:
+        out.unlink(missing_ok=True)
     totals = data["totals"]
     return round(float(totals["percent_covered"]))
 
@@ -61,11 +66,27 @@ def badge(pct: int, fill: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: coverage_badge.py OUTPUT.svg", file=sys.stderr)
+    args = argv[1:]
+    if args and args[0] in ("-h", "--help"):
+        print(USAGE)
+        print("\nExit codes: 0 badge written, 1 no coverage data, 2 bad usage.")
+        return 0
+    if len(args) != 1:
+        print(USAGE, file=sys.stderr)
         return 2
-    pct = percentage()
-    Path(argv[1]).write_text(badge(pct, colour(pct)), encoding="utf-8")
+    try:
+        pct = percentage()
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"coverage_badge: cannot compute coverage: {exc}", file=sys.stderr)
+        return 1
+    except subprocess.CalledProcessError as exc:
+        print(
+            "coverage_badge: `coverage json` failed; run it under the project's "
+            f"interpreter after a measured test run (`uv run --locked make coverage`): {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    Path(args[0]).write_text(badge(pct, colour(pct)), encoding="utf-8")
     return 0
 
 

@@ -8,9 +8,17 @@
 # Usage:
 #   ./scripts/playtest_repeat.sh [--laps N] [--suite demo] [orchestrator args...]
 #
-# Env: PLAYTEST_LAPS (default 3), PLAYTEST_SUITE (default demo),
-#      LOGDIR (default ~/.cache/7dtd-playtest; also passed to the orchestrator
-#      as --logdir so laps write and aggregate in the same directory).
+# Options:
+#   --laps N      laps to run (env PLAYTEST_LAPS; default 3)
+#   --suite ID    suite id (env PLAYTEST_SUITE; default demo)
+#   --logdir DIR  report directory (env LOGDIR; default ~/.cache/7dtd-playtest),
+#                 also passed to the orchestrator as --logdir
+#   -h, --help    print this text
+#
+# Anything else is passed through to playtest_run.py unchanged.
+#
+# Exit codes: 0 every lap clean, 1 a lap failed or the aggregate was not all
+# clean, 2 usage or a missing orchestrator.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +40,7 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2
       ;;
+    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) ORCH_ARGS+=("$1"); shift ;;
   esac
 done
@@ -98,7 +107,7 @@ echo "=== aggregate ==="
 echo "laps passed $laps_passed/$LAPS (with a report: $laps_total)"
 echo "cases pass=$sum_pass fail=$sum_fail skip=$sum_skip"
 if [[ "$laps_passed" -lt "$LAPS" ]]; then
-  echo "playtest_repeat: FAIL (not all laps clean)"
+  echo "playtest_repeat: FAIL (not all laps clean)" >&2
   exit 1
 fi
 echo "playtest_repeat: PASS"

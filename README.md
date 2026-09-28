@@ -828,10 +828,10 @@ Use a custom output directory and runner:
 
    `--runner` is for a project with its own entry point (deploys, `.local.env`,
    lock handling); it is invoked as `<cmd> --suite <id>`, and defaults to this
-   repo's `scripts/playtest_run.py`. `CAPTURE_FRAMES`, `CAPTURE_INTERVAL` and
-   `CAPTURE_CROP` tune the loop. It refuses to start while a client or
-   dedicated server is already up, because overlapping runs photograph the
-   wrong one.
+   repo's `scripts/playtest_run.py` under `uv run --locked`. `CAPTURE_FRAMES`,
+   `CAPTURE_INTERVAL` and `CAPTURE_CROP` tune the loop. It refuses to start
+   while a client or dedicated server is already up, because overlapping runs
+   photograph the wrong one. `-h` prints the full option list.
 
 5. Anything a person judges by **ear** (a blast, an ambience, a cue) is
    recorded the same way with

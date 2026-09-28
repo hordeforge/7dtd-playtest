@@ -39,6 +39,16 @@ def main(argv: list[str] | None = None) -> int:
             "uploads the clip to a third party, so it refuses without "
             "--allow-network"
         ),
+        epilog=(
+            "examples:\n"
+            "  review_video.py <clip-dir> --intent intent.json --allow-network\n"
+            "  review_video.py <clip-dir> --intent-text '{\"purpose\":\"...\"}' \\\n"
+            "      --allow-network --json\n"
+            "  make playtest-review-video SUITE=<id> INTENT=<path>\n"
+            "exit codes: 0 evidence written, 1 review failed or was refused, "
+            "2 bad usage"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("clip", type=Path, help="the clip directory to review")
     parser.add_argument(
@@ -65,8 +75,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="consent to uploading the clip to the provider",
     )
-    parser.add_argument("--keep-raw-response", action="store_true")
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--keep-raw-response",
+        action="store_true",
+        help="pass --keep-raw-response to the gateway CLI",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="pass --force to the gateway CLI",
+    )
     parser.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="seconds to wait"
     )

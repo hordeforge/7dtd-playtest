@@ -65,6 +65,7 @@ help:
 	@echo "  make playtest SUITE=demo SERVER=stock|zdtd [PROVISION=attach READONLY=1]"
 	@echo "  make playtest-smoke | playtest-gate | playtest-demo | playtest-bench LAPS=3"
 	@echo "  make playtest-zdtd | playtest-compare | playtest-repeat LAPS=3"
+	@echo "  make playtest-review-video SUITE=<id> [INTENT=<path> PROVIDER=<name>]"
 	@echo "  make playtest-residual           persist + mp + apm + soak_long"
 
 build:
@@ -279,7 +280,8 @@ playtest-review-video:
 
 # Flake detection: run a suite LAPS times, fresh server each lap, aggregate
 # the per-lap report JSON (playtest_repeat.sh). Exit nonzero unless every lap
-# is clean. LAPS?=3; SUITE?=demo; extra orchestrator args via EXTRA_ARGS.
+# is clean. LAPS defaults to 1 (pass LAPS=3 for real flake detection);
+# SUITE?=demo; extra orchestrator args via EXTRA_ARGS.
 playtest-repeat: require-uv
 	bash scripts/playtest_repeat.sh --laps "$(LAPS)" --suite "$(SUITE)" $(EXTRA_ARGS)
 

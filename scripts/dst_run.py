@@ -209,15 +209,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.regressions:
         seeds = load_regression_seeds()
         if not seeds:
-            print("[dst] no regression seeds recorded yet")
+            if not args.quiet:
+                print("[dst] no regression seeds recorded yet")
             return 0
-        print(f"[dst] replaying {len(seeds)} regression seed(s)")
+        if not args.quiet:
+            print(f"[dst] replaying {len(seeds)} regression seed(s)")
     elif args.seed is not None:
         seeds = [args.seed]
     else:
         start = secrets.randbelow(2**48)
         seeds = [start + i for i in range(max(1, args.iterations))]
-        print(f"[dst] start_seed={start} iterations={len(seeds)}")
+        if not args.quiet:
+            print(f"[dst] start_seed={start} iterations={len(seeds)}")
 
     # Elapsed-time budget and wall measurement on the monotonic clock so a
     # wall-clock step mid-soak cannot extend or truncate the soak window.

@@ -62,7 +62,9 @@ done
 
 [[ -n "$SUITE" ]] || { echo "capture_frames: --suite is required" >&2; exit 2; }
 OUT="${OUT:-$ROOT/.local/capture/$SUITE-$STAMP}"
-RUNNER="${RUNNER:-$HERE/playtest_run.py --suite}"
+command -v uv >/dev/null 2>&1 || { echo "ERROR: uv is not on PATH; host Python goes through it (see README: Requirements)" >&2; exit 2; }
+PY=(uv run --locked --project "$ROOT" python)
+RUNNER="${RUNNER:-${PY[*]} $HERE/playtest_run.py --suite}"
 
 FRAMES="${CAPTURE_FRAMES:-18}"
 INTERVAL="${CAPTURE_INTERVAL:-0.4}"
@@ -87,7 +89,7 @@ CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/A
 # phase), the stock dedicated, and zdtd are all covered with no drift between
 # this guard and the lock the runner itself enforces.
 runtime_rc=0
-python3 "$HERE/playtest_lock.py" live || runtime_rc=$?
+"${PY[@]}" "$HERE/playtest_lock.py" live || runtime_rc=$?
 case $runtime_rc in
 	0) : ;;
 	1)

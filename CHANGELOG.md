@@ -42,6 +42,14 @@ Release model (inferred practice, now pinned by `make test`):
   `append_suite_map` out of `test_catalog_surface`, and both pinned the
   `catalog.` ref prefix separately). The ref prefix that `Runner.CaseRef`
   builds lives beside the parsers now. No gate assertion changed.
+- **Help text that named a flag that no longer exists.** `playtest_run.py
+  --help` told the reader to "prefer --target" and to use `--sandbox-name`
+  "for --target sandbox"; the two-axis replacement has no `--target` flag,
+  so both strings now name `--provision`.
+- `review_video.py` documents `--keep-raw-response` and `--force` (both are
+  gateway passthroughs) and closes with examples and exit codes; `make help`
+  lists `playtest-review-video`; the `playtest-repeat` comment no longer
+  claims a `LAPS=3` default the Makefile does not have.
 
 ### Fixed
 
@@ -62,6 +70,28 @@ Release model (inferred practice, now pinned by `make test`):
   touched). `terminal_safe` flattens control characters and truncates
   model-authored text before `review_video.py` prints it, and the human
   output now states the reported token count and that confidence is advisory.
+- **CLI usage errors that read as success.** `playtest_lock.py` with no
+  command printed its usage on stdout and exited 0, so a polling caller read
+  that as "the shared client is free"; it now writes the usage to stderr and
+  exits 2, and `live` rejects stray arguments. `playtest_repeat.sh --help`
+  fell through to the orchestrator and ran three laps that could never pass;
+  it now prints its own options, env vars and exit codes.
+- **Host Python outside uv in the capture helpers.**
+  `capture_frames.sh`, `capture_video.sh` and `capture_audio.sh` invoked
+  `python3` directly for the runtime probe and the default runner while
+  every other host script went through `uv run --locked`; the project needs
+  >=3.11 and a distro `python3` can be older. They now name the missing tool
+  instead of failing with an interpreter syntax error.
+- **Cryptic coverage failure.** `coverage_badge.py` leaked a
+  `CalledProcessError` traceback when `coverage` was missing or no data had
+  been measured; it now says which command to run, exits 1, and no longer
+  leaves `.coverage.json` behind. `report_summary.py --help` was parsed as a
+  report path and reported "unreadable summary in --help"; `-h` prints usage
+  and a missing file is named as an unreadable file rather than a bad
+  summary.
+- **`--quiet` that was not quiet.** `dst_run.py --quiet` still printed the
+  start-seed and regression-replay banners, which its own help says it
+  suppresses.
 
 ## [0.13.0] - 2026-09-21
 

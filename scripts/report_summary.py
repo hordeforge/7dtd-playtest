@@ -8,6 +8,7 @@ and the parsing is lintable and typed.
 A report whose summary is missing, malformed, or non-integral exits non-zero
 with nothing on stdout: the caller counts an unreadable lap as failed, so a
 silently-zeroed count would read as a clean lap.
+
 Usage: report_summary.py REPORT.json
 """
 
@@ -37,14 +38,26 @@ def counts(report: Path) -> tuple[int, ...]:
     return tuple(values)
 
 
+USAGE = "usage: report_summary.py REPORT.json"
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage: report_summary.py REPORT.json", file=sys.stderr)
+    args = argv[1:]
+    if args and args[0] in ("-h", "--help"):
+        print(USAGE)
+        print("\nPrints 'pass fail skip' from one orchestrator report JSON.")
+        print("Exit codes: 0 counts printed, 1 unreadable report, 2 bad usage.")
+        return 0
+    if len(args) != 1:
+        print(USAGE, file=sys.stderr)
         return 2
     try:
-        values = counts(Path(argv[1]))
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        print(f"report_summary: unreadable summary in {argv[1]}: {exc}", file=sys.stderr)
+        values = counts(Path(args[0]))
+    except OSError as exc:
+        print(f"report_summary: cannot read {args[0]}: {exc.strerror}", file=sys.stderr)
+        return 1
+    except (ValueError, TypeError, KeyError) as exc:
+        print(f"report_summary: unreadable summary in {args[0]}: {exc}", file=sys.stderr)
         return 1
     print(*values)
     return 0

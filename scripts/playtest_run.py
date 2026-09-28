@@ -2077,7 +2077,7 @@ def main(argv: list[str] | None = None) -> int:
         "--sandbox-name",
         default=os.environ.get("PLAYTEST_SANDBOX_NAME", "playtest"),
         help=(
-            "sandbox instance pair base name for --target sandbox "
+            "sandbox instance pair base name for a managed run "
             "(env PLAYTEST_SANDBOX_NAME; creates srv-<name> / client-<name>)"
         ),
     )
@@ -2099,8 +2099,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=("stock", "zdtd"),
         default=os.environ.get("PLAYTEST_SERVER", "stock"),
         help=(
-            "legacy server backend (env PLAYTEST_SERVER; default stock). "
-            "Prefer --target; kept for back-compat"
+            "which server is under test (env PLAYTEST_SERVER; default stock)"
         ),
     )
     ap.add_argument(

@@ -61,7 +61,9 @@ done
 
 [[ -n "$SUITE" ]] || { echo "capture_video: --suite is required" >&2; exit 2; }
 OUT="${OUT:-$ROOT/.local/capture/$SUITE-$STAMP}"
-RUNNER="${RUNNER:-$HERE/playtest_run.py --suite}"
+command -v uv >/dev/null 2>&1 || { echo "ERROR: uv is not on PATH; host Python goes through it (see README: Requirements)" >&2; exit 2; }
+PY=(uv run --locked --project "$ROOT" python)
+RUNNER="${RUNNER:-${PY[*]} $HERE/playtest_run.py --suite}"
 
 FPS="${CAPTURE_FPS:-4}"
 
@@ -78,7 +80,7 @@ CLIENT_LOG="${PLAYTEST_CLIENT_LOG:-$COMPAT_DEFAULT/pfx/drive_c/users/steamuser/A
 # writing that log, so a "newer than start" check passes against ITS marker and
 # the clip belongs to the wrong run. Same guard and reason as capture_frames.sh.
 runtime_rc=0
-python3 "$HERE/playtest_lock.py" live || runtime_rc=$?
+"${PY[@]}" "$HERE/playtest_lock.py" live || runtime_rc=$?
 case $runtime_rc in
 	0) : ;;
 	1)

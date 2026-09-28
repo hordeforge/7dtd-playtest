@@ -21,6 +21,11 @@ Staleness: if running=yes but heartbeat is older than PLAYTEST_LOCK_STALE_SEC
 (default 120s), and no live runtime process is present, another session may
 take over (documented reclaim). Fresh heartbeat means the holder is still
 alive; agents should wait.
+
+CLI (``playtest_lock.py --help``): ``wait`` blocks until a session could
+acquire, ``live`` probes the shared client. Both exit 0/1 on the question they
+answer and 2 on bad usage; with no command the usage text goes to stderr and
+the exit code is 2, so a bare invocation never reads as "free".
 """
 
 from __future__ import annotations
@@ -993,14 +998,25 @@ def main(argv: list[str] | None = None) -> int:
     it blocks nobody.
     """
     args = list(sys.argv[1:] if argv is None else argv)
-    if not args or args[0] in ("-h", "--help"):
-        sys.stdout.write(
-            "usage: playtest_lock.py wait [--timeout SEC] [--interval SEC] "
-            "[--path FILE]\n"
-            "       playtest_lock.py live\n"
-        )
+    usage = (
+        "usage: playtest_lock.py wait [--timeout SEC] [--interval SEC] "
+        "[--path FILE]\n"
+        "       playtest_lock.py live\n"
+    )
+    if args and args[0] in ("-h", "--help"):
+        sys.stdout.write(usage)
         return 0
+    if not args:
+        # No command is a usage error, not a successful no-op: a caller that
+        # polls `playtest_lock.py` with no arguments would read exit 0 as
+        # "the client is free".
+        sys.stderr.write(usage)
+        return 2
     if args[0] == "live":
+        if len(args) > 1:
+            sys.stderr.write("live takes no options\n")
+            sys.stderr.write(usage)
+            return 2
         try:
             live = client_running()
         except Exception as ex:
@@ -1009,6 +1025,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if live else 0
     if args[0] != "wait":
         sys.stderr.write("unknown command; expected 'wait' or 'live'\n")
+        sys.stderr.write(usage)
         return 2
     timeout_sec = 1800.0
     interval_sec = 10.0
@@ -1017,9 +1034,21 @@ def main(argv: list[str] | None = None) -> int:
     i = 0
     while i < len(rest):
         opt = rest[i]
+        if opt in ("-h", "--help"):
+            sys.stdout.write(
+                "usage: playtest_lock.py wait [--timeout SEC] [--interval SEC] "
+                "[--path FILE]\n"
+                "  --timeout SEC   give up waiting after this long (default 1800)\n"
+                "  --interval SEC  poll this often (default 10)\n"
+                "  --path FILE     lock file (env PLAYTEST_LOCK_FILE, default\n"
+                "                  ~/.cache/7dtd-playtest/playtest_running)\n"
+                "exit codes: 0 a session could acquire, 1 timed out, 2 bad usage\n"
+            )
+            return 0
         if opt in ("--timeout", "--interval", "--path"):
             if i + 1 >= len(rest):
                 sys.stderr.write(opt + " requires a value\n")
+                sys.stderr.write(usage)
                 return 2
             val = rest[i + 1]
             if opt == "--path":
@@ -1035,6 +1064,7 @@ def main(argv: list[str] | None = None) -> int:
             i += 2
             continue
         sys.stderr.write("unknown option " + opt + "\n")
+        sys.stderr.write(usage)
         return 2
     sid = new_session_id("waiter")
     ok = wait_until_can_start(
