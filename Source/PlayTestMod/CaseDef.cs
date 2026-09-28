@@ -26,6 +26,13 @@ namespace ZdtdPlaytest
     /// </summary>
     public sealed class CaseDef
     {
+        /// <summary>
+        /// Where <see cref="WalkEntity"/> spawns when the caller passes
+        /// <see cref="Vector3.zero"/>: in front of and above the player, clear
+        /// of the first-person camera.
+        /// </summary>
+        public static readonly Vector3 DefaultSpawnOffset = new Vector3(1.5f, 2f, 1.5f);
+
         public string Suite;
         public string Id;
         public string[] Tags = Array.Empty<string>();
@@ -399,9 +406,12 @@ namespace ZdtdPlaytest
         /// <param name="speed">Orbit angular rate around the spawn point, in
         /// radians per second. Ground speed is that rate times the fixed 3 m
         /// orbit radius, so this is not a metres-per-second value.</param>
-        /// <param name="spawnOffset">Accepted for the caller's readability and
-        /// not read: the act spawns at a fixed (1.5, 2, 1.5) offset from the
-        /// player, and the walk orbits that spawn point.</param>
+        /// <param name="spawnOffset">Offset from the player to spawn at, and
+        /// the centre of the orbit the walk follows. <see cref="Vector3.zero"/>
+        /// means "beside the player" and resolves to
+        /// <see cref="DefaultSpawnOffset"/>, so a caller that does not care
+        /// about placement still gets a creature clear of the camera instead of
+        /// one inside the player.</param>
         public static CaseDef WalkEntity(
             string suite,
             string id,
@@ -421,6 +431,11 @@ namespace ZdtdPlaytest
                 throw new ArgumentOutOfRangeException(nameof(holdSeconds), holdSeconds,
                     "CaseDef.WalkEntity(" + (suite ?? "") + "/" + (id ?? "")
                     + ") holdSeconds must be > 0");
+            if (!(clipFps > 0f))
+                throw new ArgumentOutOfRangeException(nameof(clipFps), clipFps,
+                    "CaseDef.WalkEntity(" + (suite ?? "") + "/" + (id ?? "")
+                    + ") clipFps must be > 0");
+            var spawnAt = spawnOffset == Vector3.zero ? DefaultSpawnOffset : spawnOffset;
             bool renderProbeLogged = false;
             float nextTraceAt = 1f;
             return Live(suite, id, new[] { "capture", "clip" },
@@ -435,7 +450,7 @@ namespace ZdtdPlaytest
                     // the client run it like a local entity: it grounds, its AI
                     // wanders and the Walk gait plays. That is exactly what a
                     // server-side spawn would give, without orchestrator plumbing.
-                    var spawned = Helpers.SpawnEntityNear(player, className, new Vector3(1.5f, 2f, 1.5f));
+                    var spawned = Helpers.SpawnEntityNear(player, className, spawnAt);
                     if (spawned == null) { ctx.Detail = "SpawnEntityNear(" + className + ") returned null"; ctx.IntA = -1; return; }
                     var alive = spawned as EntityAlive;
                     if (alive != null)
@@ -769,7 +784,7 @@ namespace ZdtdPlaytest
         /// surface of slopes and partial blocks; `World.GetHeight(x,z) + 1` is
         /// only the full-voxel fallback. Subtracting the capsule bottom from
         /// that surface puts the capsule, and therefore the authored feet, on
-        /// it.</summary>
+        /// it.</para></summary>
         static float GroundYFor(World world, EntityAlive alive, float x, float z)
         {
             // GetHeightAt is the terrain generator's uncarved heightmap. It

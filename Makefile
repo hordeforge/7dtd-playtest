@@ -155,6 +155,7 @@ GATES := \
 	test_version_surface.py \
 	test_version_surface_units.py \
 	test_scenario_provider_surface.py \
+	test_readme_surface.py \
 	test_chat_probe_surface.py \
 	test_mining_probe_surface.py \
 	test_player_survivability_surface.py \

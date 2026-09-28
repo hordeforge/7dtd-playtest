@@ -431,6 +431,13 @@ the run order that both `make test` and `make coverage` expand):
    install (`UV_VERSION`) to the `[tool.uv] required-version` floor in
    `pyproject.toml`, so a bump that moves one and not the other fails here.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
+3z. documented provider surface (`scripts/test_readme_surface.py`): every
+    `Helpers.` / `CaseDef.` / `Report.` / `PlayerSurvivability.` call the README
+    snippets show resolves to a public member of the mod assembly, every named
+    argument in those snippets is a real parameter, and every `new MiningSpec
+    { … }` field is a real public field. The README is the provider SDK's only
+    reference, so a snippet that names a member the dll does not export is a
+    doc bug an external author only discovers in their own build.
 3a. chat-probe surface (`scripts/test_chat_probe_surface.py`): the text a
     remote LAN player typed stays inside `ChatProbe`. A case detail reaches
     the run log, the JSON result event, the JUnit report and
