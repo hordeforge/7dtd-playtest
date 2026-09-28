@@ -7,10 +7,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 - One version per artifact. The client mod version lives in `ModInfo.xml`
   and `ModIdentity.Version`; git tags are annotated `vX.Y.Z` refs pointing
-  at the released commit (the stray lightweight `v0.7.2` predates this; see
-  its entry below). `scripts/test_version_surface.py` fails the offline
-  gates if these disagree, if the shipped manifest went stale, or if the
-  manifest version or any visible `vX.Y.Z` tag has no entry below.
+  at the released commit. Two tags are not: `v0.7.2` (see its entry below)
+  and `v0.13.0`, both cut lightweight, so they carry no tagger and no date.
+  `scripts/test_version_surface.py` fails the offline gates if these
+  disagree, if the shipped manifest went stale, if the manifest version or
+  any visible `vX.Y.Z` tag has no entry below, if a released entry has no
+  link definition, if the `[Unreleased]` compare link starts behind the
+  newest tag, or if a lightweight tag is not named here.
 - The host orchestrator package (`pyproject.toml`) is an unpublished,
   independently versioned helper; consumers interact with it through the
   stable log contract and exit codes documented in the README, not through
@@ -444,6 +447,27 @@ Migration, by symbol:
   than the raw string. Gated by `scripts/test_chat_probe_surface.py`.
 
 ### Fixed
+
+- **The two newest releases render as dead text in the changelog, and
+  "what changed since" started two releases ago.** `## [0.12.0]` and
+  `## [0.13.0]` had no `[x.y.z]:` link definition, so GitHub rendered the
+  literal text `[0.13.0]` where a reader clicking through to the release
+  expects a link, and the `[Unreleased]` compare range still began at
+  `v0.11.0`, so the two releases a consumer most likely wanted to diff
+  against were missing from it. Both links are defined now and the compare
+  range starts at the newest tag. `test_version_surface.py` now fails on
+  both shapes, and on a lightweight tag the notes do not name: the release
+  model above promises annotated `vX.Y.Z` refs, and `v0.13.0` is a
+  lightweight one like `v0.7.2`, so the promise was untrue of two of the
+  eight tags and nothing said so.
+
+- **The README's gameplay surface is labelled as the run it came from.** The
+  list carried a `v0.8.0` heading and a `83 pass / fail=0` figure with no
+  other dating, so a reader of a 0.13.0 README read a five-release-old run as
+  the current measurement, and the catalog it describes has grown since. The
+  heading now says which run verified it, that the counts are that run's
+  rather than a current one, and that [SCENARIOS.md](SCENARIOS.md) is the
+  current list.
 
 - **A vision review can no longer run without a deadline, and no longer runs
   on a model nobody named.** `review_video.py --timeout` reached
@@ -1525,9 +1549,12 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.13.0
+[0.12.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.12.0
 [0.11.0]: https://github.com/hordeforge/7dtd-playtest/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.10.0
 [0.9.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.9.0
+[0.8.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.8.0
 [0.7.2]: https://github.com/hordeforge/7dtd-playtest/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.7.1

@@ -463,9 +463,14 @@ the run order that both `make test` and `make coverage` expand):
    `### Removed` section carries the `**Breaking.**` marker the pre-1.0 policy
    in CHANGELOG.md requires and a table naming the replacement, no release
    repeats an impact heading, and CHANGELOG.md must carry an [Unreleased]
-   section plus the current release entry. Tags are read from the git common
+   section plus the current release entry, a `[<version>]:` link definition
+   for every released entry, an `[Unreleased]` compare link starting at the
+   newest tag, and a mention of every lightweight tag (the release model
+   promises annotated `vX.Y.Z` refs). Tags are read from the git common
    dir, so a linked worktree checks coverage instead of reporting it
-   inapplicable. It also pins the uv the workflows
+   inapplicable; whether a tag is lightweight is read from the ref's own
+   object type (`git for-each-ref`), falling back to the ref files where git
+   cannot be run. It also pins the uv the workflows
    install (`UV_VERSION`) to the `[tool.uv] required-version` floor in
    `pyproject.toml`, so a bump that moves one and not the other fails here.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)

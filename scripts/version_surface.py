@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 TAG_RE = re.compile(r"v(\d+\.\d+\.\d+)")
@@ -75,32 +76,85 @@ def _common_git_dir(git_dir: Path) -> Path:
     return target if target.is_absolute() else (git_dir / target).resolve()
 
 
-def discover_tag_versions(root: Path) -> list[str]:
-    """X.Y.Z versions of the local ``vX.Y.Z`` tags, oldest first.
+def _tag_object_types(root: Path) -> dict[str, str] | None:
+    """Tag name -> the object its ref names, read from git itself.
 
-    Reads refs straight off disk so the gate stays offline and dependency-
-    free; returns [] where no git metadata is reachable (tarball download,
-    shallow CI checkout that did not fetch tags), which makes the tag-coverage
-    check vacuous there rather than wrong.
+    ``%(objecttype)`` is the only honest source for this: an annotated tag's
+    ref resolves to a tag object, and a loose ref file holding a raw sha
+    says nothing about which kind of object that sha names, because a ref
+    written to name a tag object directly looks the same as one naming a
+    commit. None when git cannot be run here (tarball download, a synthetic
+    tree in the units), where the caller falls back to reading the refs.
+    """
+    try:
+        done = subprocess.run(
+            ["git", "for-each-ref", "--format=%(refname:short) %(objecttype)", "refs/tags"],
+            cwd=root,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return None
+    if done.returncode != 0:
+        return None
+    types: dict[str, str] = {}
+    for line in done.stdout.splitlines():
+        name, _, object_type = line.strip().partition(" ")
+        if name:
+            types[name] = object_type
+    return types or None
+
+
+def _tag_refs_from_disk(root: Path) -> dict[str, bool]:
+    """Local tag name -> whether it is a lightweight ref, read off disk.
+
+    An annotated tag's loose ref is a ``ref: refs/tags/...`` indirection to
+    the tag object, and its packed line is followed by the ``^<sha>`` peel
+    of the commit it names. A lightweight ref has neither. A loose ref
+    holding a raw sha is a lightweight ref only when the sha turns out to
+    name a commit, which the object database has to answer; where git cannot
+    be asked, the ref is read as lightweight so the caller checks the
+    changelog for it rather than passing it silently.
     """
     private = _git_dir(root)
     if private is None:
-        return []
+        return {}
     git_dir = _common_git_dir(private)
-    names: set[str] = set()
+    lightweight: dict[str, bool] = {}
     tags_dir = git_dir / "refs" / "tags"
     if tags_dir.is_dir():
-        names.update(
-            path.relative_to(tags_dir).as_posix()
-            for path in tags_dir.rglob("*")
-            if path.is_file()
-        )
+        for path in tags_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            name = path.relative_to(tags_dir).as_posix()
+            value = path.read_text(encoding="utf-8").strip()
+            lightweight[name] = not value.startswith("ref:")
     packed = git_dir / "packed-refs"
     if packed.is_file():
-        for line in packed.read_text(encoding="utf-8").splitlines():
-            fields = line.split(maxsplit=1)  # "<sha> <ref>"; peel lines "^<sha>"
-            if len(fields) == 2 and fields[1].startswith("refs/tags/"):
-                names.add(fields[1].removeprefix("refs/tags/").strip())
+        lines = packed.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith("^"):
+                continue
+            fields = line.split(maxsplit=1)  # "<sha> <ref>"
+            if len(fields) != 2 or not fields[1].startswith("refs/tags/"):
+                continue
+            name = fields[1].removeprefix("refs/tags/").strip()
+            following = lines[index + 1] if index + 1 < len(lines) else ""
+            lightweight[name] = not following.startswith("^")
+    return lightweight
+
+
+def _tag_refs(root: Path) -> dict[str, bool]:
+    """Local tag name -> whether it is a lightweight ref, {} without git."""
+    types = _tag_object_types(root)
+    if types is None:
+        return _tag_refs_from_disk(root)
+    return {name: object_type != "tag" for name, object_type in types.items()}
+
+
+def _ordered_versions(names: set[str]) -> list[str]:
     versions = [match.group(1) for name in names if (match := TAG_RE.fullmatch(name))]
     # Oldest first, by component: sorted() on the strings puts "1.10.0"
     # before "1.9.0", so the tenth minor of a release sorts as older than
@@ -108,10 +162,75 @@ def discover_tag_versions(root: Path) -> list[str]:
     return sorted(versions, key=lambda v: tuple(int(part) for part in v.split(".")))
 
 
+def discover_tag_versions(root: Path) -> list[str]:
+    """X.Y.Z versions of the local ``vX.Y.Z`` tags, oldest first.
+
+    Returns [] where no git metadata is reachable.
+    """
+    return _ordered_versions(set(_tag_refs(root)))
+
+
+def discover_lightweight_tag_versions(root: Path) -> list[str]:
+    """X.Y.Z versions whose local ``vX.Y.Z`` tag is a lightweight ref."""
+    return _ordered_versions(
+        {name for name, light in _tag_refs(root).items() if light}
+    )
+
+
 def uncovered_tag_versions(tag_versions: list[str], headings: list[str]) -> list[str]:
     """Tagged versions without a ``## [<version>]`` changelog entry."""
     known = set(headings)
     return [version for version in tag_versions if version not in known]
+
+
+LINK_DEF_RE = re.compile(r"^\[([^\]]+)\]:\s*(\S+)\s*$", re.MULTILINE)
+COMPARE_BASE_RE = re.compile(r"/compare/v(\d+\.\d+\.\d+)\.\.\.")
+
+
+def unlinked_release_headings(changelog: str) -> list[str]:
+    """Released ``## [x]`` entries with no ``[x]:`` link definition.
+
+    A bracket heading is a reference-style link: without the definition
+    GitHub renders the literal text ``[0.13.0]`` instead of a link, so the
+    newest releases read as unlinked while the oldest, defined back when
+    they were cut, still work. A reader following the changelog to find out
+    what changed in the release they just installed finds nothing.
+    """
+    defined = {match.group(1) for match in LINK_DEF_RE.finditer(changelog)}
+    return [
+        name
+        for name in re.findall(r"^##\s+\[([^\]]+)\]", changelog, flags=re.MULTILINE)
+        if name != "Unreleased" and name not in defined
+    ]
+
+
+def unreleased_compare_base(changelog: str) -> str | None:
+    """The tag the ``[Unreleased]`` compare link starts from, if it has one.
+
+    None when the link is absent, which is a different defect from a stale
+    one: the reader gets no "what changed since" range at all.
+    """
+    for match in LINK_DEF_RE.finditer(changelog):
+        if match.group(1) == "Unreleased":
+            found = COMPARE_BASE_RE.search(match.group(2))
+            return found.group(1) if found else None
+    return None
+
+
+def undocumented_lightweight_tags(changelog: str, lightweight: list[str]) -> list[str]:
+    """Lightweight tags the changelog does not name as ``vX.Y.Z``.
+
+    The release model promises annotated tags. A lightweight ref carries no
+    tagger or date, so the notes have to say which ones are strays and
+    whether the ref is a distinct release; otherwise the promise reads as
+    true of the whole history. The link definitions are stripped first: a
+    ``[0.7.2]: .../tag/v0.7.2`` URL says the tag exists, not that the notes
+    mention what kind of ref it is.
+    """
+    prose = "\n".join(
+        line for line in changelog.splitlines() if LINK_DEF_RE.fullmatch(line) is None
+    )
+    return [version for version in lightweight if f"v{version}" not in prose]
 
 
 def _release_spans(changelog: str) -> list[tuple[int, int, str]]:

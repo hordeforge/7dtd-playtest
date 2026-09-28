@@ -3,9 +3,11 @@
 
 The released version is declared in three places (ModInfo.xml, ModIdentity.cs
 Version, dist manifest) and described by CHANGELOG.md. This gate fails when
-they drift, when a visible vX.Y.Z git tag has no changelog entry, or when the
-shipped dist manifest went stale, so a bump cannot ship half-applied or
-without consumer-facing notes.
+they drift, when a visible vX.Y.Z git tag has no changelog entry, when a
+release entry has no link definition, when the [Unreleased] compare link
+starts behind the newest tag, or when a lightweight tag is not named in the
+notes, so a bump cannot ship half-applied, unlinked, or without
+consumer-facing notes.
 """
 from __future__ import annotations
 
@@ -15,12 +17,16 @@ from pathlib import Path
 
 from version_surface import (
     BREAKING_MARKER,
+    discover_lightweight_tag_versions,
     discover_tag_versions,
     duplicate_impact_headings,
     required_uv_floor,
     uncovered_tag_versions,
     undeclared_breaking_sections,
+    undocumented_lightweight_tags,
+    unlinked_release_headings,
     unnamed_replacement_rows,
+    unreleased_compare_base,
     uv_pin_problems,
 )
 
@@ -115,6 +121,40 @@ def main() -> int:
         print(f"OK all {len(tag_versions)} vX.Y.Z tags have changelog entries")
     else:
         print("OK no vX.Y.Z tags visible; tag-coverage check not applicable")
+
+    unlinked = unlinked_release_headings(changelog)
+    assert not unlinked, (
+        "CHANGELOG.md has a released entry with no `[<version>]:` link "
+        "definition: "
+        + ", ".join(unlinked)
+        + "; a bracket heading is a reference-style link, so it renders as "
+        "the literal text `[x.y.z]` and a reader finds no notes for that "
+        "release"
+    )
+    print("OK every released entry has a link definition")
+
+    base = unreleased_compare_base(changelog)
+    if tag_versions:
+        newest = tag_versions[-1]
+        assert base == newest, (
+            "CHANGELOG.md [Unreleased] compares from "
+            + (f"v{base}" if base else "nothing")
+            + f" but the newest tag is v{newest}; the 'what changed since the "
+            "last release' range must start at the last release"
+        )
+        print(f"OK [Unreleased] compares from the newest tag v{newest}")
+
+    lightweight = discover_lightweight_tag_versions(ROOT)
+    if lightweight:
+        unnamed = undocumented_lightweight_tags(changelog, lightweight)
+        assert not unnamed, (
+            "CHANGELOG.md does not name the lightweight tag(s): "
+            + ", ".join("v" + version for version in unnamed)
+            + "; a lightweight ref carries no tagger or date, so the release "
+            "model's annotated-tag promise is untrue of it unless the notes say "
+            "so"
+        )
+        print(f"OK the {len(lightweight)} lightweight tag(s) are documented")
 
     print(f"OK mod version {manifest} matches ModIdentity.Version")
     print("OK CHANGELOG.md has [Unreleased] and the current release entry")

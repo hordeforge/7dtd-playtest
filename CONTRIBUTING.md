@@ -50,7 +50,11 @@ Run `make check`. Beyond style, the gates enforce repo conventions that are
 easy to miss and will fail CI otherwise:
 
 - **Changelog:** add a note under the existing `## [Unreleased]` heading in
-  CHANGELOG.md. `test_version_surface.py` fails without one.
+  CHANGELOG.md. `test_version_surface.py` fails without one. A release also
+  needs a `[<version>]:` link definition at the bottom (a bracket heading is
+  a reference-style link and renders as literal `[x.y.z]` without one), and
+  `[Unreleased]` has to compare from the newest tag, not the one that was
+  newest when the link was last edited.
 - **Catalog/doc sync:** adding or changing a case in
   `Source/PlayTestMod/Catalog.cs` requires the matching row in SCENARIOS.md;
   live rows and counts total must match (`test_catalog_surface.py`).

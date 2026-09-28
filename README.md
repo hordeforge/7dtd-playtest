@@ -179,7 +179,11 @@ reports a wall-time axis (server session seconds, from the orchestrator
 reports) - a cost observation, never a per-case finding (zdtd being faster is
 a known divergence, not a mismatch).
 
-v0.8.0 gameplay surface (stock motor / stock attack / real C2S, **not** tele-fakes):
+Gameplay surface as verified by the v0.8.0 live run (stock motor / stock
+attack / real C2S, **not** tele-fakes). The pass counts below are that run's,
+not a current measurement; the catalog has grown since, and
+[SCENARIOS.md](SCENARIOS.md) is the current list, kept in step with
+`Catalog.cs` by `test_catalog_surface.py`:
 - locomotion + jump + stamina; entity/block melee; **ranged** (pipe pistol Meta)
 - **ItemDropServer**, **loot Collect**, **keystone place**, eat, dig/place
 - **creative** UI; **craft wooden club** (queue + output); **campfire TE** place

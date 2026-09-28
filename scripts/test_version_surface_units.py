@@ -24,12 +24,16 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from version_surface import (  # noqa: E402
     BREAKING_MARKER,
+    discover_lightweight_tag_versions,
     discover_tag_versions,
     duplicate_impact_headings,
     required_uv_floor,
     uncovered_tag_versions,
     undeclared_breaking_sections,
+    undocumented_lightweight_tags,
+    unlinked_release_headings,
     unnamed_replacement_rows,
+    unreleased_compare_base,
     uv_pin_problems,
 )
 
@@ -37,6 +41,13 @@ _ROOT = Path(__file__).resolve().parents[1]
 GATE = Path(__file__).resolve().parent / "test_version_surface.py"
 UV_FLOOR = "0.12.13"
 PYPROJECT = '[tool.uv]\nrequired-version = ">=0.12.13,<0.13"\n'
+# The synthetic tag fixture make_root writes: v0.8.0 annotated, v9.9.9 loose
+# and therefore lightweight, so v9.9.9 is the newest tag.
+LIGHTWEIGHT_TAG = "9.9.9"
+NEWEST_TAG = LIGHTWEIGHT_TAG
+REPO = "https://github.com/hordeforge/7dtd-playtest"
+COMPARE_URL = f"{REPO}/compare/v%s...HEAD"
+RELEASE_URL = f"{REPO}/releases/tag/v%s"
 
 
 def make_uv_workflow(path: Path, *, uv_version: str, inline: bool) -> None:
@@ -120,16 +131,35 @@ def assert_toolchain_pins() -> None:
     )
 
 
-def make_git_dir(git_dir: Path, loose: dict[str, str], packed: list[tuple[str, str]]) -> None:
+def make_git_dir(
+    git_dir: Path,
+    loose: dict[str, str],
+    packed: list[tuple[str, str]],
+    *,
+    annotated_loose: set[str] | None = None,
+    annotated_packed: set[str] | None = None,
+) -> None:
+    """Write refs/tags and packed-refs for a synthetic repository.
+
+    A loose annotated tag's ref file is a ``ref: refs/tags/...`` indirection
+    to the tag object; a loose lightweight ref names the commit itself. In
+    packed-refs the two are told apart by the ``^<sha>`` peel of the commit
+    that follows an annotated tag's own line, so the peel is written per tag
+    rather than once at the end.
+    """
+    loose_annotated = annotated_loose or set()
+    packed_annotated = annotated_packed or set()
     tags = git_dir / "refs" / "tags"
     tags.mkdir(parents=True)
     for name, sha in loose.items():
-        (tags / name).write_text(sha + "\n", encoding="utf-8")
-    lines = [f"{sha} refs/tags/{name}" for name, sha in packed]
+        value = f"ref: refs/tags/{name}" if name in loose_annotated else sha
+        (tags / name).write_text(value + "\n", encoding="utf-8")
+    lines: list[str] = []
+    for name, sha in packed:
+        lines.append(f"{sha} refs/tags/{name}")
+        if name in packed_annotated:
+            lines.append("^" + "b" * 40)
     lines.append(f"{'a' * 40} refs/heads/main")
-    if packed:
-        # Annotated-tag peel line: must not be read as a ref name.
-        lines.append("^" + "b" * 40)
     (git_dir / "packed-refs").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -142,6 +172,7 @@ def make_root(
     removed_section: bool = False,
     breaking: bool = True,
     replacement_table: bool = True,
+    lightweight: list[str] | None = None,
 ) -> None:
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(GATE, root / "scripts" / "test_version_surface.py")
@@ -175,7 +206,37 @@ def make_root(
     (root / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
     make_uv_workflow(root / ".github" / "workflows" / "ci.yml", uv_version=UV_FLOOR, inline=False)
     if git:
-        make_git_dir(root / ".git", {"v9.9.9": "c" * 40}, [("v0.8.0", "d" * 40)])
+        make_git_dir(
+            root / ".git",
+            {"v9.9.9": "c" * 40},
+            [("v0.8.0", "d" * 40)],
+            annotated_packed={"v0.8.0"},
+        )
+    # The released entries carry link definitions, [Unreleased] compares
+    # from the newest tag, and any lightweight tag is named, so a case that
+    # is about some other rule does not fail on these three first. The tag
+    # fixture below is v0.8.0 (annotated) and v9.9.9 (lightweight), so v9.9.9
+    # is the newest tag whatever headings a case declares.
+    links = [f"[Unreleased]: {COMPARE_URL % NEWEST_TAG}"]
+    links += [f"[{h}]: {RELEASE_URL % h}" for h in headings]
+    (root / "CHANGELOG.md").write_text(
+        (root / "CHANGELOG.md").read_text(encoding="utf-8") + "\n".join(links) + "\n",
+        encoding="utf-8",
+    )
+    named = lightweight if lightweight is not None else ([LIGHTWEIGHT_TAG] if git else [])
+    if named:
+        path = root / "CHANGELOG.md"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace(
+                "## [Unreleased]\n",
+                "## [Unreleased]\n\n"
+                + ", ".join(f"`v{tag}` is a lightweight tag" for tag in named)
+                + "\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
 
 
 def run_gate(root: Path) -> subprocess.CompletedProcess[str]:
@@ -318,12 +379,81 @@ def main() -> int:
         assert "one section per impact class" in proc.stderr, proc.stderr
         print("OK the gate fails a release that repeats an impact heading")
 
+        kinds = base / "kinds"
+        make_git_dir(
+            kinds / ".git",
+            {"v1.2.3": "a" * 40, "v1.2.4": "b" * 40},
+            [("v0.8.0", "d" * 40), ("v0.9.0", "e" * 40)],
+            annotated_loose={"v1.2.3"},
+            annotated_packed={"v0.9.0"},
+        )
+        assert discover_lightweight_tag_versions(kinds) == ["0.8.0", "1.2.4"], (
+            discover_lightweight_tag_versions(kinds)
+        )
+        print("OK a loose ref indirection and a peel line mark an annotated tag")
+
+        no_git = base / "no-git"
+        no_git.mkdir()
+        assert discover_lightweight_tag_versions(no_git) == []
+        print("OK no git metadata means the lightweight check is vacuous")
+
+        unlinked_root = base / "unlinked"
+        make_root(unlinked_root, version="0.8.0", headings=["0.8.0", "9.9.9"])
+        path = unlinked_root / "CHANGELOG.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("[0.8.0]: ", "[0.8.0] "),
+            encoding="utf-8",
+        )
+        proc = run_gate(unlinked_root)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "no `[<version>]:` link definition" in proc.stderr, proc.stderr
+        print("OK the gate fails a release entry with no link definition")
+
+        behind = base / "compare-behind"
+        make_root(behind, version="0.8.0", headings=["0.8.0", "9.9.9"])
+        path = behind / "CHANGELOG.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                f"[Unreleased]: {COMPARE_URL % NEWEST_TAG}",
+                f"[Unreleased]: {COMPARE_URL % '0.8.0'}",
+            ),
+            encoding="utf-8",
+        )
+        proc = run_gate(behind)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "newest tag is v9.9.9" in proc.stderr, proc.stderr
+        print("OK the gate fails an [Unreleased] range that starts behind the newest tag")
+
+        unsaid = base / "unsaid-lightweight"
+        make_root(
+            unsaid,
+            version="0.8.0",
+            headings=["0.8.0", "9.9.9"],
+            lightweight=[],
+        )
+        proc = run_gate(unsaid)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "lightweight tag" in proc.stderr and "v9.9.9" in proc.stderr, proc.stderr
+        print("OK the gate fails a lightweight tag the notes do not name")
+
     real = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert undeclared_breaking_sections(real) == [], undeclared_breaking_sections(real)
     assert unnamed_replacement_rows(real) == [], unnamed_replacement_rows(real)
     assert duplicate_impact_headings(real) == [], duplicate_impact_headings(real)
     assert "### Removed" in real, "CHANGELOG.md must keep the removal this gate polices"
     print("OK the shipped changelog declares every removal and repeats no heading")
+
+    assert unlinked_release_headings(real) == [], unlinked_release_headings(real)
+    tags = discover_tag_versions(_ROOT)
+    assert tags, "this repository ships releases; no tag visible means none was fetched"
+    assert unreleased_compare_base(real) == tags[-1], (
+        f"[Unreleased] compares from {unreleased_compare_base(real)!r}, "
+        f"newest tag is v{tags[-1]}"
+    )
+    light = discover_lightweight_tag_versions(_ROOT)
+    assert light, "the changelog names lightweight tags; none are visible here"
+    assert undocumented_lightweight_tags(real, light) == []
+    print("OK every shipped release links, and every lightweight tag is named")
 
     with tempfile.TemporaryDirectory(prefix="version-surface-uv-") as td:
         base = Path(td)
