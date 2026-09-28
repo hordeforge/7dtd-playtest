@@ -100,6 +100,18 @@ MAX_INTENT_LIST_ITEMS = 50
 MAX_INTENT_TOTAL_CHARS = 16000
 
 _PROVIDER_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# A model id leaves the machine twice: on the gateway argv and, once the review
+# is stamped, in the evidence document. Keep it a plain name, the same shape
+# the provider name is held to.
+_MODEL_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
+
+# The local wall clock on a gateway call is the whole cost cap this tool owns:
+# past it the subprocess is killed and no verdict is billed to a human waiting.
+# NaN and infinity are the values that defeat it (subprocess adds them to the
+# current time and its own deadline check never fires), so both are refused
+# rather than read as "wait forever".
+MIN_TIMEOUT_SECONDS = 1.0
+MAX_TIMEOUT_SECONDS = 900.0
 
 RESULT_KEYS = (
     "summary",
@@ -532,10 +544,11 @@ def run_review(
 ) -> dict[str, object]:
     """Submit the clip plus recorded intent via deadeye, return the envelope.
 
-    Order matters: consent gate, local intent validation, clip existence,
-    gateway availability, disclosure, submission, structural validation. A
-    failure at any step raises one message the caller can act on and preserves no
-    partial verdict as a completed review.
+    Order matters: consent gate, request validation (provider, model, timeout),
+    local intent validation, clip existence, gateway availability, disclosure,
+    submission, structural validation. A failure at any step raises one message
+    the caller can act on and preserves no partial verdict as a completed
+    review.
     """
     if not allow_network:
         raise ReviewError(
@@ -546,6 +559,8 @@ def run_review(
     if intent_path is not None and intent_text is not None:
         raise ReviewError("takes exactly one of --intent PATH or --intent-text JSON, never both")
     provider = provider_token(provider)
+    model = model_token(model)
+    timeout_seconds = bounded_timeout(timeout_seconds)
     if intent_path is not None:
         intent, _ = load_intent_file(Path(intent_path))
     elif intent_text is not None:
@@ -564,7 +579,7 @@ def run_review(
 
     if notify is not None:
         notify(f"gateway: {GATEWAY} (provider {provider})")
-        notify(f"model: {model or 'default per provider'}")
+        notify(f"model: {model or 'provider default (unpinned; it can change between runs)'}")
         # The whole clip directory is submitted, not only the frames: the
         # capture scripts leave the run log and a copy of the client log
         # beside the mp4, and the client log carries whatever the game and
@@ -600,10 +615,15 @@ def run_review(
     try:
         result = execute(argv, timeout_seconds)
         if result.returncode != 0:
-            # Both streams and their tail: a gateway whose stderr is a
-            # progress trace and whose reason (a provider 401, a prompt-size
-            # refusal) is on stdout would otherwise report the trace's last
-            # line as the cause.
+            # A refusal is the provider's own prose, so it is model- and
+            # provider-shaped text on its way to the operator's terminal: it
+            # reaches the reader through `terminal_safe` like any other
+            # untrusted string, not raw because it arrived on stderr.
+            #
+            # Both streams, not one of them and not just their last line: a
+            # gateway whose stderr is a progress trace and whose reason (a
+            # provider 401, a prompt-size refusal) is on stdout would
+            # otherwise report the trace's last line as the cause.
             message = " | ".join(
                 part
                 for part in (
@@ -619,8 +639,11 @@ def run_review(
         try:
             envelope = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
+            # The decode error quotes the offending output, which is a fragment
+            # of whatever the provider sent.
             raise ReviewError(
-                f"the {GATEWAY} gateway returned a non-JSON envelope: {exc}"
+                f"the {GATEWAY} gateway returned a non-JSON envelope: "
+                f"{terminal_safe(str(exc))}"
             ) from exc
         if not isinstance(envelope, dict) or envelope.get("kind") != "deadeye-review":
             raise ReviewError(
@@ -636,6 +659,16 @@ def run_review(
         _discard_unvalidated(output, output_existed)
         raise
     envelope["review_validated"] = True
+    # What was asked for, next to what the gateway reports it reached: a
+    # reader holding two reviews weeks apart needs to know whether the same
+    # model answered both, and `model: null` is the honest record of a request
+    # that named no version.
+    envelope["review_request"] = {
+        "provider": provider,
+        "model": model,
+        "model_pinned": model is not None,
+        "timeout_seconds": timeout_seconds,
+    }
     envelope["intent_summary"] = {
         "purpose": intent.purpose,
         "suite": intent.suite,
@@ -697,4 +730,42 @@ def provider_token(provider: str) -> str:
             "and underscore"
         )
     return provider
+
+
+def model_token(model: str | None) -> str | None:
+    """The requested model identifier, or ``None`` for the provider's own default.
+
+    An unpinned default is the one version fact this tool cannot recover after
+    the fact: the gateway reports the model it reached, but nothing downstream
+    can tell a review of the provider's current alias from one of a model that
+    has since moved. The request is stamped into the evidence either way, so
+    `None` reads as the drift it is.
+    """
+    if model is None:
+        return None
+    token = model.strip()
+    if not _MODEL_TOKEN.fullmatch(token):
+        raise ReviewError(
+            f"--model {model!r} is not a plain model identifier; it reaches the "
+            "gateway argv and the evidence document, so it may hold only "
+            "letters, digits, dot, dash, underscore, colon and slash"
+        )
+    return token
+
+
+def bounded_timeout(timeout: float) -> float:
+    """A finite wall clock within the bounds this tool accepts.
+
+    `float("nan")` and `float("inf")` both defeat the only deadline in the
+    path: `subprocess` adds the value to the current time and its own check
+    (`endtime - now <= 0`) never fires, so the review runs until someone
+    interrupts it, with the upload already paid for.
+    """
+    if not math.isfinite(timeout) or not MIN_TIMEOUT_SECONDS <= timeout <= MAX_TIMEOUT_SECONDS:
+        raise ReviewError(
+            f"--timeout must be a finite number of seconds within "
+            f"{MIN_TIMEOUT_SECONDS:g}-{MAX_TIMEOUT_SECONDS:g}, got {timeout!r}; "
+            "a deadline that never fires is how a review outlives its cost cap"
+        )
+    return timeout
 

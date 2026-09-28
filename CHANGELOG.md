@@ -413,6 +413,24 @@ Migration, by symbol:
 
 ### Fixed
 
+- **A vision review can no longer run without a deadline, and no longer runs
+  on a model nobody named.** `review_video.py --timeout` reached
+  `subprocess.run` unvalidated: `nan` and `inf` are added to the current time
+  and the child's own deadline check never fires, so the one cost cap on a
+  paid upload could be removed by a value no human typed. `--timeout` is now a
+  finite 1-900 seconds, refused before the gateway is invoked, and the value in
+  force is recorded in the evidence. `--model` is held to the same plain-name
+  rule the provider name already had (it reaches the gateway argv and the
+  evidence document), and every validated envelope carries a `review_request`
+  block recording the provider, the model asked for and whether it was pinned,
+  so an unpinned provider default reads as the drift it is rather than as two
+  comparable reviews.
+- **A gateway refusal can no longer repaint the operator's terminal.** The
+  refusal message and the non-JSON envelope error carried provider prose (and,
+  in the second case, a fragment of the provider's own response) straight to
+  stderr, while the result path flattened the same class of text through
+  `terminal_safe`. Both now go through it, so an escape sequence or a forged
+  `PASS` line in a refusal is flattened like any other model output.
 - **A Unicode line separator in chat text can no longer forge a log line.**
   `str.splitlines()` also breaks on U+000B, U+000C, U+001C-U+001E, NEL,
   U+2028 and U+2029, and the game's logger emits none of them, so a peer who

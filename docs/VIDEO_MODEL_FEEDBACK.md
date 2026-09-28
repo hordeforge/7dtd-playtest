@@ -163,9 +163,13 @@ The gateway writes the evidence document, at `--output PATH` (default:
 
 `review_video.py` passes that path through, refuses a returned envelope that
 is not a `deadeye-review` or whose `result` fails this repo's validator, and
-stamps the envelope it returns with `review_validated` and an
-`intent_summary` (`purpose`, `suite`, `case`) so a reader can tell a
-locally-validated result from an unchecked one.
+stamps the envelope it returns with `review_validated`, a
+`review_request` (`provider`, the `model` asked for, `model_pinned`, the
+`timeout_seconds` in force) and an `intent_summary` (`purpose`, `suite`,
+`case`) so a reader can tell a locally-validated result from an unchecked one,
+and can tell two reviews apart when the provider's default model moved between
+them. An omitted `--model` is recorded as `model: null`, which is the honest
+record of an unpinned request.
 
 A later review never overwrites an earlier one by default (`--force` is the
 only way it can); disagreement across repeated reviews is preserved and
@@ -242,16 +246,18 @@ Three integration points, deliberately the only three:
 | intent lacks `purpose` | Refuse locally, name the missing field |
 | intent field, list, total, or file over its cap | Refuse locally before the upload, naming the field and the limit |
 | `--provider` is not a plain filename token | Refuse before the review; it becomes part of the evidence filename, which a failed review deletes |
+| `--model` is not a plain model identifier | Refuse before the review; it reaches the gateway argv and the evidence document |
+| `--timeout` is not a finite 1-900s | Refuse before the review; `nan`/`inf` are deadlines that never fire, so the upload would outlive the only cost cap on the call |
 | gateway not installed | Refuse before any upload, naming `deadeye` and its install hint |
-| provider/model not configured | The gateway refuses; its own last line is reported verbatim, never replaced by a local guess |
+| provider/model not configured | The gateway refuses; its own last line is reported as it stands (flattened for the terminal), never replaced by a local guess |
 | clip exceeds provider's frame/size limit | The gateway samples down and records what was dropped in its evidence; this repo adds nothing to and drops nothing from that record |
 | provider cannot ingest actual frames/video | The gateway refuses the review; a stills-incapable transcription is not a substitute |
-| provider timeout, rate limit, or refusal | Exit non-zero; no partial verdict is preserved as a completed review |
+| provider timeout, rate limit, or refusal | Exit non-zero; no partial verdict is preserved as a completed review; the gateway's last line is provider prose and reaches the operator through `terminal_safe`, not raw |
 | model returns invalid structure | Preserve a redacted raw response only when `--keep-raw-response` was passed; fail schema validation, and leave no evidence file behind |
 | usage/cost metadata unavailable | Mark unavailable rather than estimated |
 | repeated reviews of the same clip disagree | Preserve each, surface the disagreement |
 | model says the clip "looks right" | Record the wording as advisory only; no case's result changes |
-| model output carries terminal control characters or floods the screen | `terminal_safe` flattens C0/C1 control characters and newlines and truncates at 500 characters before printing; the JSON envelope is unaffected |
+| model output carries terminal control characters or floods the screen | `terminal_safe` flattens C0/C1 control characters and newlines and truncates at 500 characters before printing, on the result path and on the refusal path alike; the JSON envelope is unaffected |
 | human disagrees with the model | Human sign-off controls acceptance; the disagreement itself is retained as evaluation evidence |
 
 ## Implementation

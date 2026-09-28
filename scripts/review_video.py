@@ -24,6 +24,8 @@ from pathlib import Path
 from video_review import (
     DEFAULT_PROVIDER,
     DEFAULT_TIMEOUT_SECONDS,
+    MAX_TIMEOUT_SECONDS,
+    MIN_TIMEOUT_SECONDS,
     ReviewError,
     default_output,
     run_review,
@@ -63,7 +65,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--provider", default=DEFAULT_PROVIDER, help=f"(default {DEFAULT_PROVIDER})"
     )
-    parser.add_argument("--model", default=None, help="provider model identifier")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "provider model identifier; omit it and the provider's current "
+            "default answers, which is recorded in the evidence as unpinned"
+        ),
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -89,7 +98,13 @@ def main(argv: list[str] | None = None) -> int:
         help="pass --force to the gateway CLI",
     )
     parser.add_argument(
-        "--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS, help="seconds to wait"
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help=(
+            f"seconds to wait ({MIN_TIMEOUT_SECONDS:g}-{MAX_TIMEOUT_SECONDS:g}, "
+            "finite); a value outside that range is refused"
+        ),
     )
     parser.add_argument("--json", action="store_true", help="print the full evidence envelope")
     args = parser.parse_args(argv)
@@ -138,6 +153,9 @@ def _print_result(envelope: dict[str, object], output: Path) -> int:
             description = issue.get("description")
             text = description if isinstance(description, str) else str(issue)
             print(f"issue: {terminal_safe(text)}")
+    request = envelope.get("review_request")
+    if isinstance(request, dict) and request.get("model"):
+        print(f"model: {terminal_safe(str(request['model']))}")
     print(f"confidence: {confidence:g} (advisory only; a human accepts the clip)")
     print(f"tokens: {_token_count(envelope)}")
     print(f"evidence: {output}")

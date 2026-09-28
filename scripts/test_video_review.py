@@ -202,6 +202,79 @@ def test_a_provider_name_cannot_escape_the_clip_folder(tmp_path: Path) -> None:
     assert video_review.default_output(clip, "gemini-2.5-pro").parent == clip
 
 
+def test_a_timeout_that_never_fires_is_refused_before_the_upload(tmp_path: Path) -> None:
+    """`nan` and `inf` are the deadlines that do not expire: subprocess adds
+    them to the current time and its own check never fires, so the review
+    would outlive the only cost cap on the call."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    gateway = _FakeGateway()
+    for hostile in (float("nan"), float("inf"), float("-inf"), 0.0, -5.0, 10_000.0):
+        try:
+            run_review(
+                clip, intent_path=intent, allow_network=True,
+                timeout_seconds=hostile, runner=gateway,
+            )
+        except ReviewError as exc:
+            assert "finite" in str(exc) or "within" in str(exc)
+        else:
+            raise AssertionError(f"timeout {hostile!r} was accepted")
+    assert gateway.calls == [], "an unbounded review must not reach the gateway"
+    assert video_review.bounded_timeout(120.0) == 120.0
+
+
+def test_a_model_identifier_must_be_a_plain_name(tmp_path: Path) -> None:
+    """The model id lands on the gateway argv and in the evidence document."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    gateway = _FakeGateway()
+    for hostile in ("", "  ", "gemini 2.5 pro", "m;rm -rf /", "a" * 200, "\x1b[31m"):
+        try:
+            run_review(
+                clip, intent_path=intent, allow_network=True, model=hostile, runner=gateway
+            )
+        except ReviewError as exc:
+            assert "plain model identifier" in str(exc)
+        else:
+            raise AssertionError(f"model {hostile!r} was accepted")
+    assert gateway.calls == [], "a malformed model id must not reach the gateway"
+    assert video_review.model_token("gemini-2.5-pro") == "gemini-2.5-pro"
+    assert video_review.model_token("anthropic/claude-opus-4") == "anthropic/claude-opus-4"
+    assert video_review.model_token("bedrock:us.anthropic.v1") == "bedrock:us.anthropic.v1"
+    assert video_review.model_token(None) is None
+
+
+def test_the_evidence_records_which_model_was_asked_for(tmp_path: Path) -> None:
+    """A review is only comparable to another review if both name the model
+    that answered; an omitted --model is recorded as the unpinned drift it is."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    pinned = clip / "review-pinned.json"
+    with _gateway_available():
+        run_review(
+            clip, intent_path=intent, allow_network=True, model="gemini-2.5-pro",
+            timeout_seconds=30.0, output=pinned, runner=_FakeGateway(),
+        )
+    request = json.loads(pinned.read_text(encoding="utf-8"))["review_request"]
+    assert request == {
+        "provider": "gemini",
+        "model": "gemini-2.5-pro",
+        "model_pinned": True,
+        "timeout_seconds": 30.0,
+    }
+    default = clip / "review-default.json"
+    with _gateway_available():
+        run_review(
+            clip, intent_path=intent, allow_network=True, output=default,
+            runner=_FakeGateway(),
+        )
+    unpinned = json.loads(default.read_text(encoding="utf-8"))["review_request"]
+    assert unpinned["model"] is None and unpinned["model_pinned"] is False
+
+
 def test_consent_is_demanded_before_the_gateway_is_consulted(tmp_path: Path) -> None:
     clip = _clip(tmp_path)
     intent = tmp_path / "i.json"
@@ -386,6 +459,35 @@ def test_a_refused_review_keeps_an_earlier_evidence_file(tmp_path: Path) -> None
     assert output.read_text(encoding="utf-8") == earlier, (
         "an earlier review was destroyed by a refused one"
     )
+
+
+def test_a_gateway_refusal_cannot_own_the_terminal(tmp_path: Path) -> None:
+    """The refusal path is where provider prose reaches the operator, and it
+    is prose the provider (or the model behind it) wrote: the same flattening
+    the success path applies, or a forged log line in a failed run's output."""
+
+    def refuse(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr="\x1b[2Jprovider said no\nPASS core/fake is fine"
+        )
+
+    def garbage(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout="\x1b[31m<not json>\n", stderr="")
+
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    with _gateway_available():
+        for runner, marker in ((refuse, "refused"), (garbage, "non-JSON")):
+            try:
+                run_review(clip, intent_path=intent, allow_network=True, runner=runner)
+            except ReviewError as exc:
+                message = str(exc)
+                assert marker in message
+                assert "\x1b" not in message, f"escape sequence survived: {message!r}"
+                assert "\n" not in message, f"a forged line survived: {message!r}"
+            else:
+                raise AssertionError("a failing gateway must fail the review")
 
 
 def test_terminal_safe_defangs_model_output() -> None:
@@ -649,6 +751,9 @@ def main() -> int:
         test_an_oversized_intent_is_refused_before_it_reaches_the_gateway(root)
         test_an_oversized_intent_file_is_refused(root)
         test_a_provider_name_cannot_escape_the_clip_folder(root)
+        test_a_timeout_that_never_fires_is_refused_before_the_upload(root)
+        test_a_model_identifier_must_be_a_plain_name(root)
+        test_the_evidence_records_which_model_was_asked_for(root)
         test_consent_is_demanded_before_the_gateway_is_consulted(root)
         test_the_clip_and_intent_reach_the_gateway(root)
         test_a_missing_gateway_is_refused_with_the_install_route(root)
@@ -659,6 +764,7 @@ def main() -> int:
         test_the_stored_result_is_the_normalized_one(root)
         test_an_invalid_result_leaves_no_evidence_behind(root)
         test_a_refused_review_keeps_an_earlier_evidence_file(root)
+        test_a_gateway_refusal_cannot_own_the_terminal(root)
         test_terminal_safe_defangs_model_output()
         test_terminal_safe_cuts_between_graphemes_not_inside_one()
         test_the_cli_prints_sanitized_model_text()
