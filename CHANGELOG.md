@@ -135,6 +135,26 @@ Release model (inferred practice, now pinned by `make test`):
   the document, in `host` and in a case now fail at load naming the key;
   `server` stays open, since its keys are stock serverconfig properties.
   `schema/suite.schema.json` says the same (`additionalProperties: false`).
+- **A capture script could outlive the playtest it started.**
+  `capture_frames.sh` and `capture_video.sh` run the suite in the background
+  and have several ways out before the `wait`: an unparseable completion
+  marker, missing frames, ffmpeg failing, or Ctrl+C. None of them stopped the
+  run, which then held the playtest exclusivity lock and a live client and
+  dedicated on the machine's one shared client until its own timeout. Both now
+  start the run in its own process group (`setsid`, with the plain background
+  form as fallback) and trap EXIT/INT/TERM to `stop_run`: SIGTERM first, so the
+  orchestrator runs its own teardown, escalating to a group SIGKILL after
+  `RUN_STOP_TIMEOUT_SEC` (default 30) so a wedged run cannot hold the exit
+  open. The trap is dropped once the run is reaped. Pinned by
+  `scripts/test_capture_video_surface.py`, which runs each script's real
+  `stop_run` against a process group that ignores SIGTERM.
+- **Staged instances survived a case that failed.** `CaseDef.Staged` and
+  `StagedClip` clear their staged GameObjects when a hold completes, but a
+  case that threw while staging, timed out, or lost the player never reached
+  that line, so the objects stood in the player's face for the rest of the
+  run and the next look case photographed them. `Runner.FinishCase` and the
+  early suite abort (which bypasses `FinishCase`) now clear them, next to the
+  motor-drive release they already do.
 - **Reruns no longer answer with the previous run's state.** A run that died
   before its poll loop ended left `<logdir>/run-ended` behind, so a rerun's
   capture loop saw a stale end marker and stopped instead of photographing

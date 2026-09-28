@@ -105,12 +105,58 @@ echo "  output        $OUT"
 echo "  client log    $CLIENT_LOG"
 echo
 
+# Every path out of this script before the `wait` below must stop the run it
+# started. The suite holds the playtest exclusivity lock, and with it a live
+# client and dedicated, so a capture that gives up (unparseable marker, missing
+# frames, ffmpeg failure) or is interrupted leaves the machine's one shared
+# client busy until the run's own timeout. setsid puts the run in its own
+# process group, so the teardown signals the orchestrator and everything it
+# spawned, not just the pid the shell happened to record.
+RUN_PID=""
+RUN_PGID=""
+RUN_STOP_TIMEOUT_SEC="${RUN_STOP_TIMEOUT_SEC:-30}"
+stop_run() {
+	if [[ -z "$RUN_PID" ]] || ! kill -0 "$RUN_PID" 2>/dev/null; then
+		return 0
+	fi
+	# TERM, not KILL: the orchestrator converts it into its own teardown
+	# (stop the runtimes, release the lock) instead of being cut off mid-run.
+	if [[ -n "$RUN_PGID" ]]; then
+		kill -TERM -- "-$RUN_PGID" 2>/dev/null || true
+	else
+		kill -TERM "$RUN_PID" 2>/dev/null || true
+	fi
+	# Bounded: a run that has already wedged (or one that ignores TERM) must
+	# not hold this script's exit open, which is the very path that exists to
+	# let the machine go.
+	local deadline=$((SECONDS + RUN_STOP_TIMEOUT_SEC))
+	while kill -0 "$RUN_PID" 2>/dev/null && (( SECONDS < deadline )); do
+		sleep 0.2
+	done
+	if kill -0 "$RUN_PID" 2>/dev/null; then
+		echo "ERROR: the suite ignored SIGTERM for ${RUN_STOP_TIMEOUT_SEC}s; killing it" >&2
+		if [[ -n "$RUN_PGID" ]]; then
+			kill -KILL -- "-$RUN_PGID" 2>/dev/null || true
+		else
+			kill -KILL "$RUN_PID" 2>/dev/null || true
+		fi
+	fi
+	wait "$RUN_PID" 2>/dev/null || true
+}
+trap stop_run EXIT INT TERM
+
 # The suite in the background; the loop waits for the marker in a log written
 # after this run started, so one left by a previous run cannot trigger it early.
 # RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
 # shellcheck disable=SC2086
-$RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
-RUN_PID=$!
+if command -v setsid >/dev/null 2>&1; then
+	setsid $RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
+	RUN_PID=$!
+	RUN_PGID="$RUN_PID"
+else
+	$RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
+	RUN_PID=$!
+fi
 
 # Wait for the completion line of the wanted clip. Without --clip-id the first
 # `clip complete` line wins, so a suite that captures one clip needs no flag.
@@ -221,6 +267,9 @@ fi
 # different than one from a green run.
 RUN_RC=0
 wait "$RUN_PID" || RUN_RC=$?
+# Reaped: the EXIT trap must not signal a pid the shell has already collected.
+RUN_PID=""
+trap - EXIT INT TERM
 
 # Keep the client log with the run, the same self-containment capture_frames.sh
 # establishes: it is the only place that says what was actually in the clip,

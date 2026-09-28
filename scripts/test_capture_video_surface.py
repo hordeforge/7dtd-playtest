@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
-"""Regression guard for capture_video.sh's clip-completion-line parse.
+"""Regression guards for the capture scripts.
 
-The marker the harness writes arrives on the client log's own line, which
-carries Unity's prefix (timestamp, level, the "[7dtd-playtest]" tag), and
-the file is CRLF. The first implementation read the clip id as a fixed
-whitespace field, so on a real prefixed line it parsed the log level ("INF")
-as the id and looked for frames under clips/INF, while the frames sat under
-clips/<id>. This happened on the first real in-game run of the vendored
-7dtd-vision-review end-to-end test.
+Two contracts, both executed out of the real script text rather than a copy,
+so the script and the pinned contract cannot drift:
 
-The guard executes the actual parse fragment out of capture_video.sh (not a
-copy), so the script text and the pinned contract cannot drift.
+* capture_video.sh's clip-completion-line parse. The marker the harness writes
+  arrives on the client log's own line, which carries Unity's prefix
+  (timestamp, level, the "[7dtd-playtest]" tag), and the file is CRLF. The
+  first implementation read the clip id as a fixed whitespace field, so on a
+  real prefixed line it parsed the log level ("INF") as the id and looked for
+  frames under clips/INF, while the frames sat under clips/<id>. This happened
+  on the first real in-game run of the vendored 7dtd-vision-review
+  end-to-end test.
+
+* stop_run in capture_video.sh and capture_frames.sh. Both start the suite in
+  the background and have several ways out before the `wait` (unparseable
+  marker, missing frames, ffmpeg failure, Ctrl+C). Without the trap the suite
+  outlives the capture: it keeps the playtest lock and a live client and
+  dedicated on the machine's one shared client until its own timeout.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "capture_video.sh"
+FRAMES_SCRIPT = Path(__file__).resolve().parent / "capture_frames.sh"
+
+STOP_START = "stop_run() {"
 
 # The parse fragment: the marker comment through the line before the guard.
 PARSE_START = "# clip complete <id> frames=N -> playtest-shots/clips/<id>"
@@ -107,8 +118,61 @@ def main() -> int:
     assert proc.returncode == 0 and proc.stdout.strip() == "ok", proc.stderr
     print("OK a non-positive or non-numeric frame count is rejected by name")
 
+    check_stop_run(SCRIPT)
+    check_stop_run(FRAMES_SCRIPT)
+
     print("RESULT PASS")
     return 0
+
+
+def stop_fragment(script: Path) -> str:
+    text = script.read_text(encoding="utf-8")
+    start = text.index(STOP_START)
+    end = text.index("\n}", start) + 2
+    return text[start:end]
+
+
+def check_stop_run(script: Path) -> None:
+    """The script's own stop_run must kill the run and its process group.
+
+    The inner child stands in for what a real run is: a supervisor (`uv run`)
+    with the playtest itself underneath it. Signalling only the recorded pid
+    would leave the playtest holding the lock. The stand-in ignores SIGTERM
+    (`trap '' TERM`), which is the case the escalation exists for, and the
+    harness shortens the grace so the check stays fast.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        pid_file = Path(tmp) / "child.pid"
+        harness = "\n".join(
+            (
+                "set -euo pipefail",
+                stop_fragment(script),
+                'RUN_PID=""\nRUN_PGID=""\nRUN_STOP_TIMEOUT_SEC=2',
+                "setsid bash -c 'trap \"\" TERM; sleep 30 & echo $! > "
+                + str(pid_file)
+                + "; wait' >/dev/null 2>&1 &",
+                'RUN_PID=$!\nRUN_PGID="$RUN_PID"',
+                "stop_run",
+                'if kill -0 "$RUN_PID" 2>/dev/null; then echo "run=alive"; '
+                'else echo "run=reaped"; fi',
+                'CHILD="$(cat ' + str(pid_file) + ' 2>/dev/null || true)"',
+                'if [[ -n "$CHILD" ]] && kill -0 "$CHILD" 2>/dev/null; '
+                'then echo "group=alive"; else echo "group=gone"; fi',
+            )
+        )
+        proc = subprocess.run(
+            ["bash", "-c", harness],
+            env={"PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    assert proc.returncode == 0, f"{script.name}: stop_run exited {proc.returncode}: {proc.stderr}"
+    assert "run=reaped" in proc.stdout, f"{script.name}: the run survived stop_run: {proc.stdout}"
+    assert "group=gone" in proc.stdout, (
+        f"{script.name}: the run's process group survived stop_run: {proc.stdout}"
+    )
+    print(f"OK {script.name} stop_run terminates the run and its process group")
 
 
 if __name__ == "__main__":

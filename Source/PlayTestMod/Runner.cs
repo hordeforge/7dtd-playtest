@@ -356,8 +356,10 @@ namespace ZdtdPlaytest
                             Report.Info("player dead too long; finishing suite early");
                             // Abort bypasses FinishCase, so stop the drive here too:
                             // the PMC patches key off Active alone and would keep
-                            // injecting inputs after the run is over.
+                            // injecting inputs after the run is over. Staged
+                            // instances are released for the same reason.
                             try { LocomotionDrive.Stop(_ctx?.Player); } catch { /* */ }
+                            try { CaseDef.ClearStaged(); } catch { /* */ }
                             while (_caseIndex + 1 < _queue.Count)
                             {
                                 _caseIndex++;
@@ -658,6 +660,12 @@ namespace ZdtdPlaytest
         {
             // Never leave motor drive stuck between cases.
             try { LocomotionDrive.Stop(_ctx?.Player); } catch { /* */ }
+            // Staged instances are this case's, not the run's. A hold that
+            // completed already cleared them, but a case that threw in stage,
+            // timed out, or lost the player leaves them standing for the rest
+            // of the suite: the next look case photographs whatever this one
+            // abandoned.
+            try { CaseDef.ClearStaged(); } catch { /* */ }
 
             float ms = elapsedSec * 1000f;
             if (ms <= 0f && _ctx != null)

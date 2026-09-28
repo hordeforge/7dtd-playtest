@@ -82,6 +82,19 @@ def main() -> int:
     assert "ClearStaged()" in staged_body, (
         "CaseDef.Staged must clear previously staged instances before a new hold"
     )
+    # A hold that completes clears its own instances, but a case that throws
+    # while staging, times out, or loses the player never reaches that line.
+    # Every case ending goes through FinishCase (or the early suite abort,
+    # which bypasses it), so both must release what the case staged or the
+    # instances stand in the player's face for the rest of the run.
+    finish_body = method_body(runner, r"static\s+void\s+FinishCase\s*\([^)]*\)")
+    assert "ClearStaged()" in finish_body, (
+        "Runner.FinishCase must destroy staged instances however the case ended"
+    )
+    abort_body = method_body(runner, r"public\s+static\s+void\s+Tick\s*\(\s*\)")
+    assert abort_body.count("ClearStaged()") >= 1, (
+        "the early suite abort bypasses FinishCase and must clear staged objects too"
+    )
     assert re.search(
         r"public\s+static\s+CaseDef\s+StagedClip\s*\(",
         casedef,
