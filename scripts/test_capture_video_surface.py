@@ -18,10 +18,18 @@ so the script and the pinned contract cannot drift:
   marker, missing frames, ffmpeg failure, Ctrl+C). Without the trap the suite
   outlives the capture: it keeps the playtest lock and a live client and
   dedicated on the machine's one shared client until its own timeout.
+
+* the "written after this run started" gate in capture_video.sh and
+  capture_frames.sh. It used to be `mtime > $(date +%s)`, two wall-clock reads
+  compared to order events. A backward clock step (NTP correction, a manual
+  set, a resumed host) puts a previous run's log on the far side of the
+  comparison, and the capture photographs the previous run. The gate is now a
+  byte offset, so no clock decides it.
 """
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -31,6 +39,10 @@ SCRIPT = Path(__file__).resolve().parent / "capture_video.sh"
 FRAMES_SCRIPT = Path(__file__).resolve().parent / "capture_frames.sh"
 
 STOP_START = "stop_run() {"
+
+# The log gate: the baseline taken before the run starts, plus the reader.
+LOG_GATE_START = 'LOG_INODE="$(stat'
+LOG_GATE_END = "read_log_since_start() {"
 
 # The parse fragment: the marker comment through the line before the guard.
 PARSE_START = "# clip complete <id> frames=N -> playtest-shots/clips/<id>"
@@ -120,6 +132,8 @@ def main() -> int:
 
     check_stop_run(SCRIPT)
     check_stop_run(FRAMES_SCRIPT)
+    check_log_gate(SCRIPT)
+    check_log_gate(FRAMES_SCRIPT)
 
     print("RESULT PASS")
     return 0
@@ -130,6 +144,81 @@ def stop_fragment(script: Path) -> str:
     start = text.index(STOP_START)
     end = text.index("\n}", start) + 2
     return text[start:end]
+
+
+def log_gate_fragment(script: Path) -> str:
+    """The script's own baseline and reader, run with a real file behind them."""
+    text = script.read_text(encoding="utf-8")
+    start = text.index(LOG_GATE_START)
+    end = text.index("\n}", text.index(LOG_GATE_END, start)) + 2
+    return text[start:end]
+
+
+def read_log_since(fragment: str, log: Path, while_running: str = "") -> str:
+    """Snapshot the baseline, run `while_running`, then read what the run wrote."""
+    proc = subprocess.run(
+        ["bash", "-c", "\n".join((
+            "set -euo pipefail",
+            fragment,
+            while_running,
+            "read_log_since_start",
+            "printf '%s' \"$NEW_LOG\"",
+        ))],
+        env={"CLIENT_LOG": str(log), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"log gate exited {proc.returncode}: {proc.stderr}"
+    return proc.stdout
+
+
+def check_log_gate(script: Path) -> None:
+    """A previous run's marker must not reach this run, whatever the clock says.
+
+    The reader is the script's own and the file behind it is a real one, so a
+    regression to a clock comparison shows up as a marker coming back out of a
+    log that predates the run.
+    """
+    fragment = log_gate_fragment(script)
+    assert "date" not in fragment, f"{script.name}: the log gate reads a clock again"
+    assert "%Y" not in fragment, f"{script.name}: the log gate compares an mtime again"
+    assert "stat -c %Y" not in script.read_text(encoding="utf-8"), (
+        f"{script.name}: the log gate still gates on the log's mtime"
+    )
+
+    stale = "2026-08-25T20:20:15 53.385 INF [7dtd-playtest] scene staged old_run prop=0\r\n"
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "output_log_client.txt"
+        log.write_text(stale, encoding="utf-8", newline="")
+        assert read_log_since(fragment, log) == "", (
+            f"{script.name}: a marker left by a previous run was read as this run's"
+        )
+        # The wall clock the old gate compared against, moved back a year, so a
+        # previous run's log sits on the far side of that comparison.
+        backdated = f"touch -d 2025-01-01T00:00:00Z {shlex.quote(str(log))}"
+        assert read_log_since(fragment, log, backdated) == "", (
+            f"{script.name}: a stale marker is read once the clock moves"
+        )
+        appended = f"printf 'scene staged this_run prop=1\\r\\n' >> {shlex.quote(str(log))}"
+        assert "scene staged this_run" in read_log_since(fragment, log, appended), (
+            f"{script.name}: this run's own marker was not seen"
+        )
+        # The client truncates its log on the next launch, which leaves the
+        # anchor pointing past everything this run has written so far.
+        truncated = f"printf 'scene staged after_truncate\\r\\n' > {shlex.quote(str(log))}"
+        assert "after_truncate" in read_log_since(fragment, log, truncated), (
+            f"{script.name}: a truncated log skipped past this run's marker"
+        )
+        # Recreated under a new inode, same story.
+        recreated = "\n".join((
+            f"rm -f {shlex.quote(str(log))}",
+            f"printf 'scene staged after_recreate\\r\\n' > {shlex.quote(str(log))}",
+        ))
+        assert "after_recreate" in read_log_since(fragment, log, recreated), (
+            f"{script.name}: a recreated log skipped past this run's marker"
+        )
+    print(f"OK {script.name} reads only the log this run produced")
 
 
 def check_stop_run(script: Path) -> None:

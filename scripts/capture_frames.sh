@@ -112,8 +112,34 @@ mkdir -p "$OUT"
 rm -f "$OUT"/raw-*.png "$OUT"/contact-sheet.png
 mkdir -p "$OUT/cropped"
 rm -f "$OUT"/cropped/frame-*.png
-START="$(date +%s)"
 RUN_LOG="$OUT/run.log"
+
+# Where this run's log begins, as a byte offset into the client log as it is
+# right now. "Written after this run started" is a fact about the file's
+# contents, so it is answered with an offset rather than by comparing the log's
+# mtime against `date`: an NTP correction, a manual clock change or a resumed
+# host moves the wall clock under the run and inverts that comparison, which
+# lets a previous run's marker trigger this one.
+LOG_INODE="$(stat -c %i "$CLIENT_LOG" 2>/dev/null || echo 0)"
+LOG_BASE="$(stat -c %s "$CLIENT_LOG" 2>/dev/null || echo 0)"
+
+# NEW_LOG: the part of the client log this run has produced. A log the client
+# recreated or truncated carries no baseline to skip, so the anchor resets to
+# its new zero rather than skipping past everything this run wrote.
+read_log_since_start() {
+	local inode size
+	inode="$(stat -c %i "$CLIENT_LOG" 2>/dev/null || echo 0)"
+	size="$(stat -c %s "$CLIENT_LOG" 2>/dev/null || echo 0)"
+	if [[ "$inode" != "$LOG_INODE" ]] || (( size < LOG_BASE )); then
+		LOG_INODE="$inode"
+		LOG_BASE=0
+	fi
+	NEW_LOG=""
+	if (( size > LOG_BASE )); then
+		NEW_LOG="$(tail -c "+$((LOG_BASE + 1))" -- "$CLIENT_LOG")"
+	fi
+	return 0
+}
 
 echo "CAPTURE FRAMES"
 echo "  suite         $SUITE"
@@ -162,8 +188,9 @@ stop_run() {
 }
 trap stop_run EXIT INT TERM
 
-# The suite in the background; the loop waits for the marker in a log written
-# after this run started, so one left by a previous run cannot trigger it early.
+# The suite in the background; the loop reads only the part of the client log
+# that appeared after the baseline above, so a marker left by a previous run
+# cannot trigger this one.
 # RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
 # shellcheck disable=SC2086
 if command -v setsid >/dev/null 2>&1; then
@@ -182,13 +209,13 @@ while :; do
 		wait "$RUN_PID" || true
 		exit 1
 	fi
-	mtime="$(stat -c %Y "$CLIENT_LOG" 2>/dev/null || echo 0)"
-	if [[ "$mtime" -gt "$START" ]] && grep -q "$MARKER" "$CLIENT_LOG" 2>/dev/null; then
+	read_log_since_start
+	if [[ -n "$NEW_LOG" ]] && grep -q "$MARKER" <<<"$NEW_LOG"; then
 		break
 	fi
 	sleep 1
 done
-grep "$MARKER" "$CLIENT_LOG" | tail -1
+grep "$MARKER" <<<"$NEW_LOG" | tail -1
 
 for i in $(seq -w 1 "$FRAMES"); do
 	spectacle -b -n -f -o "$OUT/raw-$i.png" >/dev/null 2>&1 || true
