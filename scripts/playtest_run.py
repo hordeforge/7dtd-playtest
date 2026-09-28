@@ -1459,6 +1459,32 @@ QUARANTINE_KEEP = 5
 # report never loses its junit twin.
 REPORT_KEEP = 50
 
+# Why this run's poll loop ended (done / timeout / client_exit / lock_lost).
+# The logdir is shared by every run, so the file is per-run state in a
+# per-machine location: it is cleared at the start of each run so its
+# presence always means "the run that wrote it has ended".
+RUN_ENDED_NAME = "run-ended"
+
+
+def write_run_ended_marker(logdir: Path, reason: str) -> None:
+    try:
+        (logdir / RUN_ENDED_NAME).write_text(reason + "\n", encoding="utf-8")
+    except OSError as ex:
+        warn(f"could not write run-ended marker in {logdir}: {ex}")
+
+
+def clear_run_ended_marker(logdir: Path) -> None:
+    """Drop a previous run's end marker, so a rerun cannot be read as ended.
+
+    Nothing else removes it: a run killed before its poll loop ends leaves
+    the last generation's marker behind, and the capture loops that end on
+    that marker would then stop at once instead of photographing this run.
+    """
+    try:
+        (logdir / RUN_ENDED_NAME).unlink(missing_ok=True)
+    except OSError as ex:
+        warn(f"could not clear the previous run-ended marker in {logdir}: {ex}")
+
 
 def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
     """Keep only the newest `keep` report/junit files per pattern."""
@@ -2667,6 +2693,10 @@ def main(argv: list[str] | None = None) -> int:
             f"(exclusive client)"
         )
 
+        # This run now owns the machine, so the previous run's end marker is
+        # stale: from here on its presence means this run ended.
+        clear_run_ended_marker(args.logdir)
+
         # Now that this run owns the client, build it. Creating or wiping an
         # instance seeds a Proton prefix, so a run that was going to be refused
         # must not have touched it.
@@ -2691,12 +2721,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def write_run_ended(reason: str) -> None:
             """Record why the orchestrator's poll loop ended (log contract)."""
-            try:
-                (args.logdir / "run-ended").write_text(
-                    reason + "\n", encoding="utf-8"
-                )
-            except OSError as ex:
-                warn(f"could not write run-ended marker in {args.logdir}: {ex}")
+            write_run_ended_marker(args.logdir, reason)
 
         def abort_if_lock_lost() -> bool:
             """True when the caller must return immediately: the exclusivity
@@ -2770,6 +2795,14 @@ def main(argv: list[str] | None = None) -> int:
             peer_client_log.parent.mkdir(parents=True, exist_ok=True)
             if preserved_peer:
                 truncate_file(peer_client_log, "peer client log")
+        # The loadgen observer stream is per-run evidence and nothing else
+        # empties it. Left in place it is a cross-run trap: the final observer
+        # read is a whole-file read, so a rerun that never reaches a loadgen
+        # barrier (no such barrier in the suite, or the loadgen failing to
+        # start) answers with the previous run's `joined` event and checks
+        # CVars and buffs against a bot that left hours ago.
+        loadgen_events_path.parent.mkdir(parents=True, exist_ok=True)
+        truncate_file(loadgen_events_path, "loadgen events")
 
         # Incremental readers created right after the truncation above so every
         # later append is seen exactly once. Later truncations (rejoin phases)

@@ -314,7 +314,10 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 - Run ended: `<logdir>/run-ended` written when the orchestrator's poll loop
   ends, containing the reason on one line: `done`, `timeout`, `client_exit`,
   or `lock_lost` (heartbeat saw a foreign holder take the claim; the run
-  aborts instead of sharing the machine). This is the deterministic end of
+  aborts instead of sharing the machine). The marker is cleared once the run
+  holds the exclusivity lock, so its presence always means *this* run ended
+  and a run killed before its poll loop ends cannot poison a rerun. This is
+  the deterministic end of
   the run for consumers that
   key on the staged marker (a screenshot loop exits when it appears instead
   of waiting out its own timeout). `--logdir` defaults to `$LOGDIR` or

@@ -34,6 +34,17 @@ Release model (inferred practice, now pinned by `make test`):
   instead of printing a bare "not found" from the interpreter call. A mistyped
   `make test-one GATE=` lists the known gates.
 
+### Fixed
+
+- **Reruns no longer answer with the previous run's state.** A run that died
+  before its poll loop ended left `<logdir>/run-ended` behind, so a rerun's
+  capture loop saw a stale end marker and stopped instead of photographing
+  this run; the marker is cleared once the run holds the exclusivity lock.
+  `<logdir>/loadgen_events.jsonl` is emptied at run start like the client and
+  peer logs: the observer verdict is a whole-file read, so a rerun that never
+  reached a loadgen barrier used to check CVars and buffs against the
+  previous run's `joined` bot.
+
 ## [0.13.0] - 2026-09-21
 
 ### Removed

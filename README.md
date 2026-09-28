@@ -597,7 +597,10 @@ to the same run. The host reads loadgen's `7dtd.loadgen.event.v1` JSON Lines,
 retains the entity ID from its structured `joined` event, teleports that exact
 entity, and fails the run when the observer exits or the final filtered state
 does not match. CVar comparisons use a `0.0001` tolerance; buff expectations
-accept `true` or `false`. Use `--loadgen-expect-cvar-positive NAME` for a
+accept `true` or `false`. The event stream lives at
+`<logdir>/loadgen_events.jsonl` and is emptied at the start of every run, so
+a rerun can never satisfy an expectation with a previous run's bot. Use
+`--loadgen-expect-cvar-positive NAME` for a
 strictly positive value and `--loadgen-expect-cvar-equal LEFT=RIGHT` to
 compare two decoded CVars. `--loadgen-server-cvar-oracle` additionally runs
 `cvar get` for every observed CVar against the exact joined entity and

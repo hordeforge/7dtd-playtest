@@ -426,6 +426,85 @@ def test_prune_run_artifacts_wired_into_main() -> None:
     print("PASS prune_run_artifacts wired after both report-writing paths")
 
 
+def _main_source() -> str:
+    tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
+    mains = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+    ]
+    assert len(mains) == 1, "expected exactly one main() definition"
+    segment = ast.get_source_segment(PLAYTEST_RUN.read_text(encoding="utf-8"), mains[0])
+    assert segment is not None
+    return segment
+
+
+def test_run_ended_marker_is_per_run() -> None:
+    """<logdir>/run-ended is this run's end signal, in a directory every run
+    shares. A run killed before its poll loop ends leaves the marker behind,
+    and the capture loops that end on it would then stop the moment a rerun
+    starts instead of photographing it, so main() clears it once it holds the
+    lock (after the acquire, so a refused run leaves the holder's marker
+    alone) and clearing twice is a no-op."""
+    with tempfile.TemporaryDirectory(prefix="playtest-run-ended-") as td:
+        logdir = Path(td)
+        marker = logdir / playtest_run.RUN_ENDED_NAME
+        marker.write_text("done\n", encoding="utf-8")
+
+        playtest_run.clear_run_ended_marker(logdir)
+        assert not marker.exists(), "a rerun must not inherit the last run's marker"
+        playtest_run.clear_run_ended_marker(logdir)  # absent is fine, not an error
+
+        playtest_run.write_run_ended_marker(logdir, "client_exit")
+        assert marker.read_text(encoding="utf-8") == "client_exit\n"
+
+    main_src = _main_source()
+    assert "clear_run_ended_marker(args.logdir)" in main_src, (
+        "main() never clears the previous run's run-ended marker"
+    )
+    assert main_src.index("playtest lock acquired") < main_src.index(
+        "clear_run_ended_marker(args.logdir)"
+    ), "the marker must be cleared only after this run holds the lock"
+    print("PASS run-ended marker is per-run: cleared at start, written at the end")
+
+
+def test_loadgen_events_truncated_before_this_run_reads_them() -> None:
+    """The observer verdict is a whole-file read of loadgen_events.jsonl, and
+    nothing else empties that file. Left in place it answers with the previous
+    run's `joined` event, so a rerun that never reaches a loadgen barrier
+    checks CVars and buffs against a bot that left hours ago."""
+    with tempfile.TemporaryDirectory(prefix="playtest-loadgen-events-") as td:
+        events = Path(td) / "loadgen_events.jsonl"
+        events.write_text(
+            json.dumps(
+                {
+                    "schema": "7dtd.loadgen.event.v1",
+                    "type": "joined",
+                    "entityId": 4242,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        stale = playtest_run.loadgen_joined_entity(
+            playtest_run.read_loadgen_events(events)
+        )
+        assert stale == 4242, "precondition: the leftover run's bot is readable"
+
+        playtest_run.truncate_file(events, "loadgen events")
+
+        assert playtest_run.read_loadgen_events(events) == [], (
+            "the previous run's events must not answer for this one"
+        )
+        playtest_run.truncate_file(events, "loadgen events")  # rerun is a no-op
+
+    main_src = _main_source()
+    truncating = "truncate_file(loadgen_events_path"
+    assert truncating in main_src, "main() never empties the loadgen events file"
+    assert main_src.index(truncating) < main_src.index(
+        "read_loadgen_latest_state("
+    ), "the stream must be emptied before any read judges this run"
+    print("PASS loadgen events are emptied at run start, before the observer read")
+
+
 def test_main_finally_reaps_mute_helpers() -> None:
     """reap_finished_helpers must run from main()'s finally, not only inside
     the poll loops: the rejoin-abort return, exception unwind, and post-DONE
@@ -1828,6 +1907,11 @@ def main() -> int:
             test_prune_run_artifacts_keeps_newest_per_pattern,
         ),
         ("prune_run_artifacts_wiring", test_prune_run_artifacts_wired_into_main),
+        ("run_ended_marker_per_run", test_run_ended_marker_is_per_run),
+        (
+            "loadgen_events_truncated_per_run",
+            test_loadgen_events_truncated_before_this_run_reads_them,
+        ),
         ("snapshot_previous_log", test_snapshot_previous_log_copies_before_truncate),
         ("fixture_gate_selection", test_suite_wants_host_fixtures_selection_table),
         ("mixed_visual_suites", test_mixed_visual_suites_are_look_plus_block),
