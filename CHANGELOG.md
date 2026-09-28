@@ -58,6 +58,15 @@ Release model (inferred practice, now pinned by `make test`):
   the server's internal dump), and a file or symlink planted at the temp name
   would be written through and then renamed into place as this run's report.
   The temp file is now opened `O_EXCL` at 0600.
+- **A player's display name no longer reaches the run transcript.** Every
+  admin reply names the entities it talks about (`'Alice' (id=171, ...)` for
+  stock, `(entity 107) Alice` for zdtd), and the name is whatever a remote LAN
+  peer chose, so each logged slice of a `listplayers`, `listents`, `kill` or
+  `teleportplayer` reply carried a person's name into a log CI uploads. The
+  caller-facing behaviour is unchanged: a redacted line keeps its entity id,
+  which is all the parsing and the counts read, and only the name and the tail
+  past the id are dropped. Committed fixtures used the repository owner's own
+  account name; they now use synthetic ones.
 
 - **Windows device names no longer reach a staged frame or clip path.**
   `Helpers.AssetName` (the client, a Windows process under Proton) filters a

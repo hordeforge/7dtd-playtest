@@ -1524,7 +1524,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
             "4. animalStag (id=3890)",
             "5. bandit (id=3901)",
             "zombieBoe",
-            "Remote 'maci' (id=171, hp=100)",
+            "Remote 'peerone' (id=171, hp=100)",
         )
     )
     assert tn._ai_entity_ids(listents_out) == ["3877", "3878", "3890"], (
@@ -1561,7 +1561,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
     killer = CannedTelnet(
         [
             "2. zombieSteve (id=3877)\n3. animalStag (id=3890)",
-            "Total of 1 in the game\n'maci' (id=171, pos=(520.0, 62.0, 950.0))",
+            "Total of 1 in the game\n'peerone' (id=171, pos=(520.0, 62.0, 950.0))",
             "killed 3877\nkilled 3890",
         ]
     )
@@ -1581,7 +1581,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
     zdtd = CannedTelnet(
         [
             "unknown command: listplayers",
-            "(entity 107) maci\n(entity 0) ghost\n(entity 107) dup",
+            "(entity 107) peerone\n(entity 0) ghost\n(entity 107) dup",
         ]
     )
     assert zdtd.list_player_ids() == [107], zdtd.list_player_ids()
@@ -1593,7 +1593,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
     # strand players off-pad with an opaque "far from pad" failure.
     tp = CannedTelnet(
         [
-            "Total of 2 in the game\n'maci' (id=171, pos=(0, 0, 0))\n"
+            "Total of 2 in the game\n'peerone' (id=171, pos=(0, 0, 0))\n"
             "'ghost' (id=172, pos=(0, 0, 0))",
             "teleported",
             "teleported",
@@ -1662,7 +1662,7 @@ def test_telnet_mass_kill_collapses_round_trips() -> None:
             if cmd == "listents":
                 return listents
             if cmd == "listplayers":
-                return "'maci' (id=171)"
+                return "'peerone' (id=171)"
             return ""
 
         def _recv(self, settle: float) -> str:
@@ -1697,6 +1697,64 @@ def test_telnet_mass_kill_collapses_round_trips() -> None:
     assert dead._sock is None, "a broken batch must close the session"
     assert "telnet batch exec fail" in errbuf.getvalue(), errbuf.getvalue()
     print("PASS telnet_mass_kill one write and one settle per batch of kills")
+
+
+def test_telnet_replies_redact_player_names() -> None:
+    """A player name is whatever a remote LAN peer chose, and every telnet
+    caller logs a slice of the reply into a transcript that leaves the machine
+    as a CI artifact. The name goes, the id stays: the callers reason about
+    ids and counts, so what survives is the part that says a line parsed."""
+    stock = "Total of 2 in the game\n'peerone' (id=171, pos=(0, 0, 0))\n'duo' (id=9)"
+    redacted = playtest_run.redact_player_names(stock)
+    assert "peerone" not in redacted, redacted
+    assert "duo" not in redacted, redacted
+    assert redacted.count("id=171") == 1 and redacted.count("id=9") == 1, redacted
+    assert "Total of 2 in the game" in redacted, f"non-name line dropped: {redacted}"
+    assert "pos=" not in redacted, f"the tail past the id survived: {redacted}"
+    # The zdtd console prints "(entity 107) name", the id ahead of the name.
+    zdtd = playtest_run.redact_player_names("(entity 107) peerone\n(entity 0) ghost")
+    assert "peerone" not in zdtd, zdtd
+    assert "ghost" not in zdtd, "the name after the id is personal too"
+    assert "(entity 107)" in zdtd and "(entity 0)" in zdtd, f"ids lost: {zdtd}"
+
+    # A listents reply is mixed: the AI lines carry a server-side prefab
+    # name, and only the ids the AI table does not claim are redacted.
+    ai_keywords = playtest_run.TelnetAdmin.AI_LINE_KEYWORDS
+    listents = (
+        "2. zombieSteve (id=3000)\n"
+        "12. trader_rebecca (id=40)\n"
+        "'peerone' (id=171, hp=100)\n"
+        "Total of 3 in the game"
+    )
+    players = playtest_run.player_entity_ids(listents, ai_keywords)
+    assert players == {"40", "171"}, players
+    mixed = playtest_run.redact_player_names(listents, players)
+    assert "peerone" not in mixed, mixed
+    # The complement of the AI table is the safe side: a prefab the table
+    # does not claim loses its name too, and the run loses nothing by it.
+    assert "trader_rebecca" not in mixed, f"an unclaimed name survived: {mixed}"
+    assert "zombieSteve" in mixed, f"the AI prefab name is not personal: {mixed}"
+    assert "(id=3000)" in mixed, f"an id was lost: {mixed}"
+    assert "Total of 3 in the game" in mixed, mixed
+
+    # An empty reply has nothing to redact and must not become "None" or a
+    # stray newline.
+    assert playtest_run.redact_player_names("") == ""
+    assert playtest_run.redact_player_names("no entities here") == "no entities here"
+
+    # Every logged slice of a telnet reply goes through the redaction, so a
+    # name cannot reappear through a call site that never intended one.
+    src = PLAYTEST_RUN.read_text(encoding="utf-8")
+    for needle in (
+        "(listents sample {sample[:100]!r})",
+        "entities → {safe[:160]!r}",
+        "kill fallback {eid} → {redact_player_names(r, {eid})[:80]!r}",
+        "reply unparsed: {redact_player_names(out)[-160:]!r}",
+        "→ {safe[:120]!r}",
+        "kill_player {pid} → {redact_player_names(r, {str(pid)})[:80]!r}",
+    ):
+        assert needle in src, f"a telnet reply slice is logged unredacted: {needle}"
+    print("PASS telnet_replies_redact_player_names")
 
 
 def test_telnet_broken_session_degrades_to_empty_reply() -> None:
@@ -1778,7 +1836,7 @@ def test_spawn_near_players_trusts_only_live_sessions() -> None:
                 return ""
             return self._replies.pop(0)
 
-    players = "Total of 1 in the game\n'maci' (id=171, pos=(520.0, 62.0, 950.0))"
+    players = "Total of 1 in the game\n'peerone' (id=171, pos=(520.0, 62.0, 950.0))"
 
     # Session survived the exchange and the reply is not a miss: book one.
     ok = SpawnTelnet([players, "zombieBoe spawned id=3877"])
@@ -1903,8 +1961,8 @@ def test_bot_barriers_converge_instead_of_adding_a_bot() -> None:
             self.sent.append(cmd)
             return self._bot_lists.pop(0) if self._bot_lists else ""
 
-    one_bot = "Bot 1: macibot hp=100\nBot count 1"
-    six_bots = "".join(f"Bot {i}: macibot hp=100\n" for i in range(6))
+    one_bot = "Bot 1: botone hp=100\nBot count 1"
+    six_bots = "".join(f"Bot {i}: botone hp=100\n" for i in range(6))
 
     # No players listed, and a bot is already up: a second fire must not add
     # another one.
@@ -1932,7 +1990,7 @@ def test_bot_barriers_converge_instead_of_adding_a_bot() -> None:
         f"a full roster was topped up again: {full.sent}"
     )
 
-    short = BotTelnet("", ["Bot 1: macibot hp=100", six_bots, six_bots])
+    short = BotTelnet("", ["Bot 1: botone hp=100", six_bots, six_bots])
     playtest_run.barrier_ensure_bots(short)
     playtest_run.barrier_ensure_bots(short)
     assert short.sent == ["bot list", "bot count 6", "bot list"], (
@@ -2747,6 +2805,10 @@ def main() -> int:
         (
             "telnet_mass_kill",
             test_telnet_mass_kill_collapses_round_trips,
+        ),
+        (
+            "telnet_reply_name_redaction",
+            test_telnet_replies_redact_player_names,
         ),
         (
             "telnet_broken_session",

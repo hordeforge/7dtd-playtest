@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 import traceback
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Protocol
@@ -528,6 +528,59 @@ def scrub(text: str) -> str:
     dumps); report JSON/XML keep raw detail and escape it structurally.
     """
     return _LOG_CTRL_RE.sub("", text)
+
+
+# The admin plane names every entity it talks about: a stock player line
+# reads "'Alice' (id=171, pos=(520, 62, 950))" and the zdtd console prints
+# "(entity 107) Alice", so the name sits on either side of the id. On a player
+# line it is whatever a remote LAN peer chose for their character, so it is
+# personal data, and every caller below logs a slice of the reply into the run
+# transcript, which leaves the machine as a CI artifact. Callers reason about
+# ids and counts, never about the name, so a redacted line keeps its id and
+# nothing else: that is what says the line parsed.
+REDACTED_NAME = "<redacted-name>"
+_ENTITY_ID_RE = re.compile(r"\(?\s*(?:id|entity)\s*=?\s*(\d+)\s*\)?", re.IGNORECASE)
+
+
+def redact_player_names(text: str, player_ids: Collection[str] | None = None) -> str:
+    """Keep only the entity id on the player lines of an admin reply.
+
+    ``player_ids`` names the entity ids to treat as players, which is what a
+    mixed ``listents`` reply needs (its AI lines carry a server-side prefab
+    name, not a person's). Pass None for a reply that lists players and
+    nothing else, where every named line is a player: stock ``listplayers`` and
+    the zdtd ``list`` form.
+
+    Redact before slicing: cutting the tail off first can leave half a name
+    and lose the id that identified the line as a player line at all.
+    """
+    if not text:
+        return text
+    lines: list[str] = []
+    for line in text.splitlines():
+        m = _ENTITY_ID_RE.search(line)
+        if m and (player_ids is None or m.group(1) in player_ids):
+            line = f"{REDACTED_NAME} {line[m.start():m.end()]}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def player_entity_ids(out: str, ai_keywords: Collection[str]) -> set[str]:
+    """Entity ids on ``listents`` lines the AI keyword table does not claim.
+
+    The complement of the AI table, computed from the reply already in hand:
+    a listents reply names the human player alongside the horde, and every
+    caller logs a slice of it.
+    """
+    ids: set[str] = set()
+    for line in out.splitlines():
+        low = line.lower()
+        if any(k in low for k in ai_keywords):
+            continue
+        m = re.search(r"id\s*=\s*(\d+)", line, flags=re.IGNORECASE)
+        if m:
+            ids.add(m.group(1))
+    return ids
 
 
 # Bound on each pkill escalation step. These run in the finally teardown
@@ -1624,7 +1677,8 @@ class TelnetAdmin:
         for batch in batched(self._ai_entity_ids(out), KILL_BATCH_SIZE):
             self._exec_batch([f"kill {eid}" for eid in batch])
             killed += len(batch)
-        log(f"telnet clear_ai killed~={killed} (listents sample {out[:100]!r})")
+        sample = redact_player_names(out, player_entity_ids(out, self.AI_LINE_KEYWORDS))
+        log(f"telnet clear_ai killed~={killed} (listents sample {sample[:100]!r})")
 
     def kill_non_player_ai(self) -> int:
         """Kill zombie/animal entities from listents (not the player)."""
@@ -1634,7 +1688,8 @@ class TelnetAdmin:
         targets = [eid for eid in self._ai_entity_ids(out) if eid not in players]
         for batch in batched(targets, KILL_BATCH_SIZE):
             reply = self._exec_batch([f"kill {eid}" for eid in batch])
-            log(f"telnet kill {len(batch)} entities → {reply[:160]!r}")
+            safe = redact_player_names(reply, set(batch))
+            log(f"telnet kill {len(batch)} entities → {safe[:160]!r}")
             killed += len(batch)
         if killed == 0:
             # Broader: kill all entity ids in listents that are not players
@@ -1645,7 +1700,7 @@ class TelnetAdmin:
                 if int(eid) < 100:
                     continue
                 r = self.exec(f"kill {eid}")
-                log(f"telnet kill fallback {eid} → {r[:80]!r}")
+                log(f"telnet kill fallback {eid} → {redact_player_names(r, {eid})[:80]!r}")
                 killed += 1
                 if killed >= 16:
                     break
@@ -1665,7 +1720,8 @@ class TelnetAdmin:
             # is not left with "empty/unparsed".
             out += self._recv(1.5)
             if "id=" not in out:
-                log(f"telnet listplayers reply unparsed: {out[-160:]!r}")
+                # Every line here is a player line, so every name is one too.
+                log(f"telnet listplayers reply unparsed: {redact_player_names(out)[-160:]!r}")
         ids = [
             int(x) for x in re.findall(r"(?:id|entity)\s*=\s*(\d+)", out, flags=re.IGNORECASE)
         ]
@@ -1683,7 +1739,8 @@ class TelnetAdmin:
         n = 0
         for pid in ids:
             r = self.exec(f"teleportplayer {pid} {x:g} {y:g} {z:g}")
-            log(f"telnet teleportplayer {pid} {x:g} {y:g} {z:g} → {r[:120]!r}")
+            safe = redact_player_names(r, {str(pid)})
+            log(f"telnet teleportplayer {pid} {x:g} {y:g} {z:g} → {safe[:120]!r}")
             n += 1
         return n
 
@@ -2344,7 +2401,7 @@ def barrier_kill_first_player(tn: TelnetAdmin) -> None:
     pids = tn.list_player_ids()
     for pid in pids[:1]:
         r = tn.exec(f"kill {pid}")
-        log(f"telnet kill_player {pid} → {r[:80]!r}")
+        log(f"telnet kill_player {pid} → {redact_player_names(r, {str(pid)})[:80]!r}")
 
 
 def barrier_set_night(tn: TelnetAdmin) -> None:

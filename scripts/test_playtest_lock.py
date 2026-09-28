@@ -201,7 +201,7 @@ def test_client_probe_is_scoped_to_one_prefix(tmp: Path) -> None:
         "wine64-preloader\0Z:\\game\\7DaysToDie.exe\0",
     )
     (proc / "4242" / "environ").write_text(
-        f"USER=maci\0STEAM_COMPAT_DATA_PATH={theirs.resolve()}\0", encoding="utf-8"
+        f"USER=peerone\0STEAM_COMPAT_DATA_PATH={theirs.resolve()}\0", encoding="utf-8"
     )
     _assert(
         not pl.client_running_for_compat(mine, proc_root=proc),
