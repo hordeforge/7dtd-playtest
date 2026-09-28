@@ -59,12 +59,14 @@ echo "playtest_repeat: suite=$SUITE laps=$LAPS report_dir=$REPORT_DIR"
 declare -i laps_passed=0 laps_total=0
 declare -i sum_pass=0 sum_fail=0 sum_skip=0
 
-# Newest report for a lap (report-<epoch>.json). Pure bash: no ls -t parsing,
-# paths with spaces survive.
+# Newest report a lap produced (report-<epoch>.json). Pure bash: no ls -t
+# parsing, paths with spaces survive. Only reports newer than $1 count: the
+# report dir is the shared default and a previous lap, a concurrent session,
+# or the orchestrator's own late write is a report this lap did not produce.
 latest_report() {
   local f newest=""
   for f in "$REPORT_DIR"/report-*.json; do
-    [[ -f "$f" ]] || continue
+    [[ -f "$f" && "$f" -nt "$1" ]] || continue
     if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
       newest="$f"
     fi
@@ -80,11 +82,16 @@ summary_counts() {
 
 for lap in $(seq 1 "$LAPS"); do
   echo "=== lap $lap/$LAPS ==="
+  # Stamped before the lap runs, so a report this lap did not write is never
+  # graded as its verdict.
+  lap_mark="$(mktemp "$REPORT_DIR/.lap-mark.XXXXXX")"
   if ! uv run --locked --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
+    rm -f "$lap_mark"
     echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)" >&2
     continue
   fi
-  latest="$(latest_report)"
+  latest="$(latest_report "$lap_mark")"
+  rm -f "$lap_mark"
   if [[ -z "$latest" ]]; then
     echo "playtest_repeat: lap $lap produced no report under $REPORT_DIR" >&2
     continue

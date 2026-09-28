@@ -756,7 +756,11 @@ def playtest_case_refs_env(
         if sibling.is_file():
             try:
                 refs = suite_loader.load_suite_file(sibling).case_refs
-            except suite_loader.SuiteLoadError:
+            except suite_loader.SuiteLoadError as ex:
+                # Say so. An unreadable setup suite otherwise leaves the
+                # client armed with no PLAYTEST_CASE_REFS, which reads as
+                # "run everything" rather than "the setup was never armed".
+                warn(f"rejoin setup suite {sibling} could not be loaded: {ex}")
                 refs = ()
     if refs:
         out["PLAYTEST_CASE_REFS"] = ",".join(refs)
@@ -1305,7 +1309,10 @@ def collect_visual_reviews(directory: Path | None) -> dict[str, str]:
     for path in sorted(directory.rglob("review-*.json")):
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as ex:
+            # A skipped envelope is evidence that silently vanished from the
+            # report; the run still looks reviewed when it is not.
+            warn(f"visual review {path} could not be read: {ex}")
             continue
         intent = document.get("intent") or {}
         content = intent.get("content") or {}
@@ -4050,6 +4057,14 @@ def main(argv: list[str] | None = None) -> int:
             "server_config": getattr(args, "_applied_server_config", {}),
             "suite_doc": (
                 suite_loader.suite_to_report(suite_doc) if suite_doc is not None else None
+            ),
+            # Provenance sits beside the suite mapping, not inside it: the
+            # loader rejects any key the schema does not declare, so a `source`
+            # field in suite_doc would make this report unloadable.
+            "suite_doc_source": (
+                str(suite_doc.source)
+                if suite_doc is not None and suite_doc.source is not None
+                else None
             ),
             "summary": summary,
             "done": done,

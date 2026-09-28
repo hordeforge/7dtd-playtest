@@ -2175,6 +2175,54 @@ def test_playtest_case_refs_env_rejoin_uses_sibling_file() -> None:
     print("PASS rejoin_case_refs_use_armed_suite")
 
 
+def test_rejoin_setup_suite_that_will_not_load_is_reported() -> None:
+    """An unreadable setup suite must say so, not arm the client with nothing.
+
+    Dropping PLAYTEST_CASE_REFS reads as "run every case" rather than "the
+    setup suite was never armed", so a broken setup file turns into a run that
+    silently exercises the wrong thing.
+    """
+    import suite_loader
+
+    with tempfile.TemporaryDirectory(prefix="playtest-caserefs-") as td:
+        root = Path(td)
+        verify_path = root / "feat-restart.json"
+        verify_path.write_text(
+            json.dumps(
+                {
+                    "id": "feat-restart",
+                    "provision": "managed",
+                    "backend": "stock",
+                    "fresh": True,
+                    "server": {"GameWorld": "Navezgane"},
+                    "cases": [
+                        {
+                            "id": "rejoin",
+                            "kind": "live",
+                            "ref": "catalog.feat-restart.rejoin",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "feat-restart-setup.json").write_text("{ truncated", encoding="utf-8")
+        doc = suite_loader.load_suite_file(verify_path)
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            env = playtest_run.playtest_case_refs_env(
+                {"PLAYTEST_CASE_REFS": "catalog.feat-restart.rejoin"},
+                "feat-restart-setup",
+                doc,
+                verify_path,
+            )
+
+        assert "PLAYTEST_CASE_REFS" not in env, env
+        assert "feat-restart-setup.json" in stderr.getvalue(), stderr.getvalue()
+    print("PASS rejoin_setup_suite_failure_is_reported")
+
+
 def test_start_server_does_not_flip_no_server() -> None:
     src = PLAYTEST_RUN.read_text(encoding="utf-8")
     assert "args.no_server = True" not in src, (
@@ -2382,6 +2430,10 @@ def main() -> int:
         (
             "rejoin_case_refs_use_armed_suite",
             test_playtest_case_refs_env_rejoin_uses_sibling_file,
+        ),
+        (
+            "rejoin_setup_suite_failure_is_reported",
+            test_rejoin_setup_suite_that_will_not_load_is_reported,
         ),
         (
             "start_server_does_not_flip_no_server",

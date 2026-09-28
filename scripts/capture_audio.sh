@@ -91,6 +91,7 @@ MONITOR="${SINK}.monitor"
 mkdir -p "$OUT"
 WAV="$OUT/audio.wav"
 RUN_LOG="$OUT/run.log"
+EMPTY_WAV=0
 
 echo "CAPTURE AUDIO"
 echo "  suite         $SUITE"
@@ -125,7 +126,14 @@ if [[ -s "$WAV" ]]; then
 	fi
 else
 	echo "  recording     EMPTY -- nothing was captured" >&2
+	# The recorder dying on a busy or vanished monitor is a failed capture, not
+	# a passing one. Exiting 0 here ships an audio run with no audio, and the
+	# suite's own 0 is the only status a caller reads.
+	EMPTY_WAV=1
 fi
 grep -E "\[7dtd-playtest\] (PASS|FAIL) $SUITE" "$RUN_LOG" | tail -3 || true
 echo "  suite log     $RUN_LOG"
+if (( EMPTY_WAV )); then
+	exit 1
+fi
 exit "$RUN_RC"

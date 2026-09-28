@@ -882,6 +882,25 @@ def test_collect_visual_reviews_is_empty_without_a_directory() -> None:
         assert playtest_run.collect_visual_reviews(Path(temporary) / "missing") == {}
 
 
+def test_unreadable_review_envelope_is_reported_not_dropped() -> None:
+    """A skipped envelope is evidence that vanished.
+
+    The report would otherwise look reviewed for a case whose review was
+    truncated or half-written, with nothing anywhere saying so.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        evidence = Path(temporary) / "reviews"
+        evidence.mkdir()
+        (evidence / "review-half-written.json").write_text('{"intent": ', encoding="utf-8")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            reviews = playtest_run.collect_visual_reviews(evidence)
+
+        assert reviews == {}, reviews
+        assert "review-half-written.json" in stderr.getvalue(), stderr.getvalue()
+
+
 def _run_report_summary(path: Path) -> tuple[int, str]:
     """Drive report_summary's real entry point, returning (exit code, stdout)."""
     out = io.StringIO()
@@ -1127,6 +1146,7 @@ def main() -> int:
     test_contract_lines_parse_under_the_games_log_prefix()
     test_collect_visual_reviews_maps_paths_and_never_verdicts()
     test_collect_visual_reviews_is_empty_without_a_directory()
+    test_unreadable_review_envelope_is_reported_not_dropped()
     test_report_summary_prints_counts_and_fails_closed()
     test_fuzz_report_summary_never_launders_a_broken_lap()
     test_artifacts_publish_by_rename_and_roll_back()

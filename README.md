@@ -904,7 +904,9 @@ Use a custom output directory and runner:
    default sink's monitor for the length of one suite run and reports the
    recording's peak amplitude, so a muted client cannot ship silence unnoticed.
    Same `--runner` contract, same refuse-to-overlap guard; the recording is
-   material for a human verdict, and nothing in it judges:
+   material for a human verdict, and nothing in it judges. An empty recording
+   exits 1 whatever the suite did, so a recorder that died on a busy monitor
+   cannot pass as a captured run:
 
 Run the default audio capture:
 

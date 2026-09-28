@@ -88,6 +88,40 @@ Release model (inferred practice, now pinned by `make test`):
   instead of printing a bare "not found" from the interpreter call. A mistyped
   `make test-one GATE=` lists the known gates.
 
+### Fixed
+
+- **`sb` had no wall-clock bound.** `scripts/playtest_targets.py` ran every
+  Safehouse call without a timeout, so a `sb up`, `sb stage` or `sb stop` that
+  never returned blocked the orchestrator before its poll loop started, and the
+  run's own deadline could not fire: the live client and the exclusive-lock
+  claim were stranded. Each call is now bounded by `SB_COMMAND_TIMEOUT_SEC`,
+  and an overrun raises `TargetError` naming the command and whatever `sb`
+  printed before it wedged.
+- **A teardown that left an instance running said nothing.**
+  `_stop_sandbox_instance` suppressed `TargetError` and, with `check=False`,
+  ignored a non-zero `sb stop` exit, so a dedicated still holding its port
+  block looked identical to a clean stop. Both now report on stderr.
+- **Failures that silently became a green run.** An unreadable rejoin setup
+  suite dropped `PLAYTEST_CASE_REFS` with no message, which reads as "run
+  every case" rather than "the setup was never armed"; an unparseable
+  `review-*.json` envelope vanished from the report. Both now warn and name
+  the file.
+- **The run report could not be reloaded.** `suite_to_report` carried a
+  `source` key that `parse_suite_dict` rejects as unknown, so the run's own
+  record of the suite it ran was not a valid suite document. Provenance moved
+  out to `suite_doc_source` beside the mapping, and
+  `scripts/test_suite_loader.py` now pins the round trip.
+- **A lap could be graded on another run's report.**
+  `scripts/playtest_repeat.sh` selected the newest `report-*.json` from the
+  shared report directory, so a previous lap or a concurrent session supplied
+  the verdict. Each lap now stamps a mark before it runs and only accepts
+  reports newer than that.
+- **Capture scripts reported artifacts they did not produce.**
+  `capture_frames.sh` printed the contact-sheet path whether or not `montage`
+  ran, and `capture_audio.sh` exited 0 on an empty recording, so a recorder
+  that died on a busy monitor shipped as a passing run. The audio capture now
+  exits 1 on an empty recording.
+
 ### Changed
 
 - **One boolean spelling table for every env knob.** `PLAYTEST_READONLY`,

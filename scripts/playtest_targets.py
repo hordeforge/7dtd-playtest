@@ -23,18 +23,32 @@ here is what let a playtest rewrite the install's platform.cfg.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def _warn(message: str) -> None:
+    """Report a failure that must not raise. This module has no log channel."""
+    print(f"playtest-targets: {message}", file=sys.stderr)
+
 
 PROVISIONS = ("managed", "attach")
 BACKENDS = ("stock", "zdtd")
 
 # How long `sb up` may take to bind the game port before the run gives up.
 SANDBOX_UP_TIMEOUT_SEC = 240
+
+# Wall-clock bound on one `sb` invocation. `sb up` gets its own shorter
+# SANDBOX_UP_TIMEOUT_SEC for the port wait; this is the outer bound for a sb
+# that never returns at all (a wedged Proton download, a lock prompt on a
+# second instance, a hung `dotnet build` inside `sb stage`). Without it the
+# orchestrator's poll loop never starts, so the run's deadline cannot fire and
+# the live client and exclusive-lock claim are stranded.
+SB_COMMAND_TIMEOUT_SEC = 900.0
 
 _ENV_ASSIGN = re.compile(
     r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(?:'([^']*)'|\"([^\"]*)\"|(.*))$"
@@ -325,7 +339,10 @@ def sandbox_screen_args(plan: TargetPlan) -> str:
         return DEFAULT_SCREEN_ARGS
     try:
         proc = _run_sb(plan, ["env", plan.sandbox_client], check=False)
-    except TargetError:
+    except TargetError as ex:
+        # A default window command line is the right answer, but say why: a
+        # silent default reads as "the instance asked for no screen args".
+        _warn(f"sb env {plan.sandbox_client} failed ({ex}); using the default screen args")
         return DEFAULT_SCREEN_ARGS
     return parse_sb_env_output(proc.stdout).get("SB_SCREEN_ARGS") or DEFAULT_SCREEN_ARGS
 
@@ -372,10 +389,20 @@ def _stop_sandbox_instance(plan: TargetPlan, name: str | None) -> None:
         return
     if not sb_path(plan.sandbox_root).is_file():
         return
-    # Teardown runs on the way out of a run that may already be failing; a stop
-    # that cannot even start is reported by the caller's own exit path.
-    with contextlib.suppress(TargetError):
-        _run_sb(plan, ["stop", name], check=False)
+    # Teardown runs on the way out of a run that may already be failing, so a
+    # stop must not raise. It must still be reported, and a non-zero exit has
+    # to be read: an instance left up is a live process holding its port
+    # block, and swallowing the reason leaves the operator no way to tell a
+    # clean teardown from an abandoned one.
+    try:
+        proc = _run_sb(plan, ["stop", name], check=False)
+    except TargetError as ex:
+        _warn(f"sandbox {name} could not be stopped: {ex}")
+        return
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else f"exit {proc.returncode}"
+        _warn(f"sb stop {name} failed, the instance may still be running: {tail}")
 
 
 def stop_sandbox_client(plan: TargetPlan) -> None:
@@ -393,6 +420,7 @@ def _run_sb(
     argv: list[str],
     *,
     check: bool = True,
+    timeout: float = SB_COMMAND_TIMEOUT_SEC,
 ) -> subprocess.CompletedProcess[str]:
     assert plan.sandbox_root is not None
     sb = sb_path(plan.sandbox_root)
@@ -408,12 +436,24 @@ def _run_sb(
             encoding="utf-8",
             errors="replace",
             cwd=str(plan.sandbox_root),
+            timeout=timeout,
         )
+    except subprocess.TimeoutExpired as ex:
+        # sb was killed partway, so whatever it printed before the deadline is
+        # the only clue about where it wedged; keep it in the message. The
+        # capture is text-mode, but TimeoutExpired is typed as carrying
+        # whatever the pipe held, so bytes have to be decoded, not str()'d.
+        raw: bytes | str = ex.stderr or ex.stdout or b""
+        detail: str = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+        raise TargetError(
+            f"sb {' '.join(argv)} did not finish within {timeout:g}s: "
+            f"{(detail.strip() or 'no output')[-200:]}"
+        ) from ex
     except OSError as ex:
         raise TargetError(f"could not run sb {' '.join(argv)}: {ex}") from ex
     if check and proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        tail = detail[-1] if detail else f"exit {proc.returncode}"
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = lines[-1] if lines else f"exit {proc.returncode}"
         raise TargetError(f"sb {' '.join(argv)} failed: {tail}")
     return proc
 

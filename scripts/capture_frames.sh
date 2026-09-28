@@ -239,7 +239,8 @@ for f in "$OUT"/raw-*.png; do
 	fi
 done
 montage "$OUT/cropped"/frame-*.png -tile 4x -geometry 420x324+3+3 \
-	-background '#1b1b1b' -label '%f' "$OUT/contact-sheet.png" 2>/dev/null || true
+	-background '#1b1b1b' -label '%f' "$OUT/contact-sheet.png" 2>/dev/null \
+	|| echo "  contact sheet NOT BUILT: montage failed or is not installed" >&2
 
 # Counting only this script's own frame-*.png output (fixed, safe names).
 # ls is intentional here because only the count of the fixed frame glob is needed.
@@ -277,7 +278,10 @@ fi
 echo
 echo "RESULT"
 echo "  frames        $FRAME_COUNT"
-echo "  contact sheet $OUT/contact-sheet.png"
+# Only name the contact sheet when it is on disk. Printing the path
+# unconditionally turns a montage that failed or is not installed into a
+# reviewer opening a file that was never written.
+[[ -f "$OUT/contact-sheet.png" ]] && echo "  contact sheet $OUT/contact-sheet.png"
 echo "  suite exit    $RUN_RC"
 echo "  suite log     $RUN_LOG"
 if [[ -n "$CLIENT_LOG_SAVED" ]]; then

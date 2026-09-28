@@ -445,9 +445,11 @@ def suite_to_report(doc: SuiteDoc) -> dict[str, object]:
 
     Every field of the *document* is carried, so the report reparses as the
     suite that ran (``parse_suite_dict`` on this mapping gives the same
-    document). The path a doc was loaded from is not one of them: ``source``
-    is not a document key, so emitting it would make the report a document the
-    loader refuses to read back.
+    document). Only schema-declared fields appear: the loader rejects every
+    other key, so a provenance field written here would make the run's own
+    record of the suite unloadable. The path a doc was loaded from is not one
+    of them: ``doc.source`` is provenance, not a suite key, so emitting it
+    would make the report a document the loader refuses to read back.
     """
     return {
         "id": doc.id,

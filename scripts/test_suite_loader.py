@@ -249,6 +249,23 @@ def test_suite_to_report_shape() -> None:
     assert str(cases[0]["ref"]).startswith(REF_PREFIX)
 
 
+def test_suite_report_carries_only_schema_fields() -> None:
+    """The run report's suite block must reparse as the suite that ran.
+
+    A provenance key such as `source` belongs beside this mapping, not inside
+    it: the loader rejects every undeclared key, so one leaked field makes the
+    run's own record unloadable while every shape assertion still passes.
+    """
+    doc = sl.load_suite_by_id("smoke", SUITES)
+    assert doc is not None
+    report = sl.suite_to_report(doc)
+    schema = json.loads((ROOT / "schema" / "suite.schema.json").read_text(encoding="utf-8"))
+    declared = set(schema["properties"])
+    assert not (set(report) - declared), sorted(set(report) - declared)
+    reloaded = sl.parse_suite_dict(json.loads(json.dumps(report)), source=doc.source)
+    assert reloaded == doc, reloaded
+
+
 def test_published_schema_matches_the_loader() -> None:
     """schema/suite.schema.json is what an external suite author reads.
 
@@ -512,6 +529,10 @@ TESTS = (
     ("external_suite_cannot_shadow_a_builtin", test_external_suite_cannot_shadow_a_builtin),
     ("resolve_mods_short_names_and_paths", test_resolve_mods_short_names_and_paths),
     ("suite_to_report_shape", test_suite_to_report_shape),
+    (
+        "suite_report_carries_only_schema_fields",
+        test_suite_report_carries_only_schema_fields,
+    ),
     ("published_schema_matches_the_loader", test_published_schema_matches_the_loader),
     ("resolve_mods_refuses_an_unknown_side", test_resolve_mods_refuses_an_unknown_side),
     ("fuzz_suite_documents", test_fuzz_suite_documents_fail_closed_or_hold_invariants),

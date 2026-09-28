@@ -10,6 +10,8 @@ No game binaries. Pins the ownership contract:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import stat
 import sys
@@ -256,12 +258,34 @@ def test_stop_is_best_effort_and_skips_non_sandbox() -> None:
     with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
         root = Path(td)
         _fake_sb(root, 'echo "$@" >> "$PWD/calls.txt"\nexit 3\n')
-        # A failing stop must not raise out of a teardown path.
-        pt.stop_sandbox_server(_plan_on(root))
+        # A failing stop must not raise out of a teardown path, but it must be
+        # reported: an abandoned dedicated holds the instance's port block.
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            pt.stop_sandbox_server(_plan_on(root))
         assert (root / "calls.txt").read_text(encoding="utf-8").strip() == "stop srv-x"
+        assert "srv-x" in stderr.getvalue(), stderr.getvalue()
         # Attach and zdtd plans have no instance to stop.
         pt.stop_sandbox_server(pt.resolve_target(provision="attach"))
         pt.stop_sandbox_server(pt.resolve_target(provision="managed", backend="zdtd"))
+
+
+def test_sb_that_never_returns_fails_instead_of_hanging() -> None:
+    """An sb wedged past its bound must surface, not block the poll loop.
+
+    The run's own wall-clock deadline only fires between polls, so a bring-up
+    that never returns strands the live client and the exclusive-lock claim
+    with nothing to time out against.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
+        root = Path(td)
+        _fake_sb(root, "echo 'stage: downloading depot'\nsleep 30\n")
+        try:
+            pt._run_sb(_plan_on(root), ["stage", "srv-x"], timeout=1.0)
+        except pt.TargetError as ex:
+            assert "did not finish" in str(ex), ex
+        else:
+            raise AssertionError("expected TargetError for an sb that overran its bound")
 
 
 def test_sb_output_with_non_ascii_bytes_is_decoded_not_raised() -> None:
@@ -334,6 +358,10 @@ def main() -> int:
         (
             "stop_is_best_effort_and_skips_non_sandbox",
             test_stop_is_best_effort_and_skips_non_sandbox,
+        ),
+        (
+            "sb_that_never_returns_fails_instead_of_hanging",
+            test_sb_that_never_returns_fails_instead_of_hanging,
         ),
     ]
     saved = {k: os.environ.pop(k, None) for k in ("PLAYTEST_PROVISION", "PLAYTEST_BACKEND")}
