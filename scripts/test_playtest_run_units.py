@@ -414,6 +414,33 @@ def test_prune_run_artifacts_keeps_newest_per_pattern() -> None:
         print("PASS prune_run_artifacts newest kept per pattern, others untouched")
 
 
+def test_prune_run_artifacts_warns_on_a_failed_delete() -> None:
+    """A prune that cannot delete must say so. This bound is the only thing
+    keeping the logdir from growing without limit, so a silently undeleted
+    report reads as a pruned run while the bytes stay."""
+    with tempfile.TemporaryDirectory(prefix="playtest-artifacts-") as td:
+        logdir = Path(td) / "cache"
+        logdir.mkdir()
+        names = [f"report-{1700000000 + i}.json" for i in range(3)]
+        for name in names:
+            (logdir / name).write_text("{}", encoding="utf-8")
+
+        errbuf = io.StringIO()
+        with (
+            mock.patch.object(Path, "unlink", side_effect=OSError("busy")),
+            contextlib.redirect_stderr(errbuf),
+        ):
+            playtest_run.prune_run_artifacts(logdir, keep=1)
+
+        noise = errbuf.getvalue()
+        assert names[0] in noise, f"prune must name the undeleted artifact: {noise!r}"
+        assert "busy" in noise, f"prune must carry the OS error: {noise!r}"
+        assert sorted(p.name for p in logdir.glob("report-*.json")) == names, (
+            "a failed prune leaves the artifact in place, never half-removed"
+        )
+        print("PASS prune_run_artifacts reports an undeleted artifact and keeps it")
+
+
 def test_prune_run_artifacts_wired_into_main() -> None:
     """Every path that writes timestamped artifacts into <logdir> must prune,
     or the bound silently stops covering new writers (rejoin-abort path and
@@ -2143,6 +2170,10 @@ def main() -> int:
             test_prune_run_artifacts_keeps_newest_per_pattern,
         ),
         ("prune_run_artifacts_wiring", test_prune_run_artifacts_wired_into_main),
+        (
+            "prune_run_artifacts_failure",
+            test_prune_run_artifacts_warns_on_a_failed_delete,
+        ),
         ("run_ended_marker_per_run", test_run_ended_marker_is_per_run),
         (
             "loadgen_events_truncated_per_run",

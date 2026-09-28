@@ -1606,8 +1606,13 @@ def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
             warn(f"artifact prune skipped ({ex}); old {pattern} will accumulate")
             continue
         for old in entries[:-keep]:
-            with contextlib.suppress(OSError):
+            try:
                 old.unlink()
+            except OSError as ex:
+                # This prune is the only bound on logdir growth, and a failed
+                # unlink leaves a run's evidence and its disk bytes behind, so
+                # report it rather than letting the run look like it pruned.
+                warn(f"could not prune {old}: {ex}")
 
 
 def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:

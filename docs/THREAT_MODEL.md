@@ -19,7 +19,7 @@ risk below names where a fix belongs (sec-review or the owning repo).
 | R4 | Mod supply chain executes inside the game client | B5 | Any installed assembly implementing `IScenarioProvider` is auto-instantiated; the built dist DLL is installed into Mods unverified | Gap (accepted for dev use) |
 | R5 | Lock tampering / stale-takeover races redirect destructive cleanup | B6 | A wrong takeover lets one agent `pkill` another's client/server or move save data aside | Mitigated, residual risk |
 | R6 | Availability: broad process kills and destructive moves | B4 | `--kill-wine` kills Steam/wine sessions; `--fresh-save` moves saves under `<logdir>/quarantine` (recoverable until pruned); misdirected paths widen blast radius | Mitigated (quarantine), operator-scoped residual |
-| R7 | No disclosure path; audit trail is bounded run artifacts | - | No SECURITY.md exists; evidence lives under LOGDIR and is pruned (newest 50 reports, newest 5 quarantine entries) | Note only |
+| R7 | No disclosure path; audit trail is bounded run artifacts | - | No SECURITY.md exists; evidence lives under LOGDIR and `.local/capture/`, both on one local disk, and is pruned (newest 50 reports, newest 5 quarantine entries) | Note only |
 
 ## Assets
 
@@ -205,7 +205,10 @@ evidence is read from code.
   snapshots, but retention is bounded by design (newest 50 report/junit pairs
   scripts/playtest_run.py:1035-1050; newest 5 quarantine entries :1028) and
   lock takeovers/cleans log to orchestrator stdout only. Enough to answer
-  "what happened this run", thin for post-hoc incident review.
+  "what happened this run", thin for post-hoc incident review. Captured video,
+  contact sheets and review envelopes are the exception: they live only under
+  `.local/capture/<suite>-<stamp>/`, which nothing copies off the host, and a
+  re-run does not reproduce the same frame.
 
 ## Out of scope here
 

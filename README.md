@@ -609,7 +609,8 @@ Durable state this system owns, and what an incident costs:
 | State | Location | Survives instance loss? |
 |---|---|---|
 | Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
-| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run | No |
+| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run, and a prune that cannot delete warns | No |
+| Captured evidence: clip, contact sheet, frames, audio, `client.log`, and the deadeye review envelope | `.local/capture/<suite>-<stamp>/` (gitignored; `--out DIR` overrides) | No |
 | Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/` | No |
 | Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
 
@@ -619,6 +620,13 @@ Recovery facts:
   Losing them costs a suite re-run (RTO = suite wall time). The compare
   baselines are the only long-lived results, and git carries those. Nothing
   here backs up sibling projects (`zdtd`, `7dtd-fastconnect`) or game installs.
+- **Captured evidence is the one artifact a re-run does not reproduce.** A
+  report says what a case asserted; only the clip, contact sheet and review
+  envelope say what the frame actually looked like, and a second run is a
+  different picture. `.local/capture/` is one local disk with no off-host copy,
+  so copy the folder somewhere else (or commit the frames) before relying on a
+  clip as a sign-off record. The review envelope is advisory and never travels
+  in the report, so it is lost with the folder.
 - **Restore a wiped save:** `--fresh-save` no longer hard-deletes. The named
   stock save, zdtd `players.zsv`/`containers.zct`/`blockmeta.zbm`, chunk
   overlays, and the previous client log move into

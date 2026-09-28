@@ -314,7 +314,10 @@ client window, and every frame in a clip is already the client window at
   `capture_frames.sh` run already is. The source frames deliberately stay in
   the client's `playtest-shots/clips/<id>/` (a copy would double a
   40-120 MB clip for evidence the mp4 already carries); the RESULT block
-  names that directory.
+  names that directory. That folder is the clip's only copy: one local disk,
+  gitignored, no off-host copy, and a re-run is a different frame, so move it
+  somewhere else before signing off on it (README "State, backups, and
+  recovery").
 - [x] README's stable log contract table lists `clip complete`.
 - [ ] A person watches a real turntable clip of a real staged subject and
   confirms it shows what the case claims it stages.
