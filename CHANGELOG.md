@@ -231,6 +231,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- **The WalkEntity renderer/grounding probe moved out of the provider
+  contract.** `ReportWalkEntityRenderProbe`, `GroundYFor` and
+  `TryGroundSurface` were private members of `CaseDef` (CaseDef.cs), the type
+  external scenario providers build cases from, so physics and mesh inspection
+  sat beside the case contract they serve. They are now `EntityProbe`
+  (`Source/PlayTestMod/EntityProbe.cs`), an internal type that
+  `CaseDef.WalkEntity` calls. No public symbol moved: the C# provider API
+  `CaseDef`/`CaseCtx`/`IScenarioProvider`/`Helpers`/`Report` is unchanged, and
+  the render-probe evidence lines are byte-for-byte the same.
 - **The mod build answers the pinned SDK again.** `global.json` said
   `rollForward: latestMajor`, so a host that happened to have a .NET 9 or 10
   SDK installed compiled this source with that Roslyn, and the "byte-

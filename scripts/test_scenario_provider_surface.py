@@ -14,6 +14,9 @@ from playtest_log import barrier_hits_prefix
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
 CASEDEF = ROOT / "Source" / "PlayTestMod" / "CaseDef.cs"
+# The live renderer / grounding probe behind CaseDef.WalkEntity. Physics and
+# mesh inspection is not case construction, so it is not in the contract file.
+ENTITYPROBE = ROOT / "Source" / "PlayTestMod" / "EntityProbe.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 PROVIDER = ROOT / "Source" / "PlayTestMod" / "ScenarioProvider.cs"
 HELPERS_GLOB = sorted((ROOT / "Source" / "PlayTestMod").glob("Helpers*.cs"))
@@ -89,6 +92,7 @@ def check_asset_name_round_trip() -> None:
 def main() -> int:
     runner = RUNNER.read_text(encoding="utf-8")
     casedef = CASEDEF.read_text(encoding="utf-8")
+    entityprobe = ENTITYPROBE.read_text(encoding="utf-8")
     catalog = CATALOG.read_text(encoding="utf-8")
     provider = PROVIDER.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
@@ -222,7 +226,7 @@ def main() -> int:
         "WalkEntity must select a camera lane that is clear to the rendered body"
     )
     probe_body = method_body(
-        casedef,
+        entityprobe,
         r"static\s+bool\s+ReportWalkEntityRenderProbe\s*\([^)]*\)",
     )
     for evidence in (
@@ -247,7 +251,7 @@ def main() -> int:
             f"WalkEntity must keep {evidence} in its live renderer diagnostic"
         )
     ground_body = method_body(
-        casedef,
+        entityprobe,
         r"static\s+float\s+GroundYFor\s*\([^)]*\)",
     )
     assert "world.GetHeight(" in ground_body and "+ 1f" in ground_body, (
@@ -263,7 +267,7 @@ def main() -> int:
         "partial and sloped blocks need their actual collider surface, not a voxel ceiling"
     )
     surface_body = method_body(
-        casedef,
+        entityprobe,
         r"static\s+bool\s+TryGroundSurface\s*\([^)]*\)",
     )
     assert "Physics.RaycastAll" in surface_body and "268500992" in surface_body, (
