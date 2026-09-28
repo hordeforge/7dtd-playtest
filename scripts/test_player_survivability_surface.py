@@ -9,7 +9,12 @@ private copy, never the worktree.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from csharp_surface import method_body
 
 ROOT = Path(__file__).resolve().parents[1]
 SURV = ROOT / "Source" / "PlayTestMod" / "PlayerSurvivability.cs"
@@ -18,24 +23,6 @@ MAKEFILE = ROOT / "Makefile"
 README = ROOT / "README.md"
 AGENTS = ROOT / "AGENTS.md"
 CHANGELOG = ROOT / "CHANGELOG.md"
-
-
-def method_body(src: str, signature_re: str) -> str:
-    m = re.search(signature_re, src)
-    assert m, f"method not found: {signature_re}"
-    i = m.end()
-    while i < len(src) and src[i] in " \t\r\n":
-        i += 1
-    assert i < len(src) and src[i] == "{", f"expected '{{' after {signature_re}"
-    depth = 0
-    for j in range(i, len(src)):
-        if src[j] == "{":
-            depth += 1
-        elif src[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[i : j + 1]
-    raise AssertionError(f"unclosed body for {signature_re}")
 
 
 def try_press_calls_spawn_button(src: str) -> bool:

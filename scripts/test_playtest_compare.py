@@ -51,6 +51,25 @@ def _run(tmp_path: Path, stock: str, zdtd: str) -> subprocess.CompletedProcess[s
     return _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(tmp_path / "out"))
 
 
+def _report(server: str, ran_epoch: int) -> dict:
+    """A minimal single-pass report; the freshness guards vary the epoch."""
+    return {
+        "server": server,
+        "ran_epoch": ran_epoch,
+        "summary": {"pass": 1, "fail": 0, "skip": 0},
+        "results": [{"case": "smoke/join", "status": "PASS"}],
+    }
+
+
+def _report_pair(tmp_path: Path, ran_epoch: int) -> tuple[Path, Path]:
+    """One matching stock/zdtd report pair, both stamped `ran_epoch`."""
+    s = tmp_path / "stock.json"
+    z = tmp_path / "zdtd.json"
+    s.write_text(json.dumps(_report("stock", ran_epoch)), encoding="utf-8")
+    z.write_text(json.dumps(_report("zdtd", ran_epoch)), encoding="utf-8")
+    return s, z
+
+
 def test_status_mismatch_becomes_finding(tmp_path: Path) -> None:
     r = _run(tmp_path, STOCK_LOG, ZDTD_LOG)
     assert r.returncode == 0, r.stderr
@@ -154,14 +173,10 @@ def test_exit_codes_documented_in_help() -> None:
 def test_missing_side_refuses_diff(tmp_path: Path) -> None:
     """A side dir without any report must fail loudly, naming the side, and
     must NOT write comparison outputs (no phantom 'compared' result)."""
-    import time
     now = int(time.time())
     s = tmp_path / "stock" / f"report-{now}.json"
     s.parent.mkdir(parents=True)
-    s.write_text(json.dumps({"server": "stock", "ran_epoch": now,
-                             "summary": {"pass": 1, "fail": 0, "skip": 0},
-                             "results": [{"case": "smoke/join", "status": "PASS"}]}),
-                 encoding="utf-8")
+    s.write_text(json.dumps(_report("stock", now)), encoding="utf-8")
     z = tmp_path / "zdtd"   # empty dir: side never ran
     z.mkdir()
     out = tmp_path / "out"
@@ -174,18 +189,13 @@ def test_missing_side_refuses_diff(tmp_path: Path) -> None:
 def test_stale_report_refuses_diff(tmp_path: Path) -> None:
     """Old reports (e.g. a previous session) must fail the freshness guard
     instead of being diffed as if fresh, and must not write outputs."""
-    import time
     old = int(time.time()) - 6 * 86400
-    def report(server: str) -> dict:
-        return {"server": server, "ran_epoch": old,
-                "summary": {"pass": 1, "fail": 0, "skip": 0},
-                "results": [{"case": "smoke/join", "status": "PASS"}]}
     s = tmp_path / "stock" / f"report-{old}.json"
     z = tmp_path / "zdtd" / f"report-{old}.json"
     s.parent.mkdir()
     z.parent.mkdir()
-    s.write_text(json.dumps(report("stock")), encoding="utf-8")
-    z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
+    s.write_text(json.dumps(_report("stock", old)), encoding="utf-8")
+    z.write_text(json.dumps(_report("zdtd", old)), encoding="utf-8")
     out = tmp_path / "out"
     r = _run_cli("--stock-dir", str(s.parent), "--zdtd-dir", str(z.parent),
                  "--out", str(out), "--require-fresh-minutes", "60")
@@ -198,16 +208,7 @@ def test_future_epoch_refuses_freshness_guard(tmp_path: Path) -> None:
     """A ran_epoch years ahead of now used to pass --require-fresh-minutes
     because now-epoch is negative. It must fail like any other unusable age."""
     future = int(time.time()) + 50 * 365 * 86400
-
-    def report(server: str) -> dict:
-        return {"server": server, "ran_epoch": future,
-                "summary": {"pass": 1, "fail": 0, "skip": 0},
-                "results": [{"case": "smoke/join", "status": "PASS"}]}
-
-    s = tmp_path / "stock.json"
-    z = tmp_path / "zdtd.json"
-    s.write_text(json.dumps(report("stock")), encoding="utf-8")
-    z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
+    s, z = _report_pair(tmp_path, future)
     out = tmp_path / "out"
     r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out),
                  "--require-fresh-minutes", "60")
@@ -235,16 +236,8 @@ def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
 def test_ran_at_surfaces_in_report(tmp_path: Path) -> None:
     """Fresh report JSONs carry ranAtUtc; the md shows a ran (UTC) row so a
     reader can tell when each side actually ran."""
-    import time
     now = int(time.time())
-    def report(server: str) -> dict:
-        return {"server": server, "ran_epoch": now,
-                "summary": {"pass": 1, "fail": 0, "skip": 0},
-                "results": [{"case": "smoke/join", "status": "PASS"}]}
-    s = tmp_path / "stock.json"
-    z = tmp_path / "zdtd.json"
-    s.write_text(json.dumps(report("stock")), encoding="utf-8")
-    z.write_text(json.dumps(report("zdtd")), encoding="utf-8")
+    s, z = _report_pair(tmp_path, now)
     out = tmp_path / "out"
     r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
     assert r.returncode == 0, r.stderr
@@ -422,7 +415,5 @@ def test_non_string_case_in_report_does_not_crash_diff(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    import sys
-
     import pytest
     sys.exit(pytest.main([__file__, "-q"]))

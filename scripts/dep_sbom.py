@@ -108,7 +108,7 @@ def _component(
     direct: bool,
     dev: bool,
 ) -> JsonObject:
-    component: JsonObject = {
+    return {
         "type": TYPE_LIBRARY,
         "name": name,
         "version": version,
@@ -119,7 +119,6 @@ def _component(
             {"name": PROP_DEV, "value": "true" if dev else "false"},
         ],
     }
-    return component
 
 
 def _dev_edges(package: JsonObject) -> list[JsonObject]:
@@ -219,7 +218,7 @@ def build_sbom(uv_lock: JsonObject, nuget_lock: JsonObject) -> JsonObject:
     components = uv_components(uv_lock) + nuget_components(nuget_lock)
     if not components:
         raise ValueError("no components resolved from the lockfiles")
-    document: JsonObject = {
+    return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
         "serialNumber": "urn:uuid:" + _serial_number(uv_lock, nuget_lock),
@@ -238,7 +237,6 @@ def build_sbom(uv_lock: JsonObject, nuget_lock: JsonObject) -> JsonObject:
         },
         "components": components,
     }
-    return document
 
 
 def main(argv: list[str]) -> int:
