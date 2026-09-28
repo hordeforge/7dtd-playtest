@@ -1183,14 +1183,16 @@ See [Stable log contract](#stable-log-contract-do-not-rename) above.
 
 ## CI
 
-`.github/workflows/ci.yml` runs `make test` (the offline gates: catalog<->SCENARIOS
-surface incl. live rows + counts total, mod version/changelog sync, scenario-provider
-env surface, mining-probe provider surface, stock-peer orchestration surface, host
-lock, deterministic simulation, orchestrator local-init order, report/log surface,
-orchestrator pure-logic units, compare diff, capture-clip marker surface,
-video-review surface, dependency SBOM; `GATES` in the Makefile is the full
-list, and `scripts/test_gate_list.py` fails when a gate file is missing from it
-or an entry stops existing)
+`.github/workflows/ci.yml` runs `make test` (lint, typecheck, then every gate
+in the Makefile `GATES` list: the catalog<->SCENARIOS surface incl. live rows
+and counts total, the mod version/changelog sync, the scenario-provider env
+surface, the mining-probe and other provider-API surfaces, the stock-peer
+orchestration surface, the host lock and its deterministic simulation, the
+orchestrator local-init order, report/log, pure-logic unit and quarantine
+surfaces, the compare diff, the capture-clip and video-review surfaces, and the
+packaging, path, gate-list, SBOM and coverage-badge surfaces; `GATES` in the
+Makefile is the full list, and `scripts/test_gate_list.py` fails when a gate
+file is missing from it or an entry stops existing)
 plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
 runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are

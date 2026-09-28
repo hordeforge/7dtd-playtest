@@ -426,9 +426,9 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the twenty-five offline gate files on
-every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
-and are blocking:
+`make test` runs lint + typecheck plus every offline gate file in the Makefile
+`GATES` list on every push (CI: `.github/workflows/ci.yml`). The analysis gates
+come first and are blocking:
 
 0. ruff over `scripts/`, shellcheck over the bash helpers and yamllint over
    the shipped workflow YAML (`.github/`, config in `.yamllint.yml`), all
