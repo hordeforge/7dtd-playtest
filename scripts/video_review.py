@@ -15,6 +15,7 @@ requires is untouched, and nothing in this module can mark a clip accepted.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -695,7 +696,11 @@ def _write_evidence(output: Path, envelope: dict[str, object]) -> None:
         )
         staging.replace(output)
     except OSError as exc:
-        staging.unlink(missing_ok=True)
+        # A staging file the same unwritable directory refuses to remove must
+        # not replace the message naming the real destination: that raise
+        # would surface as a bare OSError traceback about a dotfile.
+        with contextlib.suppress(OSError):
+            staging.unlink(missing_ok=True)
         raise ReviewError(f"cannot write the evidence file {output}: {exc}") from exc
 
 
