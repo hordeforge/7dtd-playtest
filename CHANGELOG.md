@@ -130,6 +130,14 @@ Release model (inferred practice, now pinned by `make test`):
   result was known. Each level is shape-checked, an envelope over 8 MiB is
   skipped with a warning, and a file whose intent is unusable still appears in
   the report keyed by its stem.
+- **A malformed port in the instance contract read as "not allocated".**
+  `playtest_targets._optional_int` returned `None` for a `SERVER_PORT` /
+  `SERVER_TELNET_PORT` that did not parse, so a corrupt `instance.env` left a
+  managed run on the pre-`sb up` placeholder (or the lab default) and the only
+  complaint named an unusable number rather than the line that caused it. A
+  set-but-unparseable value is now a `TargetError` naming the key and the
+  value; unset stays unset. `test_playtest_targets.py` covers both the
+  post-`sb up` overlay and target resolution.
 - **`sb` had no wall-clock bound.** `scripts/playtest_targets.py` ran every
   Safehouse call without a timeout, so a `sb up`, `sb stage` or `sb stop` that
   never returned blocked the orchestrator before its poll loop started, and the

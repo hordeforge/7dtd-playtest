@@ -2739,7 +2739,7 @@ def main(argv: list[str] | None = None) -> int:
             sandbox_root=args.sandbox_root,
             workspace=WORKSPACE,
         )
-    except ValueError as ex:
+    except (ValueError, playtest_targets.TargetError) as ex:
         ap.error(str(ex))
     if target_plan.is_sandbox:
         # Safehouse allocates the instance's ports; an operator port would send
@@ -3290,7 +3290,11 @@ def main(argv: list[str] | None = None) -> int:
                 except playtest_targets.TargetError as ex:
                     err(f"sandbox bring-up failed: {ex}")
                     return False
-                playtest_targets.overlay_instance_env(args, env_map)
+                try:
+                    playtest_targets.overlay_instance_env(args, env_map)
+                except playtest_targets.TargetError as ex:
+                    err(f"instance {plan.sandbox_server} contract is unusable: {ex}")
+                    return False
                 try:
                     require_litenet_room(args.port)
                     require_telnet_port(args.admin_port)

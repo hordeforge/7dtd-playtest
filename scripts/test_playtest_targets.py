@@ -322,6 +322,37 @@ def test_non_utf8_instance_env_is_named_not_ignored() -> None:
             raise AssertionError("expected TargetError for a non-UTF-8 instance.env")
 
 
+def test_malformed_port_in_instance_env_is_named_not_ignored() -> None:
+    """A port that does not parse must not read as "not allocated": the run
+    would keep the pre-`sb up` placeholder and report an unusable number."""
+    args = argparse.Namespace(port=0, admin_port=8081, game_srv=None, userdata=None)
+    try:
+        pt.overlay_instance_env(args, {"SERVER_PORT": "27OOO"})
+    except pt.TargetError as ex:
+        assert "SERVER_PORT" in str(ex) and "27OOO" in str(ex), ex
+    else:
+        raise AssertionError("expected TargetError for a non-integer SERVER_PORT")
+    assert args.port == 0, "a refused overlay must leave args untouched"
+
+
+def test_malformed_port_stops_target_resolution() -> None:
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
+        root = Path(td)
+        inst = root / "instances" / "srv-x"
+        inst.mkdir(parents=True)
+        (inst / "instance.env").write_text(
+            "SERVER_PORT=not-a-port\nSERVER_TELNET_PORT=27101\n", encoding="utf-8"
+        )
+        try:
+            pt.resolve_target(
+                provision="managed", sandbox_name="x", sandbox_root=root, workspace=root
+            )
+        except pt.TargetError as ex:
+            assert "SERVER_PORT" in str(ex), ex
+        else:
+            raise AssertionError("expected TargetError for a non-integer SERVER_PORT")
+
+
 def main() -> int:
     fails = 0
     cases = [
@@ -334,6 +365,14 @@ def main() -> int:
         ("readonly_is_attach_only", test_readonly_is_attach_only),
         ("apply_plan_to_args", test_apply_plan_to_args),
         ("overlay_instance_env_wins_over_defaults", test_overlay_instance_env_wins_over_defaults),
+        (
+            "malformed_port_in_instance_env_is_named_not_ignored",
+            test_malformed_port_in_instance_env_is_named_not_ignored,
+        ),
+        (
+            "malformed_port_stops_target_resolution",
+            test_malformed_port_stops_target_resolution,
+        ),
         ("target_report_fields", test_target_report_fields),
         ("parse_sb_env_output", test_parse_sb_env_output),
         ("missing_sb_names_the_path", test_missing_sb_names_the_path),

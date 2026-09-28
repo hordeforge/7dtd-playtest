@@ -184,19 +184,28 @@ def resolve_target(
         sandbox_root=sb_root,
         game_srv=_optional_path(env_map.get("SERVER_GAME")),
         userdata=_optional_path(env_map.get("SERVER_USERDATA")),
-        port=_optional_int(env_map.get("SERVER_PORT")),
-        telnet_port=_optional_int(env_map.get("SERVER_TELNET_PORT")),
+        port=_optional_int(env_map.get("SERVER_PORT"), "SERVER_PORT"),
+        telnet_port=_optional_int(env_map.get("SERVER_TELNET_PORT"), "SERVER_TELNET_PORT"),
         notes=("Safehouse owns isolation, ports, fresh save and teardown",),
     )
 
 
-def _optional_int(raw: str | None) -> int | None:
+def _optional_int(raw: str | None, key: str) -> int | None:
+    """A contract integer: unset is None, set-but-malformed is a TargetError.
+
+    A port that fails to parse used to read as absent, which left the run on
+    the pre-`sb up` placeholder (or the lab default) and reported the unusable
+    number rather than the corrupt line that caused it.
+    """
     if raw is None or not str(raw).strip():
         return None
+    value = str(raw).strip()
     try:
-        return int(str(raw).strip())
+        return int(value)
     except ValueError:
-        return None
+        raise TargetError(
+            f"{key}={value!r} in the instance contract is not an integer"
+        ) from None
 
 
 def _optional_path(raw: str | None) -> Path | None:
@@ -479,9 +488,14 @@ def apply_plan_to_args(args: argparse.Namespace, plan: TargetPlan) -> None:
 
 
 def overlay_instance_env(args: argparse.Namespace, env_map: dict[str, str]) -> None:
-    """Overlay the live instance.env onto args after `sb up` allocated it."""
-    port = _optional_int(env_map.get("SERVER_PORT"))
-    telnet = _optional_int(env_map.get("SERVER_TELNET_PORT"))
+    """Overlay the live instance.env onto args after `sb up` allocated it.
+
+    Raises TargetError naming the key and value: the ports this map carries
+    are the ones the run connects to, and a silently skipped line leaves the
+    pre-`sb up` placeholder in place.
+    """
+    port = _optional_int(env_map.get("SERVER_PORT"), "SERVER_PORT")
+    telnet = _optional_int(env_map.get("SERVER_TELNET_PORT"), "SERVER_TELNET_PORT")
     game = _optional_path(env_map.get("SERVER_GAME"))
     userdata = _optional_path(env_map.get("SERVER_USERDATA"))
     if port is not None:
