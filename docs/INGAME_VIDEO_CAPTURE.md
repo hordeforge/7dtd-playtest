@@ -132,6 +132,9 @@ public static CaseDef StagedClip(
     Action<CaseCtx, float> onHold = null)
 ```
 
+The sketch below shows the shape of the callback; the shipped `StagedClip`
+(`CaseDef.cs:294`) is the authority for its exact timing.
+
 Internally this is `Staged`'s `wait` callback with one change: instead of a
 single `if (ctx.IntA == 1 && ctx.IntB == 0 && elapsed >=
 Mathf.Min(1f, holdSeconds * 0.25f))` check that fires once (the clamp caps a
@@ -157,8 +160,10 @@ wait: ctx =>
     if (done && ctx.IntC == 0)
     {
         ctx.IntC = 1;
-        Log.Out("[7dtd-playtest] clip complete " + id + " frames=" + ctx.IntB
-            + " -> playtest-shots/clips/" + id);
+        // AssetName, not the raw id: the collector reads the directory from
+        // this line, so the two names have to be one.
+        Log.Out("[7dtd-playtest] clip complete " + Helpers.AssetName(id) + " frames=" + ctx.IntB
+            + " -> playtest-shots/clips/" + Helpers.AssetName(id));
     }
     return done;
 },
@@ -267,7 +272,8 @@ and what it does once the wait ends:
 ```
 
 `CAPTURE_CLIP_ID` (default: the first `clip complete` seen in the log) and
-`CAPTURE_FPS` mirror `capture_frames.sh`'s tuning environment variables.
+`CAPTURE_FPS` are video-only; `capture_frames.sh` has no clip id and tunes with
+its own `CAPTURE_FRAMES` / `CAPTURE_INTERVAL` / `CAPTURE_CROP`.
 `CAPTURE_CROP` has no counterpart here: it crops a desktop grab to the
 client window, and every frame in a clip is already the client window at
 `captureSuperSize`.

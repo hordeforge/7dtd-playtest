@@ -17,7 +17,7 @@ namespace ZdtdPlaytest
         }
 
 
-        /// <summary>Count non-empty primary trader inventory entries.</summary>
+        /// <summary>Entry count of the primary trader inventory; no emptiness filter.</summary>
         public static int CountTraderPrimaryEntries(EntityTrader trader)
         {
             if (trader == null) return 0;
@@ -49,7 +49,8 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// Seed trader stock with a stack and perform a local buy: move stack to player bag,
-        /// deduct casinoCoin. Returns true if coin spent and player bag gained an item.
+        /// deduct casinoCoin. Returns true when coins were spent and goods moved
+        /// (a bag slot filled or trader stock dropped).
         /// </summary>
         public static bool TryTraderBuyLocal(EntityPlayerLocal player, EntityTrader trader, out string detail)
         {

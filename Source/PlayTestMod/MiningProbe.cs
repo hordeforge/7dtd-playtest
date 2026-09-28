@@ -15,8 +15,11 @@ namespace ZdtdPlaytest
         public string AwardItemName;
         public Vector3i TargetOffset;
         public float TimeoutSeconds;
+        /// <summary>Attempt cap. Exceeding it fails the case like a timeout, not a case timeout.</summary>
         public int MaxAttempts;
+        /// <summary>Standoff AimAtTarget teleports to before every swing.</summary>
         public float Standoff;
+        /// <summary>Wait between attempts; a swing must also have finished first.</summary>
         public float CooldownSeconds;
 
         public MiningSpec()

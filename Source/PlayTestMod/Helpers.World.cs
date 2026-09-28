@@ -78,6 +78,8 @@ namespace ZdtdPlaytest
         }
 
 
+        /// <summary>Client-to-server block change. The server accepts it, so a fixture
+        /// seeded this way is world state the dedicated really has.</summary>
         public static void SetBlockRpc(World world, Vector3i pos, BlockValue bv)
         {
             world.SetBlocksRPC(new List<BlockChangeInfo>
@@ -166,7 +168,7 @@ namespace ZdtdPlaytest
         }
 
 
-        /// <summary>Stock worldTime: days in high bits, hours packed.</summary>
+        /// <summary>Decode worldTime to day/hour/minute through GameUtils.</summary>
         /// <remarks>
         /// Returns false when the GameUtils decode is unavailable (API drift);
         /// out values are meaningless then. Callers must surface the failure:
@@ -244,6 +246,8 @@ namespace ZdtdPlaytest
         }
 
 
+        /// <summary>Highest block type in a column footprint. Samples dy -2..6 only,
+        /// so it is a near-surface band, not the whole radius.</summary>
         public static int MaxBlockTypeInRadius(World world, Vector3 center, int radiusBlocks)
         {
             int max = 0;
@@ -263,6 +267,8 @@ namespace ZdtdPlaytest
         }
 
 
+        /// <summary>Sample one Y level (dy 0) over the square of radius r: solid
+        /// count, air count, and distinct block types seen.</summary>
         public static void SampleRing(World world, Vector3i origin, int r, out int solid, out int air, out int distinct)
         {
             solid = 0;
@@ -283,6 +289,8 @@ namespace ZdtdPlaytest
         }
 
 
+        /// <summary>Count water-ish cells over a column footprint, stepping x/z by 2
+        /// and sampling dy -4..2. A coarse grid, not a dense radius count.</summary>
         public static int CountWaterInRadius(World world, Vector3 center, int radiusBlocks)
         {
             int n = 0;

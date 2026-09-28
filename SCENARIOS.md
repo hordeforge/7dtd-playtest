@@ -84,11 +84,11 @@ make playtest SUITE=combat
 | `look_yaw_sweep` | live | input, demo, bench | 4-cardinal camera pan |
 | `walk_motor` | live | move, demo, bench, locomotion | **Motor walk** (`isAutorun`+`MovementInput`); ≥1.5 m, multi-tick, hopMax&lt;2 m |
 | `walk_ring` | live | move, demo, bench, locomotion | **Motor ring**: four yaw legs; path ≥2 m |
-| `sprint_motor` | live | move, demo, locomotion | Sprint 2 s; ≥3.5 m smooth |
+| `sprint_motor` | live | move, demo, bench, locomotion | Sprint 2 s; ≥3.5 m smooth |
 | `stamina_drains_sprint` | live | player, demo, locomotion | Sprint pulse; `Stamina` drops ≥1.5 |
 | `sneak_motor` | live | move, demo, locomotion | Sneak 2 s; moves but slower than sprint |
 | `walk_lateral` | live | move, demo, locomotion | Motor walk facing yaw=90; ≥1.5 m smooth (axis free) |
-| `jump_motor` | live | move, demo, locomotion | Pulse `MovementInput.jump`; peak Y rise ≥0.35 m |
+| `jump_motor` | live | move, demo, locomotion | Pulse `MovementInput.jump`; peak Y rise ≥0.25 m and < 4 m |
 | `inventory` | live | inv, demo | Inventory non-null + held type |
 | `bag_present` | live | inv, demo | Bag slot array length &gt; 0 |
 | `dig_confirm` | live | world, c2s, setblock, demo, bench | Seed solid then dig; GetBlock → air (self-contained) |
@@ -111,10 +111,10 @@ make playtest SUITE=combat
 | `world_time` | live | world, demo | `worldTime` readable |
 | `world_time_advances` | live | world, demo, bench | `worldTime` increases while waiting |
 | `biome_id` | live | world | Biome id ≥ 0 at player |
-| `poi_textures_non_terrain` | live | world, poi | Tele to POI; block id ≥ 256 |
-| `weather_array` | live | world, weather | S2C weather residual |
-| `deco_trees` | live | world, deco | AssignIds match |
-| `water_plane` | live | world, water | WaterSet + mass/isWater/block sample (not package-only) |
+| `poi_textures_non_terrain` | live | world, poi, demo | Tele to POI; block id ≥ 256 |
+| `weather_array` | live | world, weather, demo | S2C weather residual |
+| `deco_trees` | live | world, deco, demo | Count plant/deco-named non-air blocks in a 13x13x6 sample; assert the scan returned blocks |
+| `water_plane` | live | world, water, demo | WaterSet + mass/isWater/block sample (not package-only) |
 
 ---
 
@@ -137,16 +137,16 @@ make playtest SUITE=combat
 
 | Case | Status | Tags | Notes |
 |---|---|---|---|
-| `alive_flags_self` | live | combat, player | Alive, not dead, hp &gt; 0 |
-| `held_item_type` | live | combat, inv | Holding type ≥ 0 |
-| `zombie_or_npc_nearby` | live | combat, entity, admin | barrier + telnet spawn; wait EntityAlive |
-| `zombie_target_has_health` | live | combat, entity, demo | nearest NPC `Health > 0` + class name |
+| `alive_flags_self` | live | combat, player, demo | Alive, not dead, hp &gt; 0 |
+| `held_item_type` | live | combat, inv, demo | Holding type ≥ 0 |
+| `zombie_or_npc_nearby` | live | combat, entity, demo, admin | barrier + telnet spawn; wait EntityAlive |
+| `zombie_target_has_health` | live | combat, entity, demo, admin | nearest NPC `Health > 0` + class name |
 | `melee_damage_out` | live | combat, c2s, demo, melee | Setup near target; stock `UseHoldingItem`/`Attack`; HP drops |
 | `ranged_shot` | live | combat, c2s, demo, ranged | Pipe pistol + mag Meta; fire; Meta drop and/or target HP |
-| `zombie_death_loot` | live | combat, loot | Kill → ECD loot bag (RNG); controlled drop is `loot_bag_pickup` |
-| `explosion_client` | live | combat, c2s | Soft block seed + melee damage/break (no admin Air clear) |
-| `sleeper_wake` | live | combat, sleeper | TriggerSleeperPose then ConditionalTriggerSleeperWakeUp |
-| `blood_moon_music` | live | combat, bm | Host settime night (observed hour) then restore day |
+| `zombie_death_loot` | live | combat, loot, demo, admin | Kill → ECD loot bag (RNG); controlled drop is `loot_bag_pickup` |
+| `explosion_client` | live | combat, c2s, demo | Soft block seed + melee damage/break (no admin Air clear) |
+| `sleeper_wake` | live | combat, sleeper, demo, admin | TriggerSleeperPose then ConditionalTriggerSleeperWakeUp |
+| `blood_moon_music` | live | combat, bm, demo, admin | Host settime night (observed hour) then restore day |
 
 ---
 
@@ -157,8 +157,8 @@ suites stay healthy.
 
 | Case | Status | Tags | Notes |
 |---|---|---|---|
-| `player_death_screen` | live | combat, player, admin | Admin kill player |
-| `player_respawn` | live | combat, player | After death |
+| `player_death_screen` | live | combat, player, demo, admin | Admin kill player |
+| `player_respawn` | live | combat, player, demo | After death |
 
 ---
 
@@ -173,11 +173,11 @@ suites stay healthy.
 | `loot_bag_pickup` | live | economy, loot, c2s, demo | ItemDrop + `Entity.Collect` → drop gone / bag up |
 | `land_claim_place` | live | economy, claim, demo, c2s | Place `keystoneBlock`; solid or claim table |
 | `zombie_removed_after_kill` | live | economy, loot, demo, admin | barrier kill fixture zombie; EntityAlive other drops |
-| `craft_consume_output` | live | economy, craft, demo | Give wood; queue wooden club; wood↓ or club↑ |
+| `craft_consume_output` | live | economy, craft, demo, admin | Give wood; queue wooden club; wood↓ or club↑ |
 | `workstation_burn` | live | economy, te, craft, demo | Place campfire; solid (+ TE if ready) |
-| `chest_open_loot` | live | economy, te, admin | TE lock + loot |
-| `trader_stock_ui` | live | economy, trader | EntityTrader in range (+ TraderData) |
-| `trader_buy` | live | economy, trader | Coins spent + stock/goods change |
+| `chest_open_loot` | live | economy, te, demo | TE lock + loot |
+| `trader_stock_ui` | live | economy, trader, demo | EntityTrader in range (+ TraderData) |
+| `trader_buy` | live | economy, trader, demo | Coins spent + stock/goods change |
 
 ---
 
@@ -187,11 +187,11 @@ suites stay healthy.
 |---|---|---|---|
 | `journal_exists` | live | quest, demo | Journal object |
 | `journal_iterate` | live | quest, demo | Iterate quest list without throw (count may be 0) |
-| `starter_quest_active` | live | quest | Seeded starter in journal (count &gt; 0) |
-| `quest_goto_progress` | live | quest | Phase bump and/or move ≥1.5 m |
-| `quest_kill_progress` | live | quest, combat | Phase/objective/state change after kill nudge |
-| `quest_turn_in` | live | quest, trader | CompleteQuest → Completed state |
-| `quest_nav_marker` | live | quest, ui | NavObjectManager register |
+| `starter_quest_active` | live | quest, demo | Seeded starter in journal (count &gt; 0) |
+| `quest_goto_progress` | live | quest, demo | Phase bump and/or move ≥1.5 m |
+| `quest_kill_progress` | live | quest, combat, demo | Phase/objective/state change after kill nudge |
+| `quest_turn_in` | live | quest, trader, demo | CompleteQuest → Completed state |
+| `quest_nav_marker` | live | quest, ui, demo | NavObjectManager register |
 
 (`shared_quest` is documented under `mp`; it needs a peer fixture and the
 catalog registers it there.)
@@ -214,11 +214,11 @@ catalog registers it there.)
 
 | Case | Status | Notes |
 |---|---|---|
-| `place_generator` | live | PowerGrid node |
-| `wire_set_parent` | live | WireActions op 0 |
-| `wire_remove_parent` | live | WireActions op 1 |
+| `place_generator` | live | Place a `generatorbank`; block is solid (its TE is reported in the detail) |
+| `wire_set_parent` | live | Place an `electricwirerelay` block next to the generator |
+| `wire_remove_parent` | live | Clear the wire relay block again |
 | `turret_place` | live | autoTurret |
-| `generator_fuel` | live | Fuel/SoC depth |
+| `generator_fuel` | live | Require a Power/Generator tile entity near the generator |
 | `trigger_actuation` | live | Triggers/timers |
 
 ---

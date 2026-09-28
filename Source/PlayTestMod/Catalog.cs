@@ -386,8 +386,8 @@ namespace ZdtdPlaytest
                     buffGone = b == null || !b.HasBuff("buffParachuteGlide");
                 }
                 catch { /* */ }
-                // Landed: back near the lift base (within 15 blocks above
-                // it, falling 200) and the server-side glide cleared.
+                // Landed: at least 150 blocks below the lift base (it was
+                // lifted 200) and the server-side glide cleared.
                 bool landed = p.y < ctx.FloatA - 150f && buffGone;
                 ctx.Detail = "y=" + p.y + " base=" + ctx.FloatA + " buffGone=" + buffGone;
                 return landed;
@@ -1170,7 +1170,7 @@ namespace ZdtdPlaytest
                 return ctx.IntA >= 256 || elapsed >= 4f;
             }, assert: ctx =>
             {
-                // Prefer true POI id≥256; fall back to any multi-material sample (distinct>3)
+                // Prefer true POI id≥256; fall back to any multi-material sample (distinct>=3)
                 // when town mesh is sparse so stock Navezgane still gates honestly.
                 int solid, air, distinct;
                 Helpers.SampleRing(ctx.World, ctx.Player.GetBlockPosition(), 2, out solid, out air, out distinct);
@@ -1940,7 +1940,9 @@ namespace ZdtdPlaytest
             }, timeout: 22f, fail: "sleeper pose/wake sequence failed", pause: 0.3f));
 
             // Blood moon: host settime + client World.SetTime fallback must reach night.
-            // Fire settime_bloodmoon once then settime_day once (no re-barrier spam).
+            // Fire settime_bloodmoon once. settime_day is emitted twice, once
+            // when the wait sees night and once in the assert, so the host
+            // services the morning restore on both.
             q.Add(Live(suite, "blood_moon_music", new[] { "combat", "bm", "demo", "admin" }, ctx =>
             {
                 ctx.WorldTime0 = ctx.World.worldTime;
@@ -1964,9 +1966,10 @@ namespace ZdtdPlaytest
                 }
                 ulong now = ctx.World.worldTime;
                 bool decoded = Helpers.DecodeWorldTime(now, out int day, out int hour, out int minute);
-                // Night by decoded clock; the raw-range term is the documented
-                // degraded mode when GameUtils decode is unavailable (detail
-                // shows it so a pass is never silently built on garbage).
+                // Night by decoded clock; the raw-range term is the fallback
+                // for a decode we do not vouch for, and it ORs in whatever the
+                // decoder said (detail shows both so a pass is never silently
+                // built on garbage).
                 bool nightByClock = decoded && (hour >= 18 || hour < 5);
                 bool night = nightByClock || (now >= 18000UL && now < 100000UL);
                 if (night && ctx.PlaceBlockType == 0)
@@ -3724,8 +3727,8 @@ namespace ZdtdPlaytest
                     try { p.Health = Math.Max(10, p.GetMaxHealth() / 2); } catch { /* */ }
                     try { GameManager.Instance?.RequestToSpawn(p.entityId); } catch { /* */ }
                 }
-                // IsSpawned can lag after Died; live HP + not dead is enough
-                // (join_ready uses the same gate).
+                // IsSpawned can lag after Died; live HP, not dead, and either
+                // spawned or at least 10 hp. join_ready only checks HP and IsDead.
                 bool spawned = false;
                 try { spawned = p != null && p.IsSpawned(); } catch { spawned = true; }
                 bool ok = p != null && !p.IsDead() && p.Health > 0 && (spawned || p.Health >= 10);
@@ -4466,7 +4469,8 @@ namespace ZdtdPlaytest
                 ctx.FloatA = d;
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 ctx.Detail = $"bot {ctx.IntA} moved {d:0.00}m t={elapsed:0.0}";
-                // Movement proves nav (AAS-like) is ticking; 1.5m in 12s.
+                // Movement proves nav (AAS-like) is ticking; the wait ends at
+                // 1.5m, the pass gate is 1.0m inside the 14s timeout.
                 return d >= 1.5f;
             }, assert: ctx => ctx.FloatA >= 1.0f, timeout: 14f, fail: "bot did not move >=1m in 14s (AAS/pathfinding stalled)", pause: 0.3f));
 

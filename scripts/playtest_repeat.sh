@@ -19,8 +19,10 @@
 #   PLAYTEST_LAPS               same as --laps
 #   PLAYTEST_SUITE              same as --suite
 #   LOGDIR                      same as --logdir
-#   PLAYTEST_LAP_MARK_STALE_SEC age at which an abandoned lap mark is swept
-#                               (positive integer seconds; default 86400)
+#   PLAYTEST_LAP_MARK_STALE_SEC age at which a killed lap's scratch mark is
+#                 swept (positive integer seconds; default 86400). A
+#                 concurrent session's younger mark is kept, or its lap would
+#                 find no anchor and grade as "no report".
 #
 # Anything else is passed through to playtest_run.py unchanged.
 #
@@ -47,7 +49,7 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2
       ;;
-    -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) ORCH_ARGS+=("$1"); shift ;;
   esac
 done

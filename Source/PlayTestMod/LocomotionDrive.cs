@@ -408,7 +408,7 @@ namespace ZdtdPlaytest
                 // Use unscaled delta so pauses/hitches do not starve motion.
                 float dt = Time.unscaledDeltaTime;
                 if (dt <= 0f || dt > 0.1f) dt = 0.033f;
-                // Walk ~4.5 m/s; running path uses higher speedScale.
+                // Base 4.5 m/s scaled by speedScale (1.0 run, 0.7 walk, 0.35 sneak).
                 float meters = (4.5f * Mathf.Max(0.35f, speedScale)) * dt;
                 var dir = new Vector3(fx, 0f, fz);
                 Vector3 horiz = Vector3.zero;

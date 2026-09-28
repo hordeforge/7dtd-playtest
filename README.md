@@ -29,7 +29,9 @@ make install-pair
 ```
 
 To build the release archive instead of installing it, `make package` writes
-`dist/7dtd-playtest-<version>.zip` (the version `ModInfo.xml` ships).
+`dist/7dtd-playtest/7dtd-playtest-<version>.zip` (the version `ModInfo.xml`
+ships). Its entries are rooted at `7dtd-playtest/`, so the archive extracts into
+a game install's `Mods/` without moving files.
 
 Everything below is reference detail, including the offline development loop
 and live suite commands.
@@ -233,9 +235,9 @@ in the log without rerunning with `--help`.
 | `PLAYTEST_TRACE_ENTITY` | empty | Per-second spawned-entity pose / renderer / grounding / collision probes (`--trace-entity`). Boolean, see below |
 | `PLAYTEST_SESSION_ID` | *(generated)* | Exclusivity-lock holder id (`--session`) |
 | `PLAYTEST_CONCERN_SUITES` | empty | The exact multi-id `--suite` list that is one declared concern |
-| `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach requires an explicit value |
+| `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach to a stock dedicated requires an explicit value (a zdtd attach has no telnet plane and needs none) |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
-| `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the `scripts/capture_*.sh` helpers watch, and what `--print-client-log` prints before it exits. A run does not parse this path: it resolves the log from the client instance's own install. Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
+| `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the `scripts/capture_*.sh` helpers watch, and what `--print-client-log` prints before it exits. A run parses this path when it is set; unset it to have the run resolve the log from the client instance's own install. Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
 
 Booleans (`PLAYTEST_READONLY`, `PLAYTEST_TRACE_ENTITY`, `CLIENT_MUTE`) take
 `1` / `true` / `yes` / `on` or `0` / `false` / `no` / `off`, case-insensitive
@@ -280,7 +282,8 @@ never a lock input, since it belongs to an instance with its own port block.
 launching, refreshes a **heartbeat** while the run is active, and releases when
 the run ends. Acquire also fails if the run's own client (plus `zdtd` where
 that applies) is already live and you do not hold the lock. After clean it
-refuses if ServerPort/telnet is still bound.
+refuses if ServerPort/telnet is still bound; a managed Safehouse run has no ports
+yet at that point, so there is nothing for the check to find.
 
 | | |
 |---|---|
@@ -319,6 +322,7 @@ A suite is a JSON file beside your mod, passed with `--suite-file` (or
 | `server` | serverconfig pairs handed to `sb render-config` | empty |
 | `mods` / `server_mods` | Modlets staged per side. A short name is a built-in; anything else is a path relative to the suite file | managed: `playtest`, `fastconnect` on both sides. attach: empty, and a non-empty list is refused (the run does not own the host's Mods folder) |
 | `host` | `fixtures` (host answers client barriers), `loadgen` | both `false` |
+| `notes` | Informational lines, published into the run report but never acted on | empty |
 | `cases[]` | `id`, `kind`, `ref`, `tags`, `barriers` | required |
 
 `server`, `mods`, and `server_mods` are managed-only: an attach run owns
@@ -652,8 +656,8 @@ Durable state this system owns, and what an incident costs:
 | State | Location | Survives instance loss? |
 |---|---|---|
 | Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
-| Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run, and a prune that cannot delete warns | No |
-| Captured evidence: clip, contact sheet, frames, audio, `client.log`, and the deadeye review envelope | `.local/capture/<suite>-<stamp>/` (gitignored; `--out DIR` overrides) | No |
+| Run artifacts: `report-*.json`, `junit-*.xml`, `server-orch.log` | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run, and a prune that cannot delete warns | No |
+| Captured evidence: clip, contact sheet, frames, audio, `client.log`, and the deadeye review envelope | `.local/capture/<suite>-<stamp>/` (gitignored; `--out DIR` overrides; `capture_audio.sh` uses `<suite>-audio-<stamp>`) | No |
 | Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/`, each with a `restore.jsonl` naming where every file came from | No |
 | Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
 
@@ -679,13 +683,17 @@ Recovery facts:
   so copy the folder somewhere else (or commit the frames) before relying on a
   clip as a sign-off record. The review envelope is advisory and never travels
   in the report, so it is lost with the folder.
-- **Restore a wiped save:** `--fresh-save` no longer hard-deletes. The named
-  stock save, zdtd `players.zsv`/`containers.zct`/`blockmeta.zbm`, chunk
-  overlays, and the previous client log move into
+- **Restore a wiped save:** `--fresh-save` no longer hard-deletes. The zdtd
+  `players.zsv`/`containers.zct`/`blockmeta.zbm` and chunk overlays, plus the
+  previous client log, move into
   `<logdir>/quarantine/`; the newest `QUARANTINE_KEEP = 5` entries are kept
   (oldest pruned, and a prune that drops a restorable entry names the paths
   it held on the run log). If the quarantine itself is unwritable, data stays
   in place and the run warns about stale reuse instead of destroying anything.
+
+  A **stock** save is not restorable from here: a managed run's `sb wipe`
+  resets the instance's userdata outright, so the `quarantine_restore.py`
+  commands below only cover a zdtd world and a previous client log.
 
   Every move appends `{src, dest}` to the entry's `restore.jsonl`, so the
   copy-back does not depend on remembering which `--world` produced it:
@@ -962,7 +970,8 @@ Use a custom output directory and runner:
 ```
 
    `--runner` is for a project with its own entry point (deploys, `.local.env`,
-   lock handling); it is invoked as `<cmd> --suite <id>`, and defaults to this
+   lock handling); it is invoked as `<cmd> <suite-id>` (the default runner
+   already carries the `--suite` flag), and defaults to this
    repo's `scripts/playtest_run.py` under `uv run --locked`. `CAPTURE_FRAMES`,
    `CAPTURE_INTERVAL` and `CAPTURE_CROP` tune the loop. It refuses to start
    while a client is already up, because overlapping runs photograph the wrong
@@ -1179,7 +1188,9 @@ surface incl. live rows + counts total, mod version/changelog sync, scenario-pro
 env surface, mining-probe provider surface, stock-peer orchestration surface, host
 lock, deterministic simulation, orchestrator local-init order, report/log surface,
 orchestrator pure-logic units, compare diff, capture-clip marker surface,
-video-review surface, dependency SBOM)
+video-review surface, dependency SBOM; `GATES` in the Makefile is the full
+list, and `scripts/test_gate_list.py` fails when a gate file is missing from it
+or an entry stops existing)
 plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
 runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are
@@ -1194,8 +1205,9 @@ and pushes it to the `badges` branch. A `vX.Y.Z` tag runs
 committed lockfiles and records its serial number and component count in the
 run summary. The mod archive is still built by a maintainer with a game
 install, with `make package`, and attached to the release: it builds the mod
-and writes `dist/7dtd-playtest-<version>.zip`, laid out as `Mods/7dtd-playtest/`
-so it extracts into a game install without moving files.
+and writes `dist/7dtd-playtest/7dtd-playtest-<version>.zip`, whose entries are
+rooted at `7dtd-playtest/` so it extracts into a game install's `Mods/` without
+moving files.
 
 ### Host orchestrator secrets
 
@@ -1205,11 +1217,13 @@ starts the dedicated itself, an unset `PLAYTEST_TELNET_PASSWORD` (and
 into the generated server config (chmod 0600) and used by the orchestrator's
 telnet client, so the two can never diverge and a network-reachable telnet
 listener never opens with a published default. `--no-server` runs attach to a
-dedicated whose config this process did not write, so they require
-`PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`). The supplied value is
+stock dedicated whose config this process did not write, so they require
+`PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`); a zdtd attach has no
+telnet plane and requires neither. The supplied value is
 used only by the orchestrator's telnet client.
 It is not a production secret: the admin plane is reachable only from loopback
 in playtest runs. The generated config sets `TelnetRemoteAllowedIPs=127.0.0.1`
 alongside `TelnetEnabled`, so the telnet listener refuses any non-local source
-even if it is network-reachable. The game port itself is still LAN-visible
-(`ServerVisibility=0`, Steam+LAN platforms).
+even if it is network-reachable. The built-in suites also declare
+`ServerVisibility=0`, so the game port itself stays LAN-visible on Steam+LAN
+platforms; the orchestrator renders only the three telnet keys.

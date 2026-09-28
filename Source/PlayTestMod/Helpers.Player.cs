@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace ZdtdPlaytest
 {
-    /// <summary>Local player body state: pose and aim setup, primary attack pulse, food/water stats, held-item meta, land-claim count.</summary>
+    /// <summary>Local player body state: pose and aim setup, primary attack pulse, food/water stats, held-item meta, land-claim count, plus the capture-camera and walk entry points.</summary>
     public static partial class Helpers
     {
 
@@ -186,12 +186,10 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
-        /// Detach the player's camera from the player (the game's own debug
-        /// detached-camera mode) so the clip recorder can photograph a scene the
-        /// player is not inside. `EntityPlayerLocal.SetCameraAttachedToPlayer(false)`
-        /// reparents the camera transform to null (verified from EntityPlayerLocal
-        /// IL), so the camera becomes a free transform: position it and point it at
-        /// a world target with <see cref="PointCameraAt"/>.
+        /// The free camera <see cref="DetachCamera"/> leaves behind. It exists
+        /// because `SetCameraAttachedToPlayer` reparents the camera transform
+        /// to null (verified from EntityPlayerLocal IL), so the camera is a
+        /// free transform to position and aim with <see cref="PointCameraAt"/>.
         /// </summary>
         private static Camera _captureCam;
 

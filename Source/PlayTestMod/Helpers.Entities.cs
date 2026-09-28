@@ -228,7 +228,8 @@ namespace ZdtdPlaytest
         }
 
 
-        /// <summary>Spawn entity class by name near player (server path via world API).</summary>
+        /// <summary>Spawn an entity class into the client's own world beside the player
+        /// (local only; nothing is sent to the server).</summary>
         public static Entity SpawnEntityNear(EntityPlayerLocal player, string className, Vector3 offset)
         {
             if (player == null || string.IsNullOrEmpty(className)) return null;

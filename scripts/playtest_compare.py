@@ -18,7 +18,8 @@ Exit codes:
   0  comparison written
   1  neither side had a playtest result line (one empty side still diffs)
   2  a side has no input (side never ran, logs wiped, or a bad path)
-  3  inputs older than --require-fresh-minutes
+  3  an input is not within --require-fresh-minutes of now (older, undatable,
+     or dated in the future)
   4  comparison outputs could not be written
 """
 

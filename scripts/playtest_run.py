@@ -1344,7 +1344,7 @@ def write_zdtd_apm_dump(
     ticks: int = 80,
     run_id: str = "",
 ) -> bool:
-    """Run short offline zdtd --ticks for APM text snapshot (docs/APM.md)."""
+    """Run short offline zdtd --ticks for an APM text snapshot."""
     if not zdtd.is_file():
         warn(f"apm dump: missing zdtd {zdtd}")
         return False
@@ -2249,10 +2249,10 @@ FIXTURE_SUITE_IDS = frozenset(
         "mp",
         "residual",
         "residual_light",
-        # Catalog suites with live cases that fire host-serviced barriers:
+        # Catalog suites with live cases that fire barriers the host routes:
         # combat/economy (AI + traders), vehicle (host-owned spawns),
         # finale (player kill), bot (BotMod telnet commands), parachute
-        # (telnet lift so the fall is server-side real).
+        # (parachute_lift:<entityId>; routed and counted, no host service).
         "combat",
         "economy",
         "vehicle",
@@ -2346,9 +2346,14 @@ def host_fixtures_enabled(suite: str, *, disabled: bool, requested: bool) -> boo
     return not disabled and (requested or suite_wants_host_fixtures(suite))
 
 
-# Every barrier the orchestrator counts in the client log and services over
-# telnet/admin. Single source for both the fired-count and seen-count tables
-# in main(), so a new barrier cannot be added to one and missed by the other.
+# Every barrier name the orchestrator routes and counts in the client log.
+# Single source for both the fired-count and seen-count tables in main(), so a
+# new barrier cannot be added to one and missed by the other. Most are then
+# serviced over telnet/admin by a service_barrier() call; these are not:
+# persist_setup_done (rejoin flow), rejoin_setup_done (provider name, counted
+# separately), teleport_persist_pad and apm_dump (unconditional paths), and
+# parachute_lift, which Catalog emits parameterised as `parachute_lift:<id>` so
+# it never matches the whole name this table counts.
 BARRIER_NAMES: tuple[str, ...] = (
     "spawn_zombie",
     "spawn_trader",

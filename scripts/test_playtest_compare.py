@@ -197,7 +197,9 @@ def test_exit_codes_documented_in_help() -> None:
     assert r.returncode == 0, r.stderr
     assert "Exit codes:" in r.stdout
     for line in ("0  comparison written", "1  neither side had a playtest result line",
-                 "2  a side has no input", "3  inputs older than"):
+                 "2  a side has no input",
+                 "3  an input is not within --require-fresh-minutes of now",
+                 "or dated in the future"):
         assert line in r.stdout, line
 
 

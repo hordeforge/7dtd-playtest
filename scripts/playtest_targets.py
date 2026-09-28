@@ -474,8 +474,11 @@ def _run_sb(
 def apply_plan_to_args(args: argparse.Namespace, plan: TargetPlan) -> None:
     """Mutate a parsed argparse namespace from a TargetPlan.
 
-    Sets the lifecycle flags and overlays the instance's paths and ports.
-    Explicit operator flags still win: only unset values are filled in.
+    Sets the lifecycle flags, then overlays the instance's paths and ports.
+    ``game_srv``, ``userdata`` and (absent an explicit marker) the telnet port
+    are overwritten outright: the Safehouse instance allocated them, so an
+    operator value for the same slot cannot be honoured and silently keeping it
+    would point the run at a server the instance is not running.
     """
     args.no_server = plan.is_attach
     args.provision = plan.provision

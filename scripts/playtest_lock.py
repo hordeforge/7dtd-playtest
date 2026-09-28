@@ -486,7 +486,8 @@ def is_stale(
     now: float | None = None,
     env: LockEnv | None = None,
 ) -> bool:
-    """True when running=yes but heartbeat is missing or older than max age.
+    """True when running=yes and the heartbeat is missing, older than max age,
+    or dated more than max age into the future.
 
     Free locks are not stale. Used by agents to see if a holder is still
     refreshing, and by acquire to reclaim crashed holders (with process check).

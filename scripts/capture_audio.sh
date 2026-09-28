@@ -10,7 +10,8 @@
 # The recording is evidence to listen to, not a verdict. Nothing here decides
 # whether anything sounds right. It also does not unmute anything: the runner
 # owns mute policy, and a recording of a muted client is reported as such by
-# the peak-amplitude line rather than silently shipped.
+# the peak-amplitude line, when sox is installed to compute one, rather than
+# silently shipped.
 #
 # Usage:
 #   ./scripts/capture_audio.sh --suite <id> [--out DIR] [--runner CMD]
@@ -24,7 +25,8 @@
 #                  Default: this repo's own scripts/playtest_run.py.
 #
 # Exit codes: 0 the recording was written, 1 the run or the recording failed,
-# 2 bad usage or a missing host tool.
+# 2 bad usage, a missing host tool, or the orchestrator's own 2 (lock refused or
+# harness error), which this script propagates.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
