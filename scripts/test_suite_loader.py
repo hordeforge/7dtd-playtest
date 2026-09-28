@@ -29,13 +29,13 @@ MANAGED = {
 }
 
 
-def write(tmp: Path, doc: dict, name: str = "s.json") -> Path:
+def write(tmp: Path, doc: dict[str, object], name: str = "s.json") -> Path:
     path = tmp / name
     path.write_text(json.dumps(doc), encoding="utf-8")
     return path
 
 
-def expect_error(doc: dict, needle: str) -> None:
+def expect_error(doc: dict[str, object], needle: str) -> None:
     with tempfile.TemporaryDirectory(prefix="suite-loader-") as td:
         path = write(Path(td), doc)
         try:

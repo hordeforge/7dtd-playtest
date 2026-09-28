@@ -48,6 +48,8 @@ select = [
     "PLE", # pylint errors only (used-before-assignment, ...)
     "RSE", # unnecessary paren on raised exception
     "TID", # tidy imports (no relative-import tricks)
+    "ERA", # commented-out code left behind by a revert
+    "ISC001", # two string literals fused on one line inside a call
     "SLOT",# manual __slots__ subclassing of immutable types
     "YTT", # truthy tests on sys/typing internals
     "PGH", # no blanket noqa / bare type: ignore (suppression hygiene)
@@ -58,8 +60,8 @@ select = [
 # ratchet up as annotations spread. The two Any-oriented strict flags are on
 # globally with per-module opt-outs below for modules that still carry gaps:
 # shrink a module's count to zero, then drop it from its override list.
-# Remaining debt today: ~43 missing type-arguments across the four generics
-# opt-outs, ~11 explicit Any in dst/playtest_compare.
+# Remaining debt today: 31 missing type-arguments across the four generics
+# opt-outs, 17 explicit Any in dst/playtest_compare/suite_loader.
 [tool.mypy]
 python_version = "3.11"
 files = ["scripts"]
@@ -92,6 +94,8 @@ enable_error_code = [
     "truthy-bool",
     "unimported-reveal",
     "deprecated",
+    "mutable-override",
+    "type-abstract",
 ]
 
 # Ratchet opt-outs (see comment above [tool.mypy]). Every entry is a module
@@ -99,14 +103,12 @@ enable_error_code = [
 [[tool.mypy.overrides]]
 module = [
     "playtest_compare",
-    "playtest_log",
     "playtest_run",
     "test_playtest_compare",
     "suite_loader",
-    "test_suite_loader",
 ]
 disallow_any_generics = false
 
 [[tool.mypy.overrides]]
-module = ["dst", "playtest_compare", "suite_loader", "test_suite_loader"]
+module = ["dst", "playtest_compare", "suite_loader"]
 disallow_any_explicit = false

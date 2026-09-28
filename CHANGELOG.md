@@ -80,6 +80,15 @@ Release model (inferred practice, now pinned by `make test`):
   gateway passthroughs) and closes with examples and exit codes; `make help`
   lists `playtest-review-video`; the `playtest-repeat` comment no longer
   claims a `LAPS=3` default the Makefile does not have.
+- Offline gate strictness: ruff now also enforces `ERA` (commented-out code)
+  and `ISC001`; mypy adds the `mutable-override` and `type-abstract` error
+  codes and drops `playtest_log` and `test_suite_loader` from the
+  type-argument opt-out list, since both modules pass it.
+- `playtest_targets.apply_plan_to_args` / `overlay_instance_env` take a typed
+  `argparse.Namespace` instead of `object` plus twelve `attr-defined` ignores.
+- The detached child the orchestrator launches carries its log handle as a
+  declared `DetachedPopen.log_fh` attribute rather than one attached to a
+  plain `Popen` at runtime.
 
 ### Fixed
 

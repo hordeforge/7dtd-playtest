@@ -9,12 +9,12 @@ No game binaries. Pins the ownership contract:
 """
 from __future__ import annotations
 
+import argparse
 import os
 import stat
 import sys
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
@@ -84,8 +84,8 @@ def test_readonly_is_attach_only() -> None:
 
 
 def test_apply_plan_to_args() -> None:
-    def fresh_args() -> SimpleNamespace:
-        return SimpleNamespace(
+    def fresh_args() -> argparse.Namespace:
+        return argparse.Namespace(
             server="stock",
             no_server=False,
             port=None,
@@ -109,7 +109,7 @@ def test_apply_plan_to_args() -> None:
 
 
 def test_overlay_instance_env_wins_over_defaults() -> None:
-    args = SimpleNamespace(port=26900, admin_port=8081, game_srv=None, userdata=None)
+    args = argparse.Namespace(port=26900, admin_port=8081, game_srv=None, userdata=None)
     pt.overlay_instance_env(
         args,
         {

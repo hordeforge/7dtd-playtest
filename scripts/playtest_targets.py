@@ -22,6 +22,7 @@ here is what let a playtest rewrite the install's platform.cfg.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import os
 import re
@@ -427,40 +428,40 @@ def _run_sb(
     return proc
 
 
-def apply_plan_to_args(args: object, plan: TargetPlan) -> None:
-    """Mutate an argparse Namespace-like object from a TargetPlan.
+def apply_plan_to_args(args: argparse.Namespace, plan: TargetPlan) -> None:
+    """Mutate a parsed argparse namespace from a TargetPlan.
 
     Sets the lifecycle flags and overlays the instance's paths and ports.
     Explicit operator flags still win: only unset values are filled in.
     """
-    args.no_server = plan.is_attach  # type: ignore[attr-defined]
-    args.provision = plan.provision  # type: ignore[attr-defined]
-    args.server = plan.backend  # type: ignore[attr-defined]
-    args.readonly = plan.readonly  # type: ignore[attr-defined]
+    args.no_server = plan.is_attach
+    args.provision = plan.provision
+    args.server = plan.backend
+    args.readonly = plan.readonly
     if plan.port is not None and getattr(args, "port", None) is None:
-        args.port = plan.port  # type: ignore[attr-defined]
+        args.port = plan.port
     if plan.telnet_port is not None and not getattr(args, "_admin_port_explicit", False):
-        args.admin_port = plan.telnet_port  # type: ignore[attr-defined]
+        args.admin_port = plan.telnet_port
     if plan.game_srv is not None:
-        args.game_srv = plan.game_srv  # type: ignore[attr-defined]
+        args.game_srv = plan.game_srv
     if plan.userdata is not None:
-        args.userdata = plan.userdata  # type: ignore[attr-defined]
+        args.userdata = plan.userdata
 
 
-def overlay_instance_env(args: object, env_map: dict[str, str]) -> None:
+def overlay_instance_env(args: argparse.Namespace, env_map: dict[str, str]) -> None:
     """Overlay the live instance.env onto args after `sb up` allocated it."""
     port = _optional_int(env_map.get("SERVER_PORT"))
     telnet = _optional_int(env_map.get("SERVER_TELNET_PORT"))
     game = _optional_path(env_map.get("SERVER_GAME"))
     userdata = _optional_path(env_map.get("SERVER_USERDATA"))
     if port is not None:
-        args.port = port  # type: ignore[attr-defined]
+        args.port = port
     if telnet is not None:
-        args.admin_port = telnet  # type: ignore[attr-defined]
+        args.admin_port = telnet
     if game is not None:
-        args.game_srv = game  # type: ignore[attr-defined]
+        args.game_srv = game
     if userdata is not None:
-        args.userdata = userdata  # type: ignore[attr-defined]
+        args.userdata = userdata
 
 
 def target_report_fields(plan: TargetPlan) -> dict[str, object]:

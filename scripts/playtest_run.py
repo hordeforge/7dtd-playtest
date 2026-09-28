@@ -26,6 +26,7 @@ import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
+from typing import IO
 from xml.sax.saxutils import escape as xml_escape
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -395,6 +396,16 @@ STOCK_READY_TIMEOUT_SEC = 600.0
 ZDTD_READY_TIMEOUT_SEC = 60.0
 
 
+class DetachedPopen(subprocess.Popen[bytes]):
+    """A detached child that owns the log handle stop_proc has to close.
+
+    The handle is a declared attribute rather than an attribute bolted onto a
+    plain Popen, so the ownership transfer is visible to the type checker.
+    """
+
+    log_fh: IO[str] | None = None
+
+
 def wait_zdtd_ready(proc: subprocess.Popen, server_log_path: Path) -> bool:
     """Wait for zdtd `tick=20Hz`; False when zdtd exited before ticking."""
     if wait_file_contains(server_log_path, "tick=20Hz", timeout=ZDTD_READY_TIMEOUT_SEC):
@@ -413,17 +424,17 @@ def _popen_to_logfile(
     *,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
-) -> subprocess.Popen:
+) -> DetachedPopen:
     """Start a detached process with stdout+stderr redirected into ``log_path``.
 
-    The handle is attached as ``_log_fh`` for stop_proc to close. If the
+    The handle is attached as ``log_fh`` for stop_proc to close. If the
     spawn itself fails (missing binary, exec error), the already-opened
     descriptor is closed here instead of leaking until interpreter exit.
     """
-    # Long-lived by design: the handle rides on proc._log_fh and stop_proc closes it.
+    # Long-lived by design: the handle rides on proc.log_fh and stop_proc closes it.
     fh = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
     try:
-        proc = subprocess.Popen(
+        proc = DetachedPopen(
             cmd,
             stdout=fh,
             stderr=subprocess.STDOUT,
@@ -434,7 +445,7 @@ def _popen_to_logfile(
     except OSError:
         fh.close()
         raise
-    proc._log_fh = fh  # type: ignore[attr-defined]
+    proc.log_fh = fh
     return proc
 
 
@@ -1027,7 +1038,7 @@ def stop_proc(proc: subprocess.Popen | None) -> None:
             proc.wait(timeout=_STOP_KILL_WAIT_SEC)
         except subprocess.TimeoutExpired:
             warn(f"stop_proc: pid {proc.pid} not reaped after SIGKILL")
-    fh = getattr(proc, "_log_fh", None)
+    fh = getattr(proc, "log_fh", None)
     if fh:
         with contextlib.suppress(Exception):
             fh.close()

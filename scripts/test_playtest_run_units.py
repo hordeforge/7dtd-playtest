@@ -790,9 +790,9 @@ def test_fixture_gate_covers_every_expand_suites_alias() -> None:
     )
 
 
-def _spawn_detached(body: str) -> subprocess.Popen[bytes]:
+def _spawn_detached(body: str) -> playtest_run.DetachedPopen:
     """Real child in its own session (same shape as orchestrator launches)."""
-    return subprocess.Popen(
+    return playtest_run.DetachedPopen(
         ["bash", "-c", body],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -828,10 +828,10 @@ def test_stop_proc_exited_child_closes_log_handle() -> None:
     proc = _spawn_detached("exit 0")
     while proc.poll() is None:
         time.sleep(0.02)
-    # Raw handle on purpose: mirrors the orchestrator's proc._log_fh ownership.
-    fh = tempfile.TemporaryFile()  # noqa: SIM115
+    # Raw handle on purpose: mirrors the orchestrator's proc.log_fh ownership.
+    fh = tempfile.TemporaryFile(mode="w+")  # noqa: SIM115
     try:
-        proc._log_fh = fh  # type: ignore[attr-defined]
+        proc.log_fh = fh
         playtest_run.stop_proc(proc)
         assert fh.closed, "log handle of an exited child must be closed"
     finally:
