@@ -428,6 +428,11 @@ the run order that both `make test` and `make coverage` expand):
    in CHANGELOG.md requires, and CHANGELOG.md must carry an [Unreleased]
    section plus the current release entry.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
+3a. chat-probe surface (`scripts/test_chat_probe_surface.py`): the text a
+    remote LAN player typed stays inside `ChatProbe`. A case detail reaches
+    the run log, the JSON result event, the JUnit report and
+    `report-*.json`, all of which leave the machine, so the captured text
+    has no public accessor and the chat cases report `chat_len=` only.
 4. mining-probe provider surface (`scripts/test_mining_probe_surface.py`)
 5. player-survivability surface (`scripts/test_player_survivability_surface.py`):
    the god-mode and spawn-recovery contract the combat and `NoAutoHeal` cases

@@ -93,6 +93,12 @@ Release model (inferred practice, now pinned by `make test`):
 - `CLIENT_MUTE_TIMEOUT` is validated as finite seconds > 0; a junk value warns
   and keeps the default instead of handing the helper a wait argument that
   does nothing.
+- **The vision-review consent text names the whole payload.** `--allow-network`
+  covers the entire clip directory, not "the clip": `capture_video.sh` leaves
+  the run log and a copy of the client log beside the mp4, and the client log
+  carries whatever the game and any remote LAN player wrote into it. The CLI
+  description, the `--allow-network` help, the refusal and the pre-upload
+  notice now say so, and README plus `docs/VIDEO_MODEL_FEEDBACK.md` match.
 - **Shared Catalog.cs readers moved out of a gate.** The two offline gates
   that read `Catalog.cs` now import the readers from `scripts/catalog_surface.py`
   instead of one of them importing the other (`test_suite_refs` pulled
@@ -194,6 +200,20 @@ Release model (inferred practice, now pinned by `make test`):
   run and the next look case photographed them. `Runner.FinishCase` and the
   early suite abort (which bypasses `FinishCase`) now clear them, next to the
   motor-drive release they already do.
+- **Remote player chat no longer rides out in the reports.** `chat_roundtrip`
+  and `parachute_fall_announce` put `ChatProbe.Last`, the text a remote LAN
+  player typed, into `ctx.Detail`, which is flushed to the run log, the JSON
+  result event, the JUnit report and `report-*.json`; all of those leave the
+  machine for CI and for the vision-review upload. `ChatProbe.Last` is private
+  now and the cases report `chat_len=` instead, so a failed run still says how
+  much chat arrived without republishing what it said. Gated offline by
+  `scripts/test_chat_probe_surface.py`.
+- **A sampled exception line no longer rides a whole chat message into the
+  report.** `nre_like_sample` copied each matching client-log line verbatim,
+  and remote LAN chat reaches that log (R2 in `docs/THREAT_MODEL.md`), so a
+  long chat line naming an exception was stored whole in `report-*.json`.
+  Each sample is now cut at `playtest_log.NRE_SAMPLE_CHARS` (200), which keeps
+  the exception name and its frames and drops the tail.
 - **Reruns no longer answer with the previous run's state.** A run that died
   before its poll loop ended left `<logdir>/run-ended` behind, so a rerun's
   capture loop saw a stale end marker and stopped instead of photographing

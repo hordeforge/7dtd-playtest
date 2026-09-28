@@ -11,7 +11,18 @@ namespace ZdtdPlaytest
     {
         static readonly object Gate = new object();
         static readonly List<string> Recent = new List<string>(32);
-        public static string Last = "";
+        // The captured text stays private: it is whatever a remote LAN player
+        // typed, and a case detail reaches the run log, the JUnit report and
+        // the report JSON, all of which leave the machine for CI and for the
+        // vision-review upload. Only LastLength is public, so a diagnostic can
+        // say how much arrived without carrying its content anywhere.
+        static string Last = "";
+
+        /// <summary>Length of the last captured message; its text is never exposed.</summary>
+        public static int LastLength
+        {
+            get { lock (Gate) { return Last == null ? 0 : Last.Length; } }
+        }
 
         public static void Clear()
         {

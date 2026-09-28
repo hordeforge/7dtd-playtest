@@ -61,6 +61,11 @@ def _key_values(tokens: list[str]) -> dict[str, str]:
 NRE_RE = re.compile(r"NullReferenceException|NCSimple|underrun|IndexOutOfRange", re.IGNORECASE)
 
 NRE_SAMPLE_CAP = 50
+# The sample lands in report-*.json, which leaves the machine, and a matching
+# line can be a remote LAN player's chat (R2 in docs/THREAT_MODEL.md: chat
+# text reaches this log). The exception name and the frames around it are the
+# diagnostic; the tail of a long line is not, so each sample is cut here.
+NRE_SAMPLE_CHARS = 200
 
 
 class ParsedClientLog(TypedDict):
@@ -263,7 +268,7 @@ class ClientLogScan:
         if NRE_RE.search(line):
             self.nre_total += 1
             if len(self.nre_hits) < NRE_SAMPLE_CAP:
-                self.nre_hits.append(line)
+                self.nre_hits.append(line[:NRE_SAMPLE_CHARS])
 
     def feed_lines(self, lines: Iterable[str]) -> None:
         """Parse already-split complete lines (see LogTail) in one pass.

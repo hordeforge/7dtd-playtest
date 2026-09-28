@@ -36,8 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         prog="review_video.py",
         description=(
             "vision-model review of a staged clip via the deadeye gateway; "
-            "uploads the clip to a third party, so it refuses without "
-            "--allow-network"
+            "uploads the whole clip directory (frames, mp4, run log, client "
+            "log) to a third party, so it refuses without --allow-network"
         ),
         epilog=(
             "examples:\n"
@@ -73,7 +73,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--allow-network",
         action="store_true",
-        help="consent to uploading the clip to the provider",
+        help=(
+            "consent to uploading the clip directory (frames, mp4, run log, "
+            "client log) to the provider"
+        ),
     )
     parser.add_argument(
         "--keep-raw-response",

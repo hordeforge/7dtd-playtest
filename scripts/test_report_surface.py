@@ -579,6 +579,28 @@ def test_log_tail_from_end_starts_at_current_size() -> None:
     print("PASS logtail_from_end pre-existing bytes skipped, appends still read")
 
 
+def test_nre_sample_lines_are_bounded() -> None:
+    """A sampled exception line lands in report-*.json, which leaves the
+    machine, and remote LAN chat text reaches this log (R2 in
+    docs/THREAT_MODEL.md), so a long chat line that happens to name an
+    exception must not ride into the report whole. The count still matches
+    the line and the head still carries the exception name."""
+    long_line = "[chat] player said: NullReferenceException " + ("x" * 5000)
+    parsed = playtest_log.parse_client_log(long_line + "\n")
+    assert parsed["nre_like_total"] == 1, parsed
+    assert len(parsed["nre_like"]) == 1, parsed
+    assert "NullReferenceException" in parsed["nre_like"][0]
+    assert len(parsed["nre_like"][0]) == playtest_log.NRE_SAMPLE_CHARS
+    assert "x" * 5000 not in parsed["nre_like"][0]
+
+    scan = playtest_log.ClientLogScan()
+    scan.feed_lines([long_line])
+    assert scan.result()["nre_like"] == parsed["nre_like"], (
+        "the incremental path must truncate exactly like the whole-log parse"
+    )
+    print("PASS nre_sample each sampled line is capped at NRE_SAMPLE_CHARS")
+
+
 def test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate() -> None:
     """The poll loop drains loadgen events incrementally instead of re-reading
     the whole JSONL every iteration. The accumulated list must equal
@@ -1044,6 +1066,7 @@ def main() -> int:
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
+    test_nre_sample_lines_are_bounded()
     test_loadgen_event_reader_matches_whole_read_and_resets_on_truncate()
     test_fuzz_loadgen_events_survive_hostile_jsonl()
     test_contract_lines_must_start_the_log_line()

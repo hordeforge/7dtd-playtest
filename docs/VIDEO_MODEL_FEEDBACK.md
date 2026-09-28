@@ -76,7 +76,10 @@ uv run scripts/review_video.py <clip-dir> \
 
 `<clip-dir>` is exactly what `capture_video.sh --out DIR` produced: the
 muxed `<id>.mp4`, its contact sheet, the run log, and the copied
-`client.log`. The source frames stay in the client's
+`client.log`. The whole directory is what the gateway receives, so
+`--allow-network` is consent for the run log and the client log as well as
+for the frames; the client log carries whatever the game and any remote LAN
+player on the run wrote into it. The source frames stay in the client's
 `playtest-shots/clips/<id>/`, which the RESULT block names. `ffmpeg` is
 required by `capture_video.sh`, so a clip directory always has the mp4.
 `--intent-text` may supply the same information inline; the JSON file is

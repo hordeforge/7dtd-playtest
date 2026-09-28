@@ -357,7 +357,7 @@ namespace ZdtdPlaytest
                 {
                     ctx.Player.SetPosition(new Vector3(p.x, ctx.FloatA + 200f, p.z));
                 }
-                ctx.Detail = "hit=" + hit + " last=" + ChatProbe.Last + " pos=" + p;
+                ctx.Detail = "hit=" + hit + " chat_len=" + ChatProbe.LastLength + " pos=" + p;
                 return hit;
             }, assert: ctx => ChatProbe.Contains("deployed their parachute"),
                 timeout: 30f, fail: "no parachute deploy announce after lift"));
@@ -4092,13 +4092,15 @@ namespace ZdtdPlaytest
                 float elapsed = Time.unscaledTime - ctx.CaseStartUnscaled;
                 bool hit = ChatProbe.Contains(_chatToken);
                 if (hit) ctx.IntA = 1;
-                ctx.Detail = "token=" + _chatToken + " hit=" + hit + " last=" + ChatProbe.Last
+                ctx.Detail = "token=" + _chatToken + " hit=" + hit
+                    + " chat_len=" + ChatProbe.LastLength
                     + " t=" + elapsed.ToString("0.0");
                 return hit || ctx.IntA == 1;
             }, assert: ctx =>
             {
                 bool hit = ChatProbe.Contains(_chatToken) || ctx.IntA == 1;
-                ctx.Detail = "token=" + _chatToken + " hit=" + hit + " last=" + ChatProbe.Last;
+                ctx.Detail = "token=" + _chatToken + " hit=" + hit
+                    + " chat_len=" + ChatProbe.LastLength;
                 return hit;
             }, timeout: 16f, fail: "chat token not observed", pause: 0.3f));
 

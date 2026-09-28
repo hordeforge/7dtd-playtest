@@ -402,8 +402,9 @@ def run_review(
     """
     if not allow_network:
         raise ReviewError(
-            "review_video sends the authored clip to a third-party vision model; pass "
-            "--allow-network to consent to that upload"
+            "review_video sends the whole clip directory to a third-party vision "
+            "model, including the run log and the client log copied beside the "
+            "frames; pass --allow-network to consent to that upload"
         )
     if intent_path is not None and intent_text is not None:
         raise ReviewError("takes exactly one of --intent PATH or --intent-text JSON, never both")
@@ -426,9 +427,15 @@ def run_review(
     if notify is not None:
         notify(f"gateway: {GATEWAY} (provider {provider})")
         notify(f"model: {model or 'default per provider'}")
+        # The whole clip directory is submitted, not only the frames: the
+        # capture scripts leave the run log and a copy of the client log
+        # beside the mp4, and the client log carries whatever the game and
+        # any remote LAN player put there. Say what actually leaves, not
+        # just "the media".
         notify(
-            f"reviewing {clip} against {provider}; the media leaves this machine and "
-            "retention is governed by that provider's terms"
+            f"reviewing {clip} against {provider}; this whole directory (frames, "
+            "mp4, run log, client log) is uploaded to the provider and retention "
+            "is governed by that provider's terms"
         )
 
     argv: list[str] = [GATEWAY, "review", str(clip), "--provider", provider]

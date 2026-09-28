@@ -614,6 +614,15 @@ Durable state this system owns, and what an incident costs:
 | Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/` | No |
 | Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
 
+Run artifacts carry what a remote LAN player on the test server wrote into
+the client log, because the log is the only record of what a run actually
+did. Two things keep that from spreading: a case detail never carries the
+captured chat text itself (the chat cases report `chat_len=` only), and a
+sampled exception line is cut at 200 characters. Details and report paths
+still leave the machine when a run is attached to CI or reviewed by the
+vision gateway, so treat a run's artifacts as shareable only with the
+servers that run are the ones you meant.
+
 Recovery facts:
 
 - **RPO/RTO:** run artifacts are reproducible output, not records of record.
@@ -973,8 +982,11 @@ The clip is material for a human verdict and, optionally, a prescreen:
 recorded intent to the **deadeye** vision-model gateway
 (`hordeforge/7dtd-vision-review`) and returns structured, advisory criticism
 that names moments worth a person's attention. It is explicitly advisory: it
-uploads the clip to a third party, refuses without `--allow-network`, and can
-never satisfy the human-watch gate this section exists to preserve.
+uploads the **whole clip directory** to a third party (frames, mp4, run log
+and the client log the capture scripts leave beside them, which carries
+whatever the game and any remote LAN player put there), refuses without
+`--allow-network`, and can never satisfy the human-watch gate this section
+exists to preserve.
 
 ```bash
 uv run scripts/review_video.py .local/capture/<suite>-<stamp> \
