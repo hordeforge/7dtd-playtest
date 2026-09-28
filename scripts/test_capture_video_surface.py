@@ -41,7 +41,7 @@ FRAMES_SCRIPT = Path(__file__).resolve().parent / "capture_frames.sh"
 STOP_START = "stop_run() {"
 
 # The log gate: the baseline taken before the run starts, plus the reader.
-LOG_GATE_START = 'LOG_INODE="$(stat'
+LOG_GATE_START = "LOG_SNAPSHOT=\"$(stat"
 LOG_GATE_END = "read_log_since_start() {"
 
 # The parse fragment: the marker comment through the line before the guard.
@@ -236,7 +236,37 @@ def check_log_gate(script: Path) -> None:
         assert "after_recreate" in read_log_since(fragment, log, recreated), (
             f"{script.name}: a recreated log skipped past this run's marker"
         )
+        # The client is still appending, so the read can stop inside the line
+        # it is writing. A half-written marker is a marker with fields missing,
+        # and this script decides from those fields: a clip line caught before
+        # its trailing `-> <dir>` parses as nothing and aborts the capture.
+        partial = (
+            "printf 'scene staged whole prop=2\\r\\n"
+            "clip complete motion_thing frames=4' >> " + shlex.quote(str(log))
+        )
+        torn = read_log_since(fragment, log, partial)
+        assert "scene staged whole" in torn, (
+            f"{script.name}: a completed line went missing behind a torn one"
+        )
+        assert "clip complete" not in torn, (
+            f"{script.name}: an unterminated line was read as a whole one: {torn!r}"
+        )
+        # The rest of that line arrives on the next poll, so the marker is
+        # seen whole rather than never. The fragment re-takes its baseline
+        # per read, so a completed marker is exercised on a fresh log.
+        whole_log = Path(tmp) / "output_log_whole.txt"
+        whole_log.write_text(stale, encoding="utf-8", newline="")
+        completed = (
+            "printf 'clip complete motion_thing frames=48 -> "
+            "playtest-shots/clips/motion_thing\\r\\n' >> " + shlex.quote(str(whole_log))
+        )
+        whole = read_log_since(fragment, whole_log, completed)
+        assert (
+            "clip complete motion_thing frames=48 -> "
+            "playtest-shots/clips/motion_thing" in whole
+        ), f"{script.name}: a completed marker was not read whole: {whole!r}"
     print(f"OK {script.name} reads only the log this run produced")
+    print(f"OK {script.name} drops a half-written line instead of parsing it")
 
 
 def check_stop_run(script: Path) -> None:

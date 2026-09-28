@@ -127,23 +127,41 @@ RUN_LOG="$OUT/run.log"
 # mtime against `date`: an NTP correction, a manual clock change or a resumed
 # host moves the wall clock under the run and inverts that comparison, which
 # lets a previous run's marker trigger this one.
-LOG_INODE="$(stat -c %i "$CLIENT_LOG" 2>/dev/null || echo 0)"
-LOG_BASE="$(stat -c %s "$CLIENT_LOG" 2>/dev/null || echo 0)"
+LOG_SNAPSHOT="$(stat -c '%i %s' "$CLIENT_LOG" 2>/dev/null || echo '0 0')"
+LOG_INODE="${LOG_SNAPSHOT%% *}"
+LOG_BASE="${LOG_SNAPSHOT##* }"
 
 # NEW_LOG: the part of the client log this run has produced. A log the client
 # recreated or truncated carries no baseline to skip, so the anchor resets to
 # its new zero rather than skipping past everything this run wrote.
+#
+# The client appends to this file while we read it, so the read is pinned to
+# one stat snapshot (head -c "$size", not a bare tail) and the unterminated
+# last line is dropped. A marker caught half-written is a marker with fields
+# missing: the clip line would parse as a smaller frame count and abort the
+# capture on a line the next poll would have read whole.
 read_log_since_start() {
-	local inode size
-	inode="$(stat -c %i "$CLIENT_LOG" 2>/dev/null || echo 0)"
-	size="$(stat -c %s "$CLIENT_LOG" 2>/dev/null || echo 0)"
+	local snapshot inode size chunk
+	snapshot="$(stat -c '%i %s' "$CLIENT_LOG" 2>/dev/null || echo '0 0')"
+	inode="${snapshot%% *}"
+	size="${snapshot##* }"
 	if [[ "$inode" != "$LOG_INODE" ]] || (( size < LOG_BASE )); then
 		LOG_INODE="$inode"
 		LOG_BASE=0
 	fi
 	NEW_LOG=""
 	if (( size > LOG_BASE )); then
-		NEW_LOG="$(tail -c "+$((LOG_BASE + 1))" -- "$CLIENT_LOG")"
+		# The trailing x survives command substitution's newline stripping,
+		# so a snapshot that ended mid-line is still recognisable below.
+		chunk="$(head -c "$size" -- "$CLIENT_LOG" | tail -c "+$((LOG_BASE + 1))"; printf x)"
+		chunk="${chunk%x}"
+		if [[ -z "$chunk" ]]; then
+			NEW_LOG=""
+		elif [[ "$chunk" == *$'\n' ]]; then
+			NEW_LOG="${chunk%$'\n'}"
+		else
+			NEW_LOG="${chunk%$'\n'*}"
+		fi
 	fi
 	return 0
 }
