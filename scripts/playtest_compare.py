@@ -44,6 +44,10 @@ from playtest_log import parse_client_log  # noqa: E402
 MAX_FRESHNESS_MINUTES = 10**9
 
 
+class CompareError(ValueError):
+    """A comparison input the tool refuses to diff."""
+
+
 def _count(value: object) -> int:
     """A summary count as an int; anything else (bool included) is 0."""
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
@@ -296,8 +300,12 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    stock = load_results(stock_path)
-    zdtd = load_results(zdtd_path)
+    try:
+        stock = load_results(stock_path)
+        zdtd = load_results(zdtd_path)
+    except CompareError as ex:
+        print(f"ERROR: {ex}; refusing to diff.", file=sys.stderr)
+        return 2
     if not stock["results"] and not zdtd["results"]:
         print("ERROR: neither side had a playtest result line", file=sys.stderr)
         return 1

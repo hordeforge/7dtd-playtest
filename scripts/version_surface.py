@@ -39,6 +39,24 @@ def _git_dir(root: Path) -> Path | None:
     return None
 
 
+def _common_git_dir(git_dir: Path) -> Path:
+    """The shared object store a worktree's private git dir points at.
+
+    A linked worktree's ``.git`` pointer names ``<common>/worktrees/<name>``,
+    which holds no ``refs/tags`` and no ``packed-refs``; the tags live in the
+    common dir its ``commondir`` file names. Without this the tag-coverage
+    check reports no tags in every worktree and passes vacuously.
+    """
+    commondir = git_dir / "commondir"
+    if not commondir.is_file():
+        return git_dir
+    text = commondir.read_text(encoding="utf-8").strip()
+    if not text:
+        return git_dir
+    target = Path(text)
+    return target if target.is_absolute() else (git_dir / target).resolve()
+
+
 def discover_tag_versions(root: Path) -> list[str]:
     """X.Y.Z versions of the local ``vX.Y.Z`` tags, oldest first.
 
@@ -47,9 +65,10 @@ def discover_tag_versions(root: Path) -> list[str]:
     shallow CI checkout that did not fetch tags), which makes the tag-coverage
     check vacuous there rather than wrong.
     """
-    git_dir = _git_dir(root)
-    if git_dir is None:
+    private = _git_dir(root)
+    if private is None:
         return []
+    git_dir = _common_git_dir(private)
     names: set[str] = set()
     tags_dir = git_dir / "refs" / "tags"
     if tags_dir.is_dir():

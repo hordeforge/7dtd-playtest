@@ -259,7 +259,12 @@ for f in "$OUT"/raw-*.png; do
 	[[ -e "$f" ]] || continue
 	# Drop a raw only once its crop exists: magick failing here must not delete
 	# the only copy of the evidence with it.
-	if magick "$f" -crop "$CROP" +repage "$OUT/cropped/$(basename "${f/raw-/frame-}")" 2>/dev/null; then
+	# The rename is applied to the basename only: substituting over the whole
+	# path also rewrites an `raw-` in $OUT, so `--out ./raw-frames` wrote
+	# crops named raw-NN.png, missed the frame-*.png glob, and reported that
+	# spectacle captured nothing.
+	raw_base="${f##*/}"
+	if magick "$f" -crop "$CROP" +repage "$OUT/cropped/${raw_base/raw-/frame-}" 2>/dev/null; then
 		rm -f "$f"
 	fi
 done
@@ -318,6 +323,9 @@ else
 	echo "                be explained after the next client launch overwrites it" >&2
 fi
 echo "  staged scenes"
-grep -oE 'scene staged [^ ]+' "$RUN_LOG" "$CLIENT_LOG" 2>/dev/null | sed 's/^/    /' | sort -u || true
+# Only this run's own log. The client log is append-only across runs, so a
+# whole-file grep lists the previous run's scenes under this run's result, and
+# grep's two-file `file:` prefix makes sort -u list this run's own scene twice.
+grep -oE 'scene staged [^ ]+' "$RUN_LOG" 2>/dev/null | sed 's/^/    /' | sort -u || true
 echo
 echo "These frames are material for a human verdict. Nothing here judged them."

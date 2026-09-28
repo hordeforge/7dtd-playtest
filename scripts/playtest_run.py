@@ -571,14 +571,22 @@ def clean_processes(*, kill_wine: bool = False) -> None:
     pause(2)
 
 
-def truncate_file(path: Path, what: str) -> None:
-    """Empty an append-only log so incremental readers restart from zero."""
+def truncate_file(path: Path, what: str) -> bool:
+    """Empty an append-only log so incremental readers restart from zero.
+
+    True when the file is empty afterwards (absent counts as empty). False
+    when the truncate failed and the previous generation's bytes are still
+    there, so the caller starts its reader past them instead of replaying
+    them as this run's events.
+    """
     if not path.is_file():
-        return
+        return True
     try:
         path.write_text("", encoding="utf-8")
     except OSError as ex:
         warn(f"could not truncate {what}: {ex}")
+        return False
+    return True
 
 
 def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
@@ -964,8 +972,16 @@ def parse_loadgen_event_line(line: str) -> dict | None:
     return None
 
 
-def read_loadgen_latest_state(path: Path) -> tuple[int | None, dict[tuple[str, str], dict]]:
-    """Whole-file read of the final observer snapshot (see read_loadgen_events)."""
+def read_loadgen_latest_state(
+    path: Path | None,
+) -> tuple[int | None, dict[tuple[str, str], dict]]:
+    """Whole-file read of the final observer snapshot (see read_loadgen_events).
+
+    ``None`` is a stream this run could not empty, so it has no snapshot of
+    its own to report.
+    """
+    if path is None:
+        return None, {}
     return loadgen_latest_state(read_loadgen_events(path))
 
 
@@ -1982,6 +1998,20 @@ def suite_tokens(suite: str) -> tuple[str, ...]:
     return tuple(token for token in re.split(r"[,;\s]+", suite.strip()) if token)
 
 
+def suite_flag_given(argv: list[str] | None) -> bool:
+    """True when the caller named --suite on the command line.
+
+    argparse cannot tell an omitted flag from one given the same value, and
+    the difference decides whether --suite-file picks the suite id. Parsed
+    from the raw argv rather than by comparing against the default, so
+    `--suite demo` stays an explicit choice.
+    """
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    return any(
+        token == "--suite" or token.startswith("--suite=") for token in tokens
+    )
+
+
 def mixed_visual_suites(suite: str) -> bool:
     """True when a suite list asks for both prefab-look and block-place.
 
@@ -2559,9 +2589,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--client-log",
         type=Path,
-        default=None,
+        default=(
+            Path(os.environ["PLAYTEST_CLIENT_LOG"])
+            if os.environ.get("PLAYTEST_CLIENT_LOG")
+            else None
+        ),
         help="client output log to parse for results "
-        "(default: the log under the discovered client install's Proton prefix)",
+        "(env PLAYTEST_CLIENT_LOG; default: the log under the discovered client "
+        "install's Proton prefix)",
     )
     ap.add_argument(
         "--attach-reviews",
@@ -2684,6 +2719,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = ap.parse_args(argv)
+    # --suite-file names the suite the client is armed with, so it selects the
+    # id unless --suite was given. Leaving the flag default (`demo`) in place
+    # made a mod repo's own suite load its world and mods while the client ran
+    # the demo, and dropped PLAYTEST_CASE_REFS because the doc's id never
+    # matched, so every catalog case of every demo suite ran unfiltered.
+    if args.suite_file is not None and not suite_flag_given(argv):
+        try:
+            args.suite = suite_loader.load_suite_file(args.suite_file).id
+        except suite_loader.SuiteLoadError as ex:
+            ap.error(f"--suite-file invalid: {ex}")
     if args.print_client_log:
         print(default_client_log())
         return 0
@@ -2706,7 +2751,10 @@ def main(argv: list[str] | None = None) -> int:
     suite_doc: suite_loader.SuiteDoc | None = None
     if args.suite_file is not None:
         try:
-            suite_doc = suite_loader.load_suite_file(args.suite_file)
+            # load_external_suite, not load_suite_file: a suite file outside
+            # the built-in set may not claim a stock-fidelity id, or it
+            # silently rescores what `core` means.
+            suite_doc = suite_loader.load_external_suite(args.suite_file)
         except suite_loader.SuiteLoadError as ex:
             ap.error(f"--suite-file invalid: {ex}")
     else:
@@ -3139,17 +3187,19 @@ def main(argv: list[str] | None = None) -> int:
             peer_client_log, qroot, "peer-client-log"
         ) if peer_client_log is not None else True
         if preserved_client:
-            truncate_file(args.client_log, "client log")
+            client_truncated = truncate_file(args.client_log, "client log")
         else:
             # Quarantine unusable: the previous generation's bytes stay in
             # place; the tail starts past them so stale events cannot be
             # re-parsed as this run's.
+            client_truncated = False
             warn("previous client log kept untruncated; run events are read "
                  "from the end of the existing bytes")
+        peer_truncated = True
         if peer_client_log is not None:
             peer_client_log.parent.mkdir(parents=True, exist_ok=True)
             if preserved_peer:
-                truncate_file(peer_client_log, "peer client log")
+                peer_truncated = truncate_file(peer_client_log, "peer client log")
         # The loadgen observer stream is per-run evidence and nothing else
         # empties it. Left in place it is a cross-run trap: the final observer
         # read is a whole-file read, so a rerun that never reaches a loadgen
@@ -3157,16 +3207,17 @@ def main(argv: list[str] | None = None) -> int:
         # start) answers with the previous run's `joined` event and checks
         # CVars and buffs against a bot that left hours ago.
         loadgen_events_path.parent.mkdir(parents=True, exist_ok=True)
-        truncate_file(loadgen_events_path, "loadgen events")
+        loadgen_truncated = truncate_file(loadgen_events_path, "loadgen events")
 
         # Incremental readers created right after the truncation above so every
         # later append is seen exactly once. Later truncations (rejoin phases)
         # are detected by LogTail as a shrink and restart from zero. A log left
-        # untruncated (quarantine unavailable) starts past its existing bytes.
-        client_tail = LogTail(args.client_log, from_end=not preserved_client)
+        # untruncated, whether because quarantine was unavailable or because
+        # the truncate itself failed, starts past its existing bytes.
+        client_tail = LogTail(args.client_log, from_end=not client_truncated)
         client_scan = ClientLogScan()
         peer_tail = (
-            LogTail(peer_client_log, from_end=not preserved_peer)
+            LogTail(peer_client_log, from_end=not peer_truncated)
             if peer_client_log is not None
             else None
         )
@@ -3482,10 +3533,13 @@ def main(argv: list[str] | None = None) -> int:
                 "restart server → rejoin verify"
             )
             stop_proc(client_proc)
-            truncate_file(args.client_log, "client log")
+            # A failed truncate leaves the setup generation's bytes in place, so
+            # the reader starts past them rather than re-firing setup barriers
+            # as verify-generation ones.
+            client_truncated = truncate_file(args.client_log, "client log")
             # Fresh readers for the new log generation: the scan must hold only
             # setup-phase events, not bytes from before the truncation.
-            client_tail = LogTail(args.client_log)
+            client_tail = LogTail(args.client_log, from_end=not client_truncated)
             client_scan = ClientLogScan()
             client_proc = start_client(
                 args.port,
@@ -3681,13 +3735,16 @@ def main(argv: list[str] | None = None) -> int:
             # generation just wrote, so no wipe here.
             if not start_server(wipe=False):
                 return 2
-            truncate_file(args.client_log, "client log")
+            # A failed truncate leaves the setup generation's bytes in place, so
+            # the reader starts past them rather than re-firing setup barriers
+            # as verify-generation ones.
+            client_truncated = truncate_file(args.client_log, "client log")
             # Fresh readers + fresh counter pair for the verify generation: the
             # old log's barrier lines were already serviced (or deliberately
             # dropped with the setup client) and must neither re-fire nor leak
             # into the final parsed report, nor leave fired counts that would
             # swallow the first verify-generation emission of the same name.
-            client_tail = LogTail(args.client_log)
+            client_tail = LogTail(args.client_log, from_end=not client_truncated)
             client_scan = ClientLogScan()
             barrier_counts, barrier_seen = new_barrier_tables()
             client_proc = start_client(
@@ -4261,7 +4318,11 @@ def main(argv: list[str] | None = None) -> int:
                 # an append and make the expectation verdict and the oracle
                 # state disagree with each other.
                 observer_entity, observer_latest = read_loadgen_latest_state(
-                    loadgen_events_path
+                    # A truncate that failed leaves the previous run's events
+                    # in place, and this is a whole-file read: its `joined`
+                    # event would check CVars and buffs against a bot that
+                    # left hours ago. Read nothing instead.
+                    loadgen_events_path if loadgen_truncated else None
                 )
                 observer_failures = loadgen_expectation_failures_from_latest(
                     observer_entity,
@@ -4347,6 +4408,11 @@ def main(argv: list[str] | None = None) -> int:
             sweep_patterns = [r"zig-out/bin/zdtd", r"7dtd-loadgen"]
             if teardown_plan is None or not teardown_plan.is_sandbox:
                 sweep_patterns = [*GAME_PROC_PATTERNS, *sweep_patterns]
+            if teardown_plan is not None and teardown_plan.readonly:
+                # A readonly host is one this run must never write to, and a
+                # SIGKILL sweep is a write. Nothing here started any of these
+                # processes, so the sweep has nothing of ours to clean.
+                sweep_patterns = []
             pkill_patterns(
                 sweep_patterns,
                 sig="-9",

@@ -274,9 +274,22 @@ def validate_result(
             start, end = entry.pop("start_frame", None), entry.pop("end_frame", None)
             if "at_frame" not in entry and start is not None and end is not None:
                 entry["at_frame"] = [start, end]
+            elif (start is None) != (end is None):
+                # Both are popped unconditionally, so a half pair used to
+                # lose the moment with nothing to report: the key is gone
+                # before the unexpected-key check can name it.
+                problems.append(
+                    f"issue #{index + 1} names only one of start_frame/end_frame"
+                )
+                continue
             start, end = entry.pop("start_seconds", None), entry.pop("end_seconds", None)
             if "at_seconds" not in entry and start is not None and end is not None:
                 entry["at_seconds"] = [start, end]
+            elif (start is None) != (end is None):
+                problems.append(
+                    f"issue #{index + 1} names only one of start_seconds/end_seconds"
+                )
+                continue
             unexpected = sorted(set(entry) - {"description", "at_seconds", "at_frame"})
             if unexpected:
                 problems.append(
@@ -331,6 +344,14 @@ def validate_result(
     ):
         problems.append("confidence must be a number between 0 and 1")
 
+    # Read the string-list keys while `problems` can still be looked at. They
+    # were normalized inside the return dict, so a wrong type appended here
+    # after the last read and was discarded, and the review was stamped
+    # review_validated with three fields silently coerced to [].
+    strengths = strings("strengths")
+    recommended_changes = strings("recommended_changes")
+    limitations = strings("limitations")
+
     if problems:
         raise ReviewError(
             f"{origin} returned an invalid structure (schema mismatch): " + "; ".join(problems)
@@ -339,12 +360,12 @@ def validate_result(
     assert isinstance(confidence, (int, float))  # checked above; narrows for the return
     return {
         "summary": summary.strip(),
-        "strengths": strings("strengths"),
+        "strengths": strengths,
         "issues": issues,
-        "recommended_changes": strings("recommended_changes"),
+        "recommended_changes": recommended_changes,
         "rubric_scores": scores,
         "confidence": round(float(confidence), 4),
-        "limitations": strings("limitations"),
+        "limitations": limitations,
     }
 
 
