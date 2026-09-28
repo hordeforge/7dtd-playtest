@@ -246,6 +246,7 @@ make install-pair         # playtest + connect
 make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
 make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
+make sbom                       # CycloneDX inventory of both committed lockfiles
 make playtest-review-video SUITE=<id> INTENT=<path>  # capture staged clips, then vision-review them through deadeye
 make playtest SUITE=core SERVER=stock       # managed Safehouse instance
 make playtest SUITE=smoke PROVISION=attach READONLY=1  # live host, attach-only
@@ -447,6 +448,13 @@ the run order that both `make test` and `make coverage` expand):
     listed once, `test`/`coverage`/`test-one` share that one list, and CI runs
     the same steps `make check` does. A new gate file that nobody added to
     `GATES` runs under neither `make test` nor CI.
+18. dependency inventory (`scripts/test_dep_sbom.py`): the CycloneDX SBOM
+    `make sbom` writes from `uv.lock` and `Source/PlayTestMod/packages.lock.json`
+    lists every package both lockfiles resolve, carries the locked version in
+    each purl, marks nothing `required` (pyproject declares no runtime
+    dependency and the csproj reference is `PrivateAssets="All"`), and derives
+    a content-hash serial number. A dependency added without regenerating the
+    lock, or a lockfile that stopped describing the tree, fails here offline.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

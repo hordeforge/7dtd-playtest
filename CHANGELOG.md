@@ -24,6 +24,16 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- **`make sbom` and the release-time dependency inventory.**
+  `scripts/dep_sbom.py` writes a CycloneDX 1.6 SBOM from the two committed,
+  hash-pinned lockfiles (`uv.lock`, `Source/PlayTestMod/packages.lock.json`)
+  with no network and no scanner, so a tag publishes what it depends on and a
+  vulnerability scanner can read it without a checkout. Every component is
+  marked dev scope (pyproject declares no runtime dependency; the csproj
+  reference is `PrivateAssets="All"`), and the serial number is a content hash,
+  so an unchanged tree re-runs to the same id. Gated offline by
+  `scripts/test_dep_sbom.py`, and built for the tag in
+  `.github/workflows/release.yml`.
 - **Gate-list surface** (`scripts/test_gate_list.py`, wired into the Makefile
   `GATES` list): fails when a `scripts/test_*.py` file is missing from `GATES`
   (it would run under neither `make test` nor CI) or when a `GATES` entry has

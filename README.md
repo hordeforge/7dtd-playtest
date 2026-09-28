@@ -91,6 +91,19 @@ Run the full local CI equivalent:
 make check
 ```
 
+Write the CycloneDX inventory of both committed lockfiles:
+
+```bash
+make sbom
+```
+
+Nothing ships a third-party package at runtime: `pyproject.toml` declares an
+empty runtime dependency set, and the mod's one NuGet reference is build-only
+(`PrivateAssets="All"`). `make sbom` reads `uv.lock` and
+`Source/PlayTestMod/packages.lock.json`, both hash-pinned, and marks every
+component dev scope, so a consumer or a vulnerability scanner can tell what a
+tag pulled in without checking it out.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR expectations these gates
 enforce (changelog entry, catalog/doc sync).
 
@@ -1041,7 +1054,7 @@ surface incl. live rows + counts total, mod version/changelog sync, scenario-pro
 env surface, mining-probe provider surface, stock-peer orchestration surface, host
 lock, deterministic simulation, orchestrator local-init order, report/log surface,
 orchestrator pure-logic units, compare diff, capture-clip marker surface,
-video-review surface)
+video-review surface, dependency SBOM)
 plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
 runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are

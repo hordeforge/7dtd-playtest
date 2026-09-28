@@ -26,6 +26,7 @@ jobs:
       # Actions pinned by full commit SHA (tag in comment) so a moved tag or a
       # compromised major-version release cannot inject code into the pipeline.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Check the tag matches ModInfo.xml
         shell: bash
         run: |
@@ -43,3 +44,11 @@ jobs:
             exit 1
           fi
           echo "ok: tag $TAG matches $MANIFEST ($SHIPPED)"
+      # The CycloneDX inventory for this tag, built from the two committed
+      # hash-pinned lockfiles (`--locked` refuses a stale uv.lock) rather than
+      # resolved from an index, so it names exactly the bytes this tag was cut
+      # from. Failing here means a tagged tree cannot produce an inventory,
+      # which is a reason not to ship the tag, not a flake. A maintainer
+      # publishing the release attaches the same file the release notes link.
+      - name: Build the SBOM for this tag
+        run: make sbom SBOM="$RUNNER_TEMP/7dtd-playtest.cdx.json"

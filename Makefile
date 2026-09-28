@@ -41,7 +41,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help build install uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak playtest playtest-smoke \
+.PHONY: help build install uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
@@ -57,6 +57,7 @@ help:
 	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
 	@echo "  make coverage                    line coverage of scripts/ under the offline gates (.coverage)"
 	@echo "  make check                       everything CI runs: test + dst DST_SEEDS=200"
+	@echo "  make sbom                        CycloneDX inventory of uv.lock + packages.lock.json"
 	@echo
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
 	@echo "  make build | install | install-pair | uninstall | clean"
@@ -154,7 +155,8 @@ GATES := \
 	test_playtest_compare.py \
 	test_capture_video_surface.py \
 	test_video_review.py \
-	test_gate_list.py
+	test_gate_list.py \
+	test_dep_sbom.py
 
 test: lint typecheck
 	@for gate in $(GATES); do \
@@ -191,6 +193,16 @@ test-one: require-uv
 		for gate in $(GATES); do echo "  $$gate"; done; \
 		exit 2; }
 	$(UV) "$(ROOT)/scripts/$(GATE)"
+
+# CycloneDX inventory of the two committed lockfiles, so a release publishes
+# what it depends on. Reads uv.lock and Source/PlayTestMod/packages.lock.json
+# (both hash-pinned) rather than resolving, so it needs no network and no
+# scanner; the release workflow attaches the output to the tag.
+SBOM ?= $(ROOT)/dist/7dtd-playtest.cdx.json
+sbom:
+	@mkdir -p "$(dir $(SBOM))"
+	$(UV) "$(ROOT)/scripts/dep_sbom.py" "$(SBOM)"
+	@echo "OK -> $(SBOM)"
 
 # The full local verification, identical to .github/workflows/ci.yml.
 check:
