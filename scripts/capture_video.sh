@@ -65,7 +65,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$SUITE" ]] || { echo "capture_video: --suite is required" >&2; exit 2; }
-OUT="${OUT:-$ROOT/.local/capture/$SUITE-$STAMP}"
+if [[ -z "$OUT" ]]; then
+	# A unique directory, not "<suite>-<second-stamp>": two captures of the
+	# same suite starting in the same second resolved to one path, and each
+	# one then swept the artifacts the other was still writing. An explicit
+	# --out is the caller naming a directory to reuse.
+	mkdir -p "$ROOT/.local/capture"
+	OUT="$(mktemp -d "$ROOT/.local/capture/$SUITE-$STAMP-XXXXXX")"
+fi
 command -v uv >/dev/null 2>&1 || { echo "ERROR: uv is not on PATH; host Python goes through it (see README: Requirements)" >&2; exit 2; }
 PY=(uv run --locked --project "$ROOT" python)
 RUNNER="${RUNNER:-${PY[*]} $HERE/playtest_run.py --suite}"
@@ -123,11 +130,10 @@ fi
 CLIP_LINE=""
 echo "waiting for a completed clip..."
 while :; do
-	if ! kill -0 "$RUN_PID" 2>/dev/null; then
-		echo "ERROR: the run exited before any clip completed; see $RUN_LOG" >&2
-		wait "$RUN_PID" || true
-		exit 1
-	fi
+	# Drain the log before asking whether the run is still alive. A suite can
+	# complete its clip and exit between two polls; a liveness check first
+	# reports "the run exited before any clip completed" with the marker
+	# sitting unread in the log it already wrote.
 	read_log_since_start
 	if [[ -n "$NEW_LOG" ]]; then
 		if [[ -n "$CLIP_ID" ]]; then
@@ -144,6 +150,16 @@ while :; do
 	fi
 	if [[ -n "$CLIP_LINE" ]]; then
 		break
+	fi
+	if ! kill -0 "$RUN_PID" 2>/dev/null; then
+		echo "ERROR: the run exited before any clip completed; see $RUN_LOG" >&2
+		wait "$RUN_PID" || true
+		# Reaped: the EXIT trap must not signal a pid the shell has already
+		# collected, which by then the kernel may have handed to an unrelated
+		# process, nor its process group.
+		RUN_PID=""
+		RUN_PGID=""
+		exit 1
 	fi
 	sleep 1
 done

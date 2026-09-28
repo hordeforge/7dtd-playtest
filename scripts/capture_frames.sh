@@ -66,7 +66,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$SUITE" ]] || { echo "capture_frames: --suite is required" >&2; exit 2; }
-OUT="${OUT:-$ROOT/.local/capture/$SUITE-$STAMP}"
+if [[ -z "$OUT" ]]; then
+	# A unique directory, not "<suite>-<second-stamp>": two captures of the
+	# same suite starting in the same second resolved to one path, and the
+	# reuse sweep below then deleted frames the other capture was still
+	# writing. An explicit --out is the caller naming a directory to reuse.
+	mkdir -p "$ROOT/.local/capture"
+	OUT="$(mktemp -d "$ROOT/.local/capture/$SUITE-$STAMP-XXXXXX")"
+fi
 command -v uv >/dev/null 2>&1 || { echo "ERROR: uv is not on PATH; host Python goes through it (see README: Requirements)" >&2; exit 2; }
 PY=(uv run --locked --project "$ROOT" python)
 RUNNER="${RUNNER:-${PY[*]} $HERE/playtest_run.py --suite}"
@@ -127,17 +134,26 @@ fi
 
 echo "waiting for the first staged scene..."
 while :; do
-	if ! kill -0 "$RUN_PID" 2>/dev/null; then
-		echo "ERROR: the run exited before any scene was staged; see $RUN_LOG" >&2
-		wait "$RUN_PID" || true
-		exit 1
-	fi
+	# Drain the log before asking whether the run is still alive. A suite can
+	# stage its scene and exit between two polls; a liveness check first
+	# reports "the run exited before any scene was staged" with the marker
+	# sitting unread in the log it already wrote.
 	read_log_since_start
 	if [[ -n "$NEW_LOG" ]]; then
 		LAST_MARK="$(grep -- "$MARKER" <<<"$NEW_LOG" | tail -1 || true)"
 		if [[ -n "$LAST_MARK" ]]; then
 			break
 		fi
+	fi
+	if ! kill -0 "$RUN_PID" 2>/dev/null; then
+		echo "ERROR: the run exited before any scene was staged; see $RUN_LOG" >&2
+		wait "$RUN_PID" || true
+		# Reaped: the EXIT trap must not signal a pid the shell has already
+		# collected, which by then the kernel may have handed to an unrelated
+		# process, nor its process group.
+		RUN_PID=""
+		RUN_PGID=""
+		exit 1
 	fi
 	sleep 1
 done
@@ -173,10 +189,13 @@ montage "$OUT/cropped"/frame-*.png -tile 4x -geometry 420x324+3+3 \
 	-background '#1b1b1b' -label '%f' "$OUT/contact-sheet.png" 2>/dev/null \
 	|| echo "  contact sheet NOT BUILT: montage failed or is not installed" >&2
 
-# Counting only this script's own frame-*.png output (fixed, safe names).
-# ls is intentional here because only the count of the fixed frame glob is needed.
-# shellcheck disable=SC2012
-FRAME_COUNT="$(ls "$OUT/cropped"/frame-*.png 2>/dev/null | wc -l)"
+# Counting only this script's own frame-*.png output (fixed, safe names), by
+# glob rather than `ls | wc -l`, so a directory that vanished reads as no
+# frames instead of silently counting as zero.
+shopt -s nullglob
+frames=("$OUT"/cropped/frame-*.png)
+shopt -u nullglob
+FRAME_COUNT=${#frames[@]}
 if (( FRAME_COUNT == 0 )); then
 	echo
 	echo "ERROR: no frames were captured; spectacle produced nothing for this run." >&2

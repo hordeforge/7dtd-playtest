@@ -62,9 +62,13 @@ declare -i sum_pass=0 sum_fail=0 sum_skip=0
 # A lap mark is this script's own scratch, and a run killed between mktemp and
 # its own rm -f leaves one behind in the report dir. Nothing else removes them,
 # so repeated runs pile up an empty file per killed lap for good. Sweep only
-# the marks old enough that no live lap can still be reading through one: a
-# concurrent session's fresh mark must survive, or its newest_report finds no
-# anchor and grades its lap as "no report".
+# the marks old enough that no live lap can still be holding one: a concurrent
+# session's fresh mark must survive its own release_lap_mark.
+#
+# The mark is scratch, not the filter. Which report belongs to a lap is decided
+# by snapshot_reports (what was already on disk before the lap), because a
+# concurrent session publishes into this same directory and a time bound alone
+# cannot tell the two apart.
 MARK_STALE_SEC="${PLAYTEST_LAP_MARK_STALE_SEC:-86400}"
 sweep_stale_lap_marks() {
   local older_than=$(( MARK_STALE_SEC / 60 )) mark
@@ -75,9 +79,12 @@ sweep_stale_lap_marks() {
              -mmin "+$older_than" 2>/dev/null)
 }
 
-if [[ -d "$REPORT_DIR" ]]; then
-  sweep_stale_lap_marks
+if [[ ! -d "$REPORT_DIR" ]]; then
+  echo "playtest_repeat: report dir does not exist: $REPORT_DIR" >&2
+  echo "  pass --logdir, or let the orchestrator create it" >&2
+  exit 2
 fi
+sweep_stale_lap_marks
 
 # An interrupted run drops the mark it is holding, so the common exit paths
 # leave nothing behind. A SIGKILLed run still leaves one; the sweep above is
@@ -92,14 +99,32 @@ release_lap_mark() {
 }
 trap release_lap_mark EXIT INT TERM
 
-# Newest report a lap produced (report-<epoch>.json). Pure bash: no ls -t
-# parsing, paths with spaces survive. Only reports newer than $1 count: the
-# report dir is the shared default and a previous lap, a concurrent session,
-# or the orchestrator's own late write is a report this lap did not produce.
-latest_report() {
-  local f newest=""
+# The reports already on disk, by name. The report dir is the shared default:
+# a concurrent session on another client instance publishes
+# report-<epoch>.json into the same directory, and a mark is only a time
+# bound, so "newer than the mark" alone selects another session's report and
+# grades this lap with its counts. A name that was already here before the
+# lap started is never this lap's, whatever its mtime.
+declare -A prior_reports=()
+snapshot_reports() {
+  local f
+  prior_reports=()
   for f in "$REPORT_DIR"/report-*.json; do
-    [[ -f "$f" && "$f" -nt "$1" ]] || continue
+    [[ -f "$f" ]] || continue
+    prior_reports["${f##*/}"]=1
+  done
+}
+
+# Newest report a lap produced (report-<epoch>.json). Pure bash: no ls -t
+# parsing, paths with spaces survive. Only reports this lap created count: the
+# report dir is shared, and a previous lap or a concurrent session wrote the
+# rest.
+latest_report() {
+  local f name newest=""
+  for f in "$REPORT_DIR"/report-*.json; do
+    [[ -f "$f" ]] || continue
+    name="${f##*/}"
+    [[ -z "${prior_reports[$name]:-}" ]] || continue
     if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
       newest="$f"
     fi
@@ -115,17 +140,22 @@ summary_counts() {
 
 for lap in $(seq 1 "$LAPS"); do
   echo "=== lap $lap/$LAPS ==="
-  # Stamped before the lap runs, so a report this lap did not write is never
-  # graded as its verdict.
-  lap_mark="$(mktemp "$REPORT_DIR/.lap-mark.XXXXXX")"
+  # Stamped before the lap runs, and the reports already present are recorded
+  # before it starts, so nothing this lap did not write is graded as its
+  # verdict.
+  lap_mark="$(mktemp "$REPORT_DIR/.lap-mark.XXXXXX")" || {
+    echo "playtest_repeat: cannot create a lap mark in $REPORT_DIR" >&2
+    exit 2
+  }
   LAP_MARK="$lap_mark"
+  snapshot_reports
   if ! uv run --locked --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
     rm -f "$lap_mark"
     LAP_MARK=""
     echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)" >&2
     continue
   fi
-  latest="$(latest_report "$lap_mark")"
+  latest="$(latest_report)"
   rm -f "$lap_mark"
   LAP_MARK=""
   if [[ -z "$latest" ]]; then
