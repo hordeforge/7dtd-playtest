@@ -39,6 +39,7 @@ import playtest_log  # noqa: E402
 import playtest_run  # noqa: E402
 
 ROOT = _SCRIPTS.parent
+SUITES_DIR = ROOT / "suites"
 CATALOG_CS = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 PLAYTEST_RUN = _SCRIPTS / "playtest_run.py"
 
@@ -1885,6 +1886,22 @@ def test_start_server_does_not_flip_no_server() -> None:
     print("PASS start_server_does_not_flip_no_server")
 
 
+def test_telnet_admin_pinned_to_loopback() -> None:
+    src = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert 'config["TelnetRemoteAllowedIPs"] = "127.0.0.1"' in src, (
+        "the generated server config must pin the telnet admin plane to loopback; "
+        "TelnetAdmin only ever connects from 127.0.0.1, so any other source is refused"
+    )
+    # Orchestrator-owned, so a suite must not be able to widen it. The suites
+    # declare TelnetEnabled/TelnetPassword inputs, never the remote allow list.
+    for suite in sorted(SUITES_DIR.glob("*.json")):
+        assert "TelnetRemoteAllowedIPs" not in suite.read_text(encoding="utf-8"), (
+            f"{suite.name} declares TelnetRemoteAllowedIPs; the admin-plane reachability "
+            "is the orchestrator's, not a suite's to widen"
+        )
+    print("PASS telnet_admin_pinned_to_loopback")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -2007,6 +2024,10 @@ def main() -> int:
         (
             "start_server_does_not_flip_no_server",
             test_start_server_does_not_flip_no_server,
+        ),
+        (
+            "telnet_admin_pinned_to_loopback",
+            test_telnet_admin_pinned_to_loopback,
         ),
     ):
         try:

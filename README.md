@@ -1074,5 +1074,8 @@ listener never opens with a published default. `--no-server` runs attach to a
 dedicated whose config this process did not write, so they require
 `PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`). The supplied value is
 used only by the orchestrator's telnet client.
-It is not a production secret: the server binds localhost in playtest runs
-(`ServerVisibility=0`, Steam+LAN only).
+It is not a production secret: the admin plane is reachable only from loopback
+in playtest runs. The generated config sets `TelnetRemoteAllowedIPs=127.0.0.1`
+alongside `TelnetEnabled`, so the telnet listener refuses any non-local source
+even if it is network-reachable. The game port itself is still LAN-visible
+(`ServerVisibility=0`, Steam+LAN platforms).

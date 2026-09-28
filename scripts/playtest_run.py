@@ -2916,7 +2916,13 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 # The orchestrator's own telnet surface is not the suite's to
                 # declare: it must match what TelnetAdmin authenticates with.
+                # TelnetRemoteAllowedIPs pins the admin plane to loopback, the
+                # only host TelnetAdmin ever connects from (telnet_host is
+                # 127.0.0.1), so a LAN peer that reaches the port is refused
+                # even with the password. Set here, after the suite's own
+                # server block is copied in, so a suite cannot widen it.
                 config["TelnetEnabled"] = "true"
+                config["TelnetRemoteAllowedIPs"] = "127.0.0.1"
                 config["TelnetPassword"] = telnet_password
                 mods = (
                     suite_loader.resolve_mods(
