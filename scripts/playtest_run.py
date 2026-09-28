@@ -24,9 +24,9 @@ import subprocess
 import sys
 import time
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import IO
+from typing import IO, Protocol
 from xml.sax.saxutils import escape as xml_escape
 
 _SCRIPTS = Path(__file__).resolve().parent
@@ -79,6 +79,66 @@ STEAM_ROOTS = (
 # number is the default of --loadgen-server-cvar-tolerance, which the operator
 # can widen.
 CVAR_ABS_TOLERANCE = 0.0001
+
+
+# Every time read and every wait in this file goes through the clock below
+# instead of `time` directly. The run's whole timing surface (phase deadlines,
+# barrier and readiness polls, progress crumbs, the soak window) is then
+# drivable by a simulation that advances a virtual clock rather than waiting
+# out real minutes, which is the first of the seams DST.md lists as missing.
+# Production installs the real clock; nothing else differs between the two.
+class Clock(Protocol):
+    def monotonic(self) -> float: ...
+    def wall(self) -> float: ...
+    def sleep(self, seconds: float) -> None: ...
+
+
+class SystemClock:
+    """Real time. The only clock a managed run uses."""
+
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    def wall(self) -> float:
+        return time.time()
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
+
+
+_CLOCK: Clock = SystemClock()
+
+
+@contextlib.contextmanager
+def use_clock(clock: Clock) -> Iterator[None]:
+    """Install `clock` for the duration of the block.
+
+    Restoration is by finally, so a failing assertion inside the block cannot
+    leave a virtual clock driving the rest of the process.
+    """
+    global _CLOCK
+    previous = _CLOCK
+    _CLOCK = clock
+    try:
+        yield
+    finally:
+        _CLOCK = previous
+
+
+def monotonic_now() -> float:
+    """Monotonic seconds. Elapsed budgets read this and never `epoch_now`, so
+    a wall-clock step (NTP, an operator change) cannot extend or truncate a
+    phase deadline mid-run."""
+    return _CLOCK.monotonic()
+
+
+def epoch_now() -> float:
+    """Epoch seconds. Only for naming a run's artifacts, never for a budget."""
+    return _CLOCK.wall()
+
+
+def pause(seconds: float) -> None:
+    _CLOCK.sleep(seconds)
 
 
 def peer_client_game(compat: Path) -> Path | None:
@@ -470,7 +530,7 @@ def clean_processes(*, kill_wine: bool = False) -> None:
         r"zig-out/bin/zdtd",
     ]
     pkill_patterns(patterns, sig="-15")
-    time.sleep(2)
+    pause(2)
     pkill_patterns(patterns, sig="-9")
     if kill_wine:
         log("aggressive wine clean (kill_wine=1)")
@@ -482,7 +542,7 @@ def clean_processes(*, kill_wine: bool = False) -> None:
             ],
             sig="-9",
         )
-    time.sleep(2)
+    pause(2)
 
 
 def truncate_file(path: Path, what: str) -> None:
@@ -498,15 +558,15 @@ def truncate_file(path: Path, what: str) -> None:
 def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
     # Elapsed-time budget: monotonic so an NTP step or manual clock change
     # cannot extend or cut the wait.
-    deadline = time.monotonic() + timeout
+    deadline = monotonic_now() + timeout
     # Incremental tail: O(new bytes) per poll instead of re-reading the whole
     # log every 0.5s. This waits on server startup logs that reach tens of MB
     # over a cold load, and the poll shares the machine with the game.
     tail = LogTail(path)
-    while time.monotonic() < deadline:
+    while monotonic_now() < deadline:
         if needle in tail.poll():
             return True
-        time.sleep(0.5)
+        pause(0.5)
     return False
 
 
@@ -1346,9 +1406,9 @@ class TelnetAdmin:
             return None
         try:
             self._send(f"cvar get {name} -p {entity_id}")
-            deadline = time.monotonic() + timeout
+            deadline = monotonic_now() + timeout
             reply = ""
-            while time.monotonic() < deadline:
+            while monotonic_now() < deadline:
                 reply += self._recv(0.5)
                 value = parse_cvar_value(reply, name)
                 if value is not None:
@@ -1481,7 +1541,7 @@ class TelnetAdmin:
     def _recv(self, settle: float) -> str:
         if not self._sock:
             return ""
-        time.sleep(settle)
+        pause(settle)
         chunks: list[bytes] = []
         self._sock.settimeout(0.25)
         try:
@@ -1976,7 +2036,7 @@ def barrier_tele_pad_and_save(tn: TelnetAdmin) -> bool:
         warn("teleport_persist_pad: no player ids; retry next poll")
         return False
     # Let server commit player position before later setup/save.
-    time.sleep(2.0)
+    pause(2.0)
     tn.exec("saveworld")
     return True
 
@@ -1984,7 +2044,7 @@ def barrier_tele_pad_and_save(tn: TelnetAdmin) -> bool:
 def barrier_spawn_zombie(tn: TelnetAdmin) -> None:
     n = tn.spawn_near_players("zombieBoe")
     if n == 0:
-        time.sleep(1.0)
+        pause(1.0)
         tn.spawn_near_players("zombieBoe")
 
 
@@ -2709,7 +2769,7 @@ def main(argv: list[str] | None = None) -> int:
     # env var or stale shell default is visible in every log without --help.
     log("config: " + config_summary(args))
 
-    report_path = args.logdir / f"report-{int(time.time())}.json"
+    report_path = args.logdir / f"report-{int(epoch_now())}.json"
     server_log = args.logdir / "server-orch.log"
     client_launch_log = args.logdir / "client-launch.log"
     peer_client_launch_log = args.logdir / "peer-client-launch.log"
@@ -2844,7 +2904,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # Duration measurement on the monotonic clock; wall clock only for
         # naming and recorded instants.
-        t0 = time.monotonic()
+        t0 = monotonic_now()
         # Exclusive live-client lock BEFORE clean_processes / launch so a second
         # orchestrator cannot wipe another agent's client. See AGENTS.md.
         try:
@@ -3198,14 +3258,14 @@ def main(argv: list[str] | None = None) -> int:
 
         # Poll budget on the monotonic clock so a wall-clock step (NTP or
         # manual) during a long soak cannot hang or truncate the run.
-        deadline = time.monotonic() + args.timeout
+        deadline = monotonic_now() + args.timeout
         # soak_long needs ≥15 min wall + setup; bump default timeout. Whole-
         # token match (same , ; space delimiters as Catalog.ExpandSuites, see
         # suite_wants_host_fixtures): a provider suite whose name merely
         # contains "soak_long" must not silently inflate the run budget.
         if "soak_long" in re.split(r"[,;\s]+", args.suite.lower()):
-            deadline = time.monotonic() + max(args.timeout, 1100.0)
-            log(f"soak_long timeout deadline wall_s>={int(deadline - time.monotonic())}")
+            deadline = monotonic_now() + max(args.timeout, 1100.0)
+            log(f"soak_long timeout deadline wall_s>={int(deadline - monotonic_now())}")
         last_progress = float("-inf")
         # Fired and seen counts per barrier (fired may trail seen: combat +
         # sleeper + economy re-spawn/kill). Created as one pair per log
@@ -3222,7 +3282,7 @@ def main(argv: list[str] | None = None) -> int:
         # Cumulative spawn_vehicle:<class> barrier lines seen in the log.
         vehicle_seen: dict[str, int] = {}
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
-        apm_run_id = f"apm-{int(time.time())}-{os.getpid()}"
+        apm_run_id = f"apm-{int(epoch_now())}-{os.getpid()}"
         client_extra_env: dict[str, str] = dict(client_instance_env)
         if args.trace_entity:
             client_extra_env["PLAYTEST_TRACE_ENTITY"] = "1"
@@ -3282,7 +3342,7 @@ def main(argv: list[str] | None = None) -> int:
                         f"{PEER_STAGGER_TIMEOUT_SEC:g}s; launching the peer anyway, "
                         "which may hit the same-IP connect rate limit"
                     )
-                time.sleep(1.0)
+                pause(1.0)
                 # The peer gets its instance's GAME too, not just its prefix.
                 # launch_client.sh defaults GAME to the operator's Steam
                 # install, so a peer given only COMPAT ran the wrong tree
@@ -3342,21 +3402,21 @@ def main(argv: list[str] | None = None) -> int:
             # Phase budgets stay inside the documented harness wall clock
             # (--timeout bounds the whole run): each rejoin phase is bounded
             # by its own per-phase cap AND what remains of the run deadline.
-            remaining_sec = max(0.0, deadline - time.monotonic())
-            setup_deadline = time.monotonic() + min(
+            remaining_sec = max(0.0, deadline - monotonic_now())
+            setup_deadline = monotonic_now() + min(
                 min(args.timeout, 300), remaining_sec
             )
             last_setup_progress = float("-inf")
             rejoin_setup_seen = 0
 
-            while time.monotonic() < setup_deadline:
+            while monotonic_now() < setup_deadline:
                 if abort_if_lock_lost():
                     return 2
                 reap_finished_helpers()
                 note_backend_exit()
                 chunk = pump_log_tail(client_tail, client_scan)
                 if chunk:
-                    now = time.monotonic()
+                    now = monotonic_now()
                     if now - last_setup_progress > 8:
                         last_setup_progress = now
                         crumb = latest_playtest_crumb(chunk)
@@ -3391,11 +3451,11 @@ def main(argv: list[str] | None = None) -> int:
                                         "retry next poll"
                                     )
                                 else:
-                                    time.sleep(1.5)
+                                    pause(1.5)
                                     for cmd in ("saveworld", "sa"):
                                         r = tn.exec(cmd)
                                         log(f"telnet {cmd} → {r[:100]!r}")
-                                    time.sleep(2.0)
+                                    pause(2.0)
                                     r = tn.exec("saveworld")
                                     log(f"telnet saveworld (settle) → {r[:100]!r}")
                                     # The fire is marked once either way (retrying
@@ -3422,7 +3482,7 @@ def main(argv: list[str] | None = None) -> int:
                         )
                         break
                 if client_proc.poll() is not None:
-                    time.sleep(1)
+                    pause(1)
                     if client_scan.result().get("done") is not None:
                         log(f"{rejoin_label} setup DONE (client exited)")
                         break
@@ -3434,7 +3494,7 @@ def main(argv: list[str] | None = None) -> int:
                         "aborting rejoin instead of waiting out the timeout"
                     )
                     break
-                time.sleep(0.5)
+                pause(0.5)
             # Require setup DONE before rejoin verify; otherwise fixtures never existed.
             setup_parsed = client_scan.result()
             setup_done = setup_parsed.get("done") is not None
@@ -3459,7 +3519,7 @@ def main(argv: list[str] | None = None) -> int:
                     "skip": int((setup_parsed.get("summary") or {}).get("skip") or 0),
                 }
                 results = setup_parsed.get("results") or []
-                junit_path = args.logdir / f"junit-{int(time.time())}.xml"
+                junit_path = args.logdir / f"junit-{int(epoch_now())}.xml"
                 write_report(
                     report_path,
                     {
@@ -3498,16 +3558,16 @@ def main(argv: list[str] | None = None) -> int:
                     # the position their setup case actually established.
                     if not provider_rejoin:
                         tn.teleport_players_to(*PERSIST_PAD_XYZ)
-                    time.sleep(1.5)
+                    pause(1.5)
                     r = tn.exec("saveworld")
                     log(f"telnet saveworld (post-setup) → {r[:100]!r}")
-                    time.sleep(2.0)
+                    pause(2.0)
                     tn.exec("sa")
-                    time.sleep(1.0)
+                    pause(1.0)
                     tn.exec("kickall")
                 finally:
                     tn.close()
-            time.sleep(4)
+            pause(4)
             stop_proc(client_proc)
             client_proc = None
             stop_proc(server_proc)
@@ -3515,9 +3575,9 @@ def main(argv: list[str] | None = None) -> int:
             # Stop the dedicated by instance, never by pattern: the rejoin
             # restart must not reach another sandbox instance's server.
             playtest_targets.stop_sandbox_server(args._target_plan)
-            time.sleep(3)
+            pause(3)
             pkill_patterns(GAME_PROC_PATTERNS, sig="-9")
-            time.sleep(5)
+            pause(5)
             # Rejoin verifies persistence: restart on the save the setup
             # generation just wrote, so no wipe here.
             if not start_server(wipe=False):
@@ -3543,9 +3603,9 @@ def main(argv: list[str] | None = None) -> int:
             rejoin_teleport_done = args.rejoin_teleport is None
             # Same run-budget discipline as the setup phase above: the verify
             # phase cannot push the total past --timeout.
-            deadline = time.monotonic() + min(
+            deadline = monotonic_now() + min(
                 min(args.timeout, 400),
-                max(0.0, deadline - time.monotonic()),
+                max(0.0, deadline - monotonic_now()),
             )
 
         # Always defined so timeout / missing client logs cannot UnboundLocalError.
@@ -3563,7 +3623,7 @@ def main(argv: list[str] | None = None) -> int:
             return not peer_client_suite or peer_parsed.get("done") is not None
 
         run_end_reason = "timeout"
-        while time.monotonic() < deadline:
+        while monotonic_now() < deadline:
             if abort_if_lock_lost():
                 return 2
             reap_finished_helpers()
@@ -3574,7 +3634,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if chunk:
                 # Progress crumbs for long joins
-                now = time.monotonic()
+                now = monotonic_now()
                 if now - last_progress > 8:
                     last_progress = now
                     crumb = latest_playtest_crumb(chunk)
@@ -3905,7 +3965,7 @@ def main(argv: list[str] | None = None) -> int:
                     warn("stock peer teleport: telnet connect fail; retry next poll")
 
             if client_proc is not None and client_proc.poll() is not None:
-                time.sleep(2)
+                pause(2)
                 pump_log_tail(client_tail, client_scan)
                 parsed = client_scan.result()
                 peer_parsed = read_peer_results()
@@ -3919,9 +3979,9 @@ def main(argv: list[str] | None = None) -> int:
                 log("client exited before DONE; failing instead of waiting out the timeout")
                 run_end_reason = "client_exit"
                 break
-            time.sleep(0.5)
+            pause(0.5)
         else:
-            log(f"timeout after {time.monotonic() - t0:.0f}s waiting for DONE")
+            log(f"timeout after {monotonic_now() - t0:.0f}s waiting for DONE")
 
         # The run is decided: DONE parsed, the client exited, or the budget
         # ran out. Record it for any consumer watching this run (the capture
@@ -3945,7 +4005,7 @@ def main(argv: list[str] | None = None) -> int:
         peer_results = peer_parsed.get("results") or []
         peer_nre = peer_parsed.get("nre_like") or []
         combined_results = results + peer_results
-        wall_s = time.monotonic() - t0
+        wall_s = monotonic_now() - t0
 
         slowest = slowest_cases(parsed.get("json_events") or [])
 
@@ -3986,7 +4046,7 @@ def main(argv: list[str] | None = None) -> int:
             "unity_log": str(unity_log) if unity_log else None,
             "timeout_sec": args.timeout,
             "wall_sec": round(wall_s, 1),
-            "ran_epoch": int(time.time()),
+            "ran_epoch": int(epoch_now()),
             # Structured echo of note_backend_exit(): a report whose cases
             # failed against an already-dead server must say so, not just the
             # terminal transcript.
@@ -4003,7 +4063,7 @@ def main(argv: list[str] | None = None) -> int:
             "visual_reviews": collect_visual_reviews(args.attach_reviews),
         }
         write_report(report_path, payload)
-        junit_path = args.junit or (args.logdir / f"junit-{int(time.time())}.xml")
+        junit_path = args.junit or (args.logdir / f"junit-{int(epoch_now())}.xml")
         write_junit(junit_path, args.suite, combined_results)
         # A user-provided --junit path outside logdir is deliberate evidence
         # placement and is never pruned; only the timestamped logdir defaults

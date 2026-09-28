@@ -37,6 +37,17 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- **Injectable clock for the orchestrator** (`playtest_run.use_clock()`).
+  Every time read and wait in `playtest_run.py` now goes through
+  `monotonic_now()`, `epoch_now()`, or `pause()`; `SystemClock` is the only
+  place `time` is touched. A run that installs a clock which moves only when
+  slept on executes its whole poll-loop timing surface (phase deadlines,
+  readiness and barrier polls, progress crumbs, the soak window) without
+  spending a real second, which is what a simulation of the orchestrator
+  needs first. Production behaviour is unchanged: the default is the real
+  clock. Gated by `test_playtest_run_units.py`, which drives a real poll loop
+  on a virtual clock and fails if any `time` call reappears outside the seam.
+
 - **`make sbom` and the release-time dependency inventory.**
   `scripts/dep_sbom.py` writes a CycloneDX 1.6 SBOM from the two committed,
   hash-pinned lockfiles (`uv.lock`, `Source/PlayTestMod/packages.lock.json`)

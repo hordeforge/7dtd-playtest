@@ -57,6 +57,15 @@ but the refresh *policy* lives in `HeartbeatLoop`, which the simulator drives
 directly. Live-process detection is already injectable (`live_probe=`), which
 is why it needed no change.
 
+`playtest_run.py` has its own, coarser seam, `playtest_run.use_clock()`. Every
+time read and every wait in the orchestrator goes through `monotonic_now()`,
+`epoch_now()`, or `pause()`; `SystemClock` is the only place `time` is touched
+directly. A run that installs a clock which moves only when slept on executes
+its whole poll-loop timing surface - phase deadlines, readiness and barrier
+polls, progress crumbs, the soak window - without spending a real second. That
+makes the deadline arithmetic reachable from a test or a simulation, but it is
+not yet simulated; see below.
+
 ## Faults
 
 All seed-driven, so a scenario is replayed rather than re-rolled
@@ -132,17 +141,18 @@ seed count means nothing if the scenarios were never entered.
 different problem: it is mostly a driver for real subprocesses (game client,
 dedicated server, telnet admin, loadgen) whose behaviour is the thing under
 test. Simulating it is only worth doing for the parts that are pure decisions
-about time and log content, and it would need its own seams first:
+about time and log content. The time half now has its seam; what is left:
 
-1. A clock seam for the roughly forty `time.time()` / `time.monotonic()` /
-   `time.sleep()` call sites that drive timeouts, barrier waits, and phase
-   deadlines.
-2. A process port (start / poll / stop / kill) with a simulated implementation,
-   so crash-and-restart and slow-boot cases become reachable.
-3. A telnet port, so `TelnetAdmin` retries and partial reads can be modelled.
+1. A process port (start / poll / stop / kill) with a simulated implementation,
+   so crash-and-restart and slow-boot cases become reachable. This is the next
+   one: the clock alone makes the barrier and deadline logic reachable, but the
+   run's decisions are mostly about which processes are up.
+2. A telnet port, so `TelnetAdmin` retries and partial reads can be modelled.
+3. A `LogTail` in-memory source, so log arrival is a simulated event rather
+   than a real file a test appends to.
 
-Order matters: the clock alone would already make the barrier and deadline
-logic testable without waiting fifteen minutes for a soak. Until then the
-log-contract parser (`parse_client_log`, `barrier_hits_prefix`, in
-`scripts/playtest_log.py`) and the compare diff stay covered by the ordinary
-offline gates.
+Until then the log-contract parser (`parse_client_log`, `barrier_hits_prefix`,
+in `scripts/playtest_log.py`) and the compare diff stay covered by the ordinary
+offline gates, and the orchestrator's timing is covered by
+`test_playtest_run_units.py`, which drives a real poll loop on a clock that
+only moves when slept on.

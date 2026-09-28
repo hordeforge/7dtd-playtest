@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS = ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
+import playtest_compare  # noqa: E402
 import playtest_run  # noqa: E402
 
 TOOL = _SCRIPTS / "playtest_compare.py"
@@ -363,8 +364,16 @@ def test_orchestrator_payload_keys_match_consumer_contract() -> None:
     src = (_SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
     for key in ('"results"', '"summary"', '"server"', '"wall_sec"', '"ran_epoch"'):
         assert key in src, f"producer payload lost consumer key {key}"
-    assert 'report-{int(time.time())}.json' in src, (
+    # The stamp reads the orchestrator's clock seam, so a simulated run names
+    # its report the same way a real one does. Pinned by name to keep the seam
+    # from being bypassed, and by behaviour so what is actually checked is that
+    # the consumer parses the filename the producer builds.
+    assert 'report-{int(epoch_now())}.json' in src, (
         "producer report filename no longer matches newest_report's glob"
+    )
+    produced = f"report-{int(playtest_run.epoch_now())}.json"
+    assert playtest_compare.ran_epoch_of(Path(produced), {}) is not None, (
+        f"newest_report cannot read the producer's filename: {produced}"
     )
 
 

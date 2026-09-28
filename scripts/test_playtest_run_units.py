@@ -639,6 +639,67 @@ def test_wait_file_contains_incremental() -> None:
         print("PASS wait_file_contains incremental pre-existing/late-append/timeout")
 
 
+class VirtualClock:
+    """A clock that only moves when someone sleeps. Every deadline in the
+    orchestrator reads the installed clock, so a run driven by this one costs
+    no real seconds, which is what makes a simulated run possible at all."""
+
+    def __init__(self) -> None:
+        self.seconds = 0.0
+        self.slept: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.seconds
+
+    def wall(self) -> float:
+        return 1_700_000_000.0 + self.seconds
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.seconds += seconds
+
+
+def test_run_time_reads_go_through_the_clock_seam() -> None:
+    """The poll loop's own time source must be the seam, not `time`.
+
+    A deadline computed from a raw `time.monotonic()` cannot be advanced by a
+    simulation, so every wait in the runner would have to be spent in real
+    seconds before it could be exercised. Pinned here by driving a real
+    timeout through a clock that only the runner's own reads can see.
+    """
+    src = (_SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
+    direct = [
+        f"{i}: {line.strip()}"
+        for i, line in enumerate(src.splitlines(), 1)
+        if re.search(r"\btime\.(monotonic|time|sleep)\s*\(", line)
+    ]
+    # The three in SystemClock are the seam's own production implementation;
+    # anything else is a call site that escaped it.
+    assert len(direct) == 3, f"time read outside the clock seam: {direct}"
+    assert all("return time." in d or "time.sleep(seconds)" in d for d in direct), (
+        f"unexpected raw time call: {direct}"
+    )
+
+    clock = VirtualClock()
+    with tempfile.TemporaryDirectory(prefix="playtest-clock-") as td:
+        log = Path(td) / "unity.log"
+        log.write_text("nothing yet\n", encoding="utf-8")
+        with playtest_run.use_clock(clock):
+            assert not playtest_run.wait_file_contains(log, "absent", 90.0)
+        # 90s of budget, spent as poll intervals, and no real time at all.
+        assert clock.slept == [0.5] * 180, clock.slept
+        assert clock.seconds == 90.0, clock.seconds
+
+    # The seam is restored on the way out, including when the block raises, so
+    # a failing gate cannot leave a virtual clock driving the rest of the run.
+    with contextlib.suppress(ZeroDivisionError), playtest_run.use_clock(clock):
+        raise ZeroDivisionError("boom inside the installed clock")
+    assert playtest_run.monotonic_now() != 1_700_000_000.0, (
+        "virtual clock outlived its block"
+    )
+    print("PASS run time reads go through the injectable clock seam")
+
+
 def test_suite_wants_host_fixtures_selection_table() -> None:
     """Whole-suite-token gate: fixture-bearing catalog suites and the legacy
     aliases that include them open the telnet fixture path; pure-client
@@ -2241,6 +2302,7 @@ def main() -> int:
         ("reap_finished_helpers", test_reap_finished_helpers_drops_only_exited),
         ("main_finally_reap_helpers", test_main_finally_reaps_mute_helpers),
         ("wait_file_contains", test_wait_file_contains_incremental),
+        ("clock_seam", test_run_time_reads_go_through_the_clock_seam),
         ("client_install_discovery", test_client_install_is_discovered_from_steam_libraries),
         ("client_install_refusal", test_no_client_install_is_a_refusal_not_a_guess),
         ("client_install_env_wins", test_game_env_wins_over_discovery),

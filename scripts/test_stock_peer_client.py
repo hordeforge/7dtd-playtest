@@ -84,13 +84,16 @@ def test_peer_spacing_past_engine_rate_limit() -> None:
     # Client-side: this is read out of the primary's own log, and the server's
     # word for the same moment (PlayerSpawnedInWorld) never appears there, so
     # waiting on it timed out every run.
-    assert 'PEER_STAGGER_MARKER = "Respawning: EnterMultiplayer"' in RUNNER_CODE
-    assert "wait_file_contains(" in RUNNER_CODE
-    assert "time.sleep(1.0)" in RUNNER_CODE
+    assert 'PEER_STAGGER_MARKER = "Respawning: EnterMultiplayer"' in RUNNER
+    assert "wait_file_contains(" in RUNNER
+    # The stagger floor goes through the injected clock, so a simulation can
+    # run this wait without spending the second. What is pinned here is the
+    # ordering, not which clock API the file happens to call.
+    assert "pause(1.0)" in RUNNER
     # Both the wait and the floor precede the peer launch.
-    peer_launch = RUNNER_CODE.index('"7DTD_PLAYER_NAME": peer_client_name')
-    assert RUNNER_CODE.index("PEER_STAGGER_TIMEOUT_SEC\n") < peer_launch
-    assert RUNNER_CODE.index("time.sleep(1.0)") < peer_launch
+    peer_launch = RUNNER.index('"7DTD_PLAYER_NAME": peer_client_name')
+    assert RUNNER.index("PEER_STAGGER_TIMEOUT_SEC\n") < peer_launch
+    assert RUNNER.index("pause(1.0)") < peer_launch
 
 
 def test_peer_can_run_explicit_provider_setup_suite() -> None:
