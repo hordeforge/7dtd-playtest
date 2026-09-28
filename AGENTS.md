@@ -380,7 +380,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the seventeen offline gate files on
+`make test` runs lint + typecheck plus the eighteen offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -435,6 +435,11 @@ the run order that both `make test` and `make coverage` expand):
     declares all its cases, the `catalog.SUITE.CASE` format is pinned on both
     sides (loader and `Runner.CaseRef`), and every catalog suite is either
     declared or listed in `UNDECLARED_SUITES`.
+17. gate-list surface (`scripts/test_gate_list.py`): every `scripts/test_*.py`
+    is listed in the Makefile `GATES`, every `GATES` entry exists and is
+    listed once, `test`/`coverage`/`test-one` share that one list, and CI runs
+    the same steps `make check` does. A new gate file that nobody added to
+    `GATES` runs under neither `make test` nor CI.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

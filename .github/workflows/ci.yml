@@ -37,7 +37,10 @@ jobs:
       # the host lock, the deterministic simulation, the orchestrator
       # local-init order gate, the orchestrator report/log surface, the
       # orchestrator pure-logic units, the compare diff (pytest via uv),
-      # the capture-clip marker surface, and the video-review surface.
+      # the capture-clip marker surface, the video-review surface, the
+      # player-survivability helper surface, and the gate-list surface (every
+      # scripts/test_*.py is in the Makefile GATES list, and these steps are
+      # the ones `make check` runs).
       # The mod build itself is not CI-able (references game DLLs), but these
       # gates catch the doc/catalog drift that used to ship silently.
       - run: make test

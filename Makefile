@@ -41,7 +41,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help build install uninstall clean test test-one coverage lint typecheck check dst dst-soak playtest playtest-smoke \
+.PHONY: help build install uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
@@ -104,18 +104,23 @@ clean:
 # uv.lock disagree, so a build can never drift from the committed lock.
 UV := uv run --locked --project "$(ROOT)" python
 
-# Lint gate: ruff with the defect-oriented rule set from pyproject.toml
-# ([tool.ruff]) plus shellcheck over the bash helpers under scripts/. Both are
-# preinstalled on GitHub runners, so local and CI run one identical gate.
-# uv and shellcheck are host tools no lockfile can provide: name a missing
-# one instead of letting make print a bare "not found" inside a new
+# Preflight for every target that shells out to a host tool no lockfile can
+# provide. uv is the one every host Python command goes through, so a missing
+# one is named once here instead of printing a bare "not found" inside a new
 # contributor's first gate.
-lint:
+require-uv:
 	@command -v uv >/dev/null 2>&1 || { \
-		echo "make lint: 'uv' is not on PATH; every host Python command goes through it."; \
+		echo "'uv' is not on PATH; every host Python command goes through it."; \
 		echo "  install: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
 		echo "  see README: Requirements"; \
 		exit 2; }
+
+# Lint gate: ruff with the defect-oriented rule set from pyproject.toml
+# ([tool.ruff]) plus shellcheck over the bash helpers under scripts/. Both are
+# preinstalled on GitHub runners, so local and CI run one identical gate.
+# shellcheck is a host tool no lockfile can provide: name a missing one instead
+# of letting make print a bare "not found".
+lint: require-uv
 	@command -v shellcheck >/dev/null 2>&1 || { \
 		echo "make lint: 'shellcheck' is not on PATH; it lints scripts/*.sh."; \
 		echo "  install it with your package manager, e.g.: sudo apt install shellcheck"; \
@@ -124,11 +129,7 @@ lint:
 	@cd "$(ROOT)" && shellcheck scripts/*.sh
 
 # Type gate: mypy baseline strictness from pyproject.toml ([tool.mypy]).
-typecheck:
-	@command -v uv >/dev/null 2>&1 || { \
-		echo "make typecheck: 'uv' is not on PATH; every host Python command goes through it."; \
-		echo "  install: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
-		exit 2; }
+typecheck: require-uv
 	@cd "$(ROOT)" && uv run --locked python -m mypy scripts
 
 # Every offline gate, in run order. `test` and `coverage` both expand this one
@@ -151,7 +152,8 @@ GATES := \
 	test_suite_refs.py \
 	test_playtest_compare.py \
 	test_capture_video_surface.py \
-	test_video_review.py
+	test_video_review.py \
+	test_gate_list.py
 
 test: lint typecheck
 	@for gate in $(GATES); do \
@@ -167,7 +169,7 @@ test: lint typecheck
 # `--with` side-install, so CI measures with hash-pinned bytes.
 COV := $(UV)
 
-coverage:
+coverage: require-uv
 	rm -f .coverage .coverage.*
 	@for gate in $(GATES); do \
 		echo "coverage run scripts/$$gate"; \
@@ -178,12 +180,14 @@ coverage:
 
 # One gate while iterating: make test-one GATE=test_dst.py
 GATE ?=
-test-one:
+test-one: require-uv
 	@test -n "$(GATE)" || { \
 		echo "usage: make test-one GATE=<gate file name, e.g. GATE=test_dst.py>"; \
 		exit 2; }
 	@test -f "$(ROOT)/scripts/$(GATE)" || { \
 		echo "unknown gate: scripts/$(GATE)"; \
+		echo "known gates:"; \
+		for gate in $(GATES); do echo "  $$gate"; done; \
 		exit 2; }
 	$(UV) "$(ROOT)/scripts/$(GATE)"
 
@@ -198,20 +202,20 @@ check:
 # each. A failure prints the seed and the command to replay it exactly.
 DST_SEEDS ?= 200
 DST_AGENTS ?= 3
-dst:
+dst: require-uv
 	$(UV) "$(ROOT)/scripts/dst_run.py" --regressions
 	$(UV) "$(ROOT)/scripts/dst_run.py" --iterations "$(DST_SEEDS)" --agents "$(DST_AGENTS)"
 
 # Tail-bug hunt: keep drawing fresh seeds for DST_SOAK_SEC wall seconds and
 # record any failing seed in scripts/dst_seeds.txt.
 DST_SOAK_SEC ?= 300
-dst-soak:
+dst-soak: require-uv
 	$(UV) "$(ROOT)/scripts/dst_run.py" --soak "$(DST_SOAK_SEC)" \
 		--agents "$(DST_AGENTS)" --record --quiet
 
 # Full host orchestration: stock dedicated (default) + client, score logs.
 # SERVER=stock|zdtd  WORLD_NAME=Navezgane  PORT= (empty → backend default)
-playtest: install-pair
+playtest: install-pair require-uv
 	@mkdir -p "$(WORLD)"
 	PLAYTEST_LAPS="$(LAPS)" \
 	$(UV) "$(ROOT)/scripts/playtest_run.py" \
@@ -276,7 +280,7 @@ playtest-review-video:
 # Flake detection: run a suite LAPS times, fresh server each lap, aggregate
 # the per-lap report JSON (playtest_repeat.sh). Exit nonzero unless every lap
 # is clean. LAPS?=3; SUITE?=demo; extra orchestrator args via EXTRA_ARGS.
-playtest-repeat:
+playtest-repeat: require-uv
 	bash scripts/playtest_repeat.sh --laps "$(LAPS)" --suite "$(SUITE)" $(EXTRA_ARGS)
 
 # zdtd APM dump attach.

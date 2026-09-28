@@ -22,6 +22,18 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Added
+
+- **Gate-list surface** (`scripts/test_gate_list.py`, wired into the Makefile
+  `GATES` list): fails when a `scripts/test_*.py` file is missing from `GATES`
+  (it would run under neither `make test` nor CI) or when a `GATES` entry has
+  no file, and pins that `test`/`coverage`/`test-one` share one gate list and
+  that CI runs the same steps `make check` does.
+- **`require-uv` preflight.** `make test-one`, `dst`, `dst-soak`, `coverage`,
+  `playtest` and `playtest-repeat` now check for `uv` up front and name it,
+  instead of printing a bare "not found" from the interpreter call. A mistyped
+  `make test-one GATE=` lists the known gates.
+
 ## [0.13.0] - 2026-09-21
 
 ### Removed
