@@ -79,13 +79,17 @@ def _truncate_at_cluster(text: str, limit: int) -> str:
     head = text[:limit]
     while head and _is_cluster_tail(head[-1]):
         head = head[:-1]
-    flags = sum(
-        1
-        for character in head
+    flags = [
+        index
+        for index, character in enumerate(head)
         if _REGIONAL_INDICATOR_FIRST <= ord(character) <= _REGIONAL_INDICATOR_LAST
-    )
-    if flags % 2:
-        head = head[:-1]
+    ]
+    if len(flags) % 2:
+        # The odd one out is the LAST regional indicator, which may sit
+        # anywhere in the kept text: a cut between a flag and the word after
+        # it ("\U0001F1E6bc") leaves a letter box, and dropping the final
+        # character there deletes the 'b' and keeps the half flag.
+        head = head[: flags[-1]] + head[flags[-1] + 1 :]
     return head
 
 # Intent caps. The intent is the one author-supplied text this repository
