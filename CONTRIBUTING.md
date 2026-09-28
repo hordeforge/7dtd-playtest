@@ -41,6 +41,12 @@ easy to miss and will fail CI otherwise:
   live rows and counts total must match (`test_catalog_surface.py`).
 - **Version bumps:** ModInfo.xml, `ModIdentity.cs` `Version`, and CHANGELOG.md
   move together in one change (same gate).
+- **Removing a public symbol:** every release is `0.Y.Z` and a minor may
+  remove a symbol on the consumer contracts (`Helpers`, the log tokens, the
+  suite/env surface, the lock payload), but the entry must say so: a
+  `### Removed` section needs a `**Breaking.**` first line and a
+  removed-to-replacement table, or `test_version_surface.py` fails the gate.
+  The pre-1.0 policy is written out at the top of CHANGELOG.md.
 - **New offline gate:** a new `scripts/test_*.py` must be added to the
   `GATES` list in the Makefile. `test_gate_list.py` fails otherwise: an
   unlisted gate file runs under neither `make test` nor CI, so it would sit

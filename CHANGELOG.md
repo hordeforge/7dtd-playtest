@@ -19,6 +19,19 @@ Release model (inferred practice, now pinned by `make test`):
   schema `"v":1`, suite/env surface, exclusivity lock payload format, and the
   C# provider API `CaseDef`/`CaseCtx`/`IScenarioProvider`/`Helpers`/`Report`)
   may only change in a release whose entry below says so explicitly.
+- **Pre-1.0 policy (de facto, stated here so consumers need not infer it).**
+  Every release so far is `0.Y.Z`. Nothing here promises SemVer stability
+  before `1.0.0`: a **minor** may remove or re-sign a symbol on those
+  contracts, and a patch may change a default only when the entry says so.
+  What a consumer is promised instead is the announcement: a release that
+  removes a public symbol carries a `### Removed` section whose first line is
+  `**Breaking.**`, and a table naming the replacement for each removed
+  symbol. `scripts/test_version_surface.py` fails a release whose `### Removed`
+  section does not carry that marker, so "removed dead code" can no longer ship
+  undeclared, as `0.13.0` did before the marker existed.
+- Once `1.0.0` ships, the contracts named above become SemVer: a removal needs
+  a major bump, and a deprecation needs a release that announces the
+  replacement and a later release that removes it.
 
 ## [Unreleased]
 
@@ -39,6 +52,13 @@ Release model (inferred practice, now pinned by `make test`):
   (it would run under neither `make test` nor CI) or when a `GATES` entry has
   no file, and pins that `test`/`coverage`/`test-one` share one gate list and
   that CI runs the same steps `make check` does.
+- **A removal can no longer ship undeclared.** The release model now states
+  the pre-1.0 policy in full (a minor may remove a public symbol; the entry
+  has to say so and name the replacement), and
+  `scripts/test_version_surface.py` fails a release whose `### Removed`
+  section lacks the `**Breaking.**` marker. `0.13.0` removed three `Helpers`
+  methods and two host helpers under a plain `### Removed` heading, so its
+  entry now declares the break and carries a symbol-to-replacement table.
 - **`require-uv` preflight.** `make test-one`, `dst`, `dst-soak`, `coverage`,
   `playtest` and `playtest-repeat` now check for `uv` up front and name it,
   instead of printing a bare "not found" from the interpreter call. A mistyped
@@ -126,6 +146,22 @@ Release model (inferred practice, now pinned by `make test`):
 ## [0.13.0] - 2026-09-21
 
 ### Removed
+
+**Breaking.** This is a pre-1.0 minor (see the release model above), so the
+removals below are allowed without a major bump, but they do break an external
+`IScenarioProvider` that called the removed symbols, and the entry says so
+rather than shipping them as an ordinary "removed dead code" note.
+
+Migration, by symbol:
+
+| Removed | Use instead |
+|---|---|
+| `Helpers.ShowHud` | none; nothing in the tree needed it, an external provider that did must carry its own |
+| `Helpers.CloseWindowGroup` | `Helpers.OpenWindowGroup` / `OpenWindowNames` (kept), or close the group from the case's own teardown |
+| `Helpers.GetWaterValue` | none; nothing in the tree needed it |
+| `suite_loader.suite_ids` | `suite_loader.discover_suites()` |
+| `video_review.ReviewIntent.as_dict` | `dataclasses.asdict(intent)` |
+| `playtest_run.read_loadgen_latest_state` | `loadgen_latest_state(read_loadgen_events(path))` |
 
 - **Dead C# helpers.** `Helpers.ShowHud`, `Helpers.CloseWindowGroup` and
   `Helpers.GetWaterValue` had no caller in the catalog, the providers or any

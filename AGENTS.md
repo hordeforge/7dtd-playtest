@@ -397,7 +397,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the eighteen offline gate files on
+`make test` runs lint + typecheck plus the nineteen offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -416,13 +416,15 @@ the run order that both `make test` and `make coverage` expand):
    rather than another gate.
 2. mod version surface (`scripts/test_version_surface.py`): ModInfo.xml ==
    ModIdentity.Version == dist manifest, every visible `vX.Y.Z` tag has a
-   CHANGELOG entry (units in `scripts/test_version_surface_units.py`), and
-   CHANGELOG.md must carry an [Unreleased] section plus the current release
-   entry.
+   CHANGELOG entry (units in `scripts/test_version_surface_units.py`), every
+   `### Removed` section carries the `**Breaking.**` marker the pre-1.0 policy
+   in CHANGELOG.md requires, and CHANGELOG.md must carry an [Unreleased]
+   section plus the current release entry.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)
 4. mining-probe provider surface (`scripts/test_mining_probe_surface.py`)
-5. player-survivability surface
-   (`scripts/test_player_survivability_surface.py`)
+5. player-survivability surface (`scripts/test_player_survivability_surface.py`):
+   the god-mode and spawn-recovery contract the combat and `NoAutoHeal` cases
+   rely on, pinned against the runner arming it outside a case that asked.
 6. stock-peer orchestration surface (`scripts/test_stock_peer_client.py`)
 7. host lock (`scripts/test_playtest_lock.py`)
 8. deterministic simulation (`scripts/test_dst.py`)
@@ -430,13 +432,13 @@ the run order that both `make test` and `make coverage` expand):
    catches the read-before-assignment crash class that once shipped in
    `playtest_run.py` main(); only fires with real game binaries present.
 10. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
-    and serverconfig XML attribute escaping plus parser survival on malformed
-    JSON events, plus `scripts/report_summary.py` failing closed on a hostile
-    or malformed lap summary.
+   and serverconfig XML attribute escaping plus parser survival on malformed
+   JSON events, plus `scripts/report_summary.py` failing closed on a hostile
+   or malformed lap summary.
 11. orchestrator pure-logic units (`scripts/test_playtest_run_units.py`):
-    fresh-save removes only every world's copy of the named game save
-    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
-    hard-deleted).
+   fresh-save removes only every world's copy of the named game save
+   (quarantined under `<logdir>/quarantine`, newest 5 kept, never
+   hard-deleted).
 12. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
 13. capture-clip marker surface (`scripts/test_capture_video_surface.py`):
     the `scene staged` line `capture_frames.sh` keys on parses the clip id
@@ -456,7 +458,7 @@ the run order that both `make test` and `make coverage` expand):
     declares all its cases, the `catalog.SUITE.CASE` format is pinned on both
     sides (loader and `Runner.CaseRef`), and every catalog suite is either
     declared or listed in `UNDECLARED_SUITES`.
-17. gate-list surface (`scripts/test_gate_list.py`): every `scripts/test_*.py`
+18. gate-list surface (`scripts/test_gate_list.py`): every `scripts/test_*.py`
     is listed in the Makefile `GATES`, every `GATES` entry exists and is
     listed once, `test`/`coverage`/`test-one` share that one list, and CI runs
     the same steps `make check` does. A new gate file that nobody added to

@@ -5,6 +5,9 @@ import re
 from pathlib import Path
 
 TAG_RE = re.compile(r"v(\d+\.\d+\.\d+)")
+SECTION_RE = re.compile(r"^##\s+\[([^\]]+)\]", re.MULTILINE)
+REMOVED_HEADING_RE = re.compile(r"^###\s+Removed\b", re.MULTILINE)
+BREAKING_MARKER = "**Breaking.**"
 
 
 def _git_dir(root: Path) -> Path | None:
@@ -54,3 +57,24 @@ def uncovered_tag_versions(tag_versions: list[str], headings: list[str]) -> list
     """Tagged versions without a ``## [<version>]`` changelog entry."""
     known = set(headings)
     return [version for version in tag_versions if version not in known]
+
+
+def undeclared_breaking_sections(changelog: str) -> list[str]:
+    """Version entries whose ``### Removed`` section omits the breaking marker.
+
+    The pre-1.0 policy stated at the top of CHANGELOG.md: a minor may remove a
+    public symbol, and the entry has to say so. 0.13.0 removed three
+    ``Helpers`` methods without the marker, so a consumer reading the notes had
+    no way to tell the removal from a dead-code tidy-up.
+    """
+    starts = [
+        (match.start(), match.end(), match.group(1))
+        for match in SECTION_RE.finditer(changelog)
+    ]
+    undeclared: list[str] = []
+    for index, (_start, end, heading) in enumerate(starts):
+        stop = starts[index + 1][0] if index + 1 < len(starts) else len(changelog)
+        body = changelog[end:stop]
+        if REMOVED_HEADING_RE.search(body) and BREAKING_MARKER not in body:
+            undeclared.append(heading)
+    return undeclared

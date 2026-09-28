@@ -13,7 +13,12 @@ import re
 import sys
 from pathlib import Path
 
-from version_surface import discover_tag_versions, uncovered_tag_versions
+from version_surface import (
+    BREAKING_MARKER,
+    discover_tag_versions,
+    uncovered_tag_versions,
+    undeclared_breaking_sections,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 MOD_INFO = ROOT / "ModInfo.xml"
@@ -63,6 +68,15 @@ def main() -> int:
         f"CHANGELOG.md has no ## [{manifest}] entry; every released version "
         "needs consumer-facing notes before it ships"
     )
+
+    undeclared = undeclared_breaking_sections(changelog)
+    assert not undeclared, (
+        "CHANGELOG.md has a ### Removed section with no " + BREAKING_MARKER + " marker in: "
+        + ", ".join(undeclared)
+        + "; a pre-1.0 minor may remove a public symbol, but the entry has to say so "
+        "and name the replacement (see the release model at the top of the file)"
+    )
+    print("OK every ### Removed section declares itself breaking")
 
     tag_versions = discover_tag_versions(ROOT)
     if tag_versions:

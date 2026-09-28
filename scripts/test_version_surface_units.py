@@ -22,7 +22,12 @@ from pathlib import Path
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-from version_surface import discover_tag_versions, uncovered_tag_versions  # noqa: E402
+from version_surface import (  # noqa: E402
+    BREAKING_MARKER,
+    discover_tag_versions,
+    uncovered_tag_versions,
+    undeclared_breaking_sections,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 GATE = Path(__file__).resolve().parent / "test_version_surface.py"
@@ -111,6 +116,8 @@ def make_root(
     version: str,
     headings: list[str],
     git: bool = True,
+    removed_section: bool = False,
+    breaking: bool = True,
 ) -> None:
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(GATE, root / "scripts" / "test_version_surface.py")
@@ -124,7 +131,13 @@ def make_root(
         f'public class ModIdentity {{ public const string Version = "{version}"; }}\n',
         encoding="utf-8",
     )
-    entries = "\n".join(f"## [{h}]\n\n- note\n" for h in headings)
+    if removed_section:
+        marker = "**Breaking.** use the replacement instead\n\n" if breaking else ""
+        entries = "\n".join(
+            f"## [{h}]\n\n### Removed\n\n{marker}- `Old.Symbol` removed\n" for h in headings
+        )
+    else:
+        entries = "\n".join(f"## [{h}]\n\n- note\n" for h in headings)
     (root / "CHANGELOG.md").write_text(
         "# Changelog\n\n## [Unreleased]\n\n- note\n\n" + entries, encoding="utf-8"
     )
@@ -194,6 +207,31 @@ def main() -> int:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "all 2 vX.Y.Z tags have changelog entries" in proc.stdout, proc.stdout
         print("OK the gate passes once every tagged version has notes")
+
+        silent = base / "silent-removal"
+        make_root(
+            silent,
+            version="0.8.0",
+            headings=["0.8.0", "9.9.9"],
+            removed_section=True,
+            breaking=False,
+        )
+        proc = run_gate(silent)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "0.8.0" in proc.stderr and BREAKING_MARKER in proc.stderr, proc.stderr
+        print("OK the gate fails an undeclared removal of a public symbol")
+
+        declared = base / "declared-removal"
+        make_root(declared, version="0.8.0", headings=["0.8.0", "9.9.9"], removed_section=True)
+        proc = run_gate(declared)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "every ### Removed section declares itself breaking" in proc.stdout, proc.stdout
+        print("OK the gate passes a removal that declares its replacement")
+
+    real = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert undeclared_breaking_sections(real) == [], undeclared_breaking_sections(real)
+    assert "### Removed" in real, "CHANGELOG.md must keep the removal this gate polices"
+    print("OK the shipped changelog has no undeclared removal section")
 
     print("RESULT PASS")
     return 0
