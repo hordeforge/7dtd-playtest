@@ -8,12 +8,16 @@ SUITE ?= demo
 # Where playtest-review-video puts the captured clip and its review evidence;
 # the SUITE names the fixed directory, so repeated runs replace it.
 OUT ?= $(ROOT)/.local/capture/$(SUITE)-review
-# Default backend is the stock dedicated. Override SERVER=zdtd for the zig dedi.
-SERVER ?= stock
+# Backend for the server under test. Empty means "let the orchestrator
+# decide": its own PLAYTEST_BACKEND env, else stock. Passing the default
+# through as --server instead would make the env var inert for every make
+# target, which is how a run ends up on the wrong server.
+SERVER ?= $(if $(PLAYTEST_BACKEND),$(PLAYTEST_BACKEND),)
 # PROVISION=managed|attach (default managed: a Safehouse instance). READONLY=1
-# is attach-only and names a host playtest must never write to.
+# is attach-only and names a host playtest must never write to; the same
+# on/off spellings as PLAYTEST_READONLY, and READONLY=false is not "on".
 PROVISION ?=
-READONLY ?=
+READONLY ?= $(PLAYTEST_READONLY)
 # World for a catalog-only suite; a declarative suite's own `server` block wins.
 WORLD_NAME ?= Navezgane
 GAME_NAME ?= PlaytestNav
@@ -64,7 +68,8 @@ help:
 	@echo "  make build | install | install-pair | uninstall | clean"
 	@echo
 	@echo "Live suites (needs game client; see README):"
-	@echo "  make playtest SUITE=demo SERVER=stock|zdtd [PROVISION=attach READONLY=1]"
+	@echo "  make playtest SUITE=demo [SERVER=stock|zdtd] [PROVISION=attach READONLY=1]"
+	@echo "                                  (SERVER defaults to PLAYTEST_BACKEND, else stock)"
 	@echo "  make playtest-smoke | playtest-gate | playtest-demo | playtest-bench LAPS=3"
 	@echo "  make playtest-zdtd | playtest-compare | playtest-repeat LAPS=3"
 	@echo "  make playtest-review-video SUITE=<id> [INTENT=<path> PROVIDER=<name>]"
@@ -242,8 +247,8 @@ playtest: install-pair require-uv
 	PLAYTEST_LAPS="$(LAPS)" \
 	$(UV) "$(ROOT)/scripts/playtest_run.py" \
 		$(if $(PROVISION),--provision "$(PROVISION)",) \
-		$(if $(READONLY),--readonly,) \
-		--server "$(SERVER)" \
+		$(if $(filter 1 true yes on,$(READONLY)),--readonly,) \
+		$(if $(SERVER),--server "$(SERVER)",) \
 		--suite "$(SUITE)" \
 		--world-name "$(WORLD_NAME)" \
 		--game-name "$(GAME_NAME)" \

@@ -191,8 +191,8 @@ in the log without rerunning with `--help`.
 | Env | Default | Meaning |
 |---|---|---|
 | `PLAYTEST_PROVISION` | `managed` | Who owns the server process: `managed` or `attach` (`--provision`). `--no-server` forces attach |
-| `PLAYTEST_BACKEND` | `stock` | Which server is under test: `stock` or `zdtd` (`--server`) |
-| `PLAYTEST_READONLY` | empty | Attach-only: never write to this host (`--readonly`) |
+| `PLAYTEST_BACKEND` | `stock` | Which server is under test: `stock` or `zdtd` (`--server`). The `make playtest*` targets read it too (`SERVER=`, then this) |
+| `PLAYTEST_READONLY` | empty | Attach-only: never write to this host (`--readonly`). Boolean, see below |
 | `PLAYTEST_SANDBOX_NAME` | `playtest` | Safehouse pair base name (`srv-<name>` / `client-<name>`) |
 | `PLAYTEST_SANDBOX_ROOT` | `../7dtd-sandbox` | Safehouse checkout that owns the instances (`--sandbox-root`) |
 | `PLAYTEST_SUITE_FILE` | empty | Suite JSON to run, including a mod repo's own (`--suite-file`) |
@@ -200,8 +200,18 @@ in the log without rerunning with `--help`.
 | `RE_DEDICATED_USERDATA` | `~/.cache/7dtd-playtest-dedicated` | Stock dedicated userdata dir (`--userdata`) |
 | `LOGDIR` | `~/.cache/7dtd-playtest` | Report / server-log dir (`--logdir`) |
 | `PLAYTEST_TIMEOUT_SEC` | `900` | Harness wall-clock timeout in seconds > 0 (`--timeout`). Invalid values are a harness error (exit 2) naming the variable |
+| `PLAYTEST_TRACE_ENTITY` | empty | Per-second spawned-entity pose / renderer / grounding / collision probes (`--trace-entity`). Boolean, see below |
+| `PLAYTEST_SESSION_ID` | *(generated)* | Exclusivity-lock holder id (`--session`) |
+| `PLAYTEST_CONCERN_SUITES` | empty | The exact multi-id `--suite` list that is one declared concern |
 | `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach requires an explicit value |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
+
+Booleans (`PLAYTEST_READONLY`, `PLAYTEST_TRACE_ENTITY`, `CLIENT_MUTE`) take
+`1` / `true` / `yes` / `on` or `0` / `false` / `no` / `off`, case-insensitive
+and surrounding spaces ignored. Anything else is a harness error (exit 2) that
+names the variable, because a silently misread flag runs the wrong thing
+(`PLAYTEST_READONLY=false` used to arm readonly; `PLAYTEST_TRACE_ENTITY=yes`
+used to arm nothing). Empty means unset, which is the documented default.
 
 Invalid numeric values in `PLAYTEST_LOCK_STALE_SEC` /
 `PLAYTEST_LOCK_HEARTBEAT_SEC` fall back to their defaults (120 / 30) with a
@@ -218,7 +228,7 @@ GamePrefs / in-game audio sliders). Independent of master volume. Requires
 | Env | Meaning |
 |---|---|
 | `CLIENT_MUTE` / `PLAYTEST_MUTE` / `SEVEN_DAYS_TO_DIE_CLIENT_MUTE` | Default `1`. Set `0` / `false` / `no` / `off` to keep sound |
-| `CLIENT_MUTE_TIMEOUT` | Seconds to wait for the audio stream (default 60) |
+| `CLIENT_MUTE_TIMEOUT` | Seconds to wait for the audio stream (default 60). A value that is not finite seconds > 0 warns and keeps the default: the mute helper is best-effort and must not abort a run |
 
 ```bash
 CLIENT_MUTE=0 make playtest-demo
@@ -281,8 +291,10 @@ is deferred, and a case requests a fixture from inside the client with
 `Report.Barrier("spawn_zombie")`. A declared `kind` that contradicts the
 factory its `ref` builds (`CaseDef.Live` or `CaseDef.Defer`) fails an offline
 gate, so the document cannot claim a live case that only ever records a skip.
-Unknown fields are ignored; missing or contradictory ones fail closed with the
-file and field in the message.
+Unknown fields fail closed with the file and field named: a misspelled
+`provision` or `readonly` would otherwise read as unset, and "unset" means
+managed with a wipe. Only `server` takes open keys (stock serverconfig
+property names). Missing or contradictory fields fail the same way.
 
 `provision` and `backend` resolve in one order: the operator's flag, then the
 environment (`PLAYTEST_PROVISION`, `PLAYTEST_BACKEND`), then the suite

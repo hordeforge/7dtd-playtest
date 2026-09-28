@@ -222,6 +222,57 @@ def positive_seconds(text: str) -> float:
     return val
 
 
+TRUE_TOKENS = ("1", "true", "yes", "on")
+FALSE_TOKENS = ("0", "false", "no", "off")
+
+
+def env_flag(name: str, default: bool) -> bool:
+    """Read a boolean env override: the documented on/off spellings, else a
+    harness error naming the variable.
+
+    A typo used to read as "on" in one knob and "off" in another, so
+    PLAYTEST_READONLY=false armed readonly and PLAYTEST_TRACE_ENTITY=yes
+    armed nothing. One spelling table for every boolean knob.
+    """
+    return env_flag_from((name,), default)
+
+
+def env_flag_from(names: tuple[str, ...], default: bool) -> bool:
+    """First name set (non-empty) decides; unset everywhere is the default."""
+    for name in names:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            continue
+        value = raw.lower()
+        if value in TRUE_TOKENS:
+            return True
+        if value in FALSE_TOKENS:
+            return False
+        err(
+            f"invalid {name}={raw!r}: expected one of "
+            + ", ".join(TRUE_TOKENS + FALSE_TOKENS)
+        )
+        raise SystemExit(2) from None
+    return default
+
+
+def env_choice(name: str, choices: tuple[str, ...], default: str) -> str:
+    """Read a value from `choices` out of the environment, failing fast.
+
+    argparse checks `choices` on a flag but not on a string default, so an
+    env-supplied value has to be validated here or it reaches the run as a
+    typo the operator never sees.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    value = raw.lower()
+    if value not in choices:
+        err(f"invalid {name}={raw!r}: expected one of {', '.join(choices)}")
+        raise SystemExit(2) from None
+    return value
+
+
 def seconds_from_env(name: str, default: float) -> float:
     """Read a positive-seconds env var; harness error (exit 2) when invalid.
 
@@ -289,6 +340,12 @@ def config_summary(args: argparse.Namespace) -> str:
     ]
     if args.peer_client_name:
         parts.append(f"peer={args.peer_client_name}")
+    plan = getattr(args, "_target_plan", None)
+    client_instance = plan.sandbox_client if plan is not None and plan.is_sandbox else None
+    if client_instance:
+        parts.append(f"instance={client_instance}")
+    parts.append(f"lock_file={playtest_lock.default_lock_path(client_instance)}")
+    parts.append(f"mute={client_mute_enabled()}")
     return " ".join(parts)
 
 
@@ -498,15 +555,40 @@ def reap_finished_helpers() -> None:
             _MUTE_HELPER_PROCS.remove(p)
 
 
+CLIENT_MUTE_ENVVARS = (
+    "CLIENT_MUTE",
+    "PLAYTEST_MUTE",
+    "SEVEN_DAYS_TO_DIE_CLIENT_MUTE",
+)
+CLIENT_MUTE_TIMEOUT_ENVVARS = (
+    "CLIENT_MUTE_TIMEOUT",
+    "SEVEN_DAYS_TO_DIE_CLIENT_MUTE_TIMEOUT",
+)
+DEFAULT_MUTE_TIMEOUT_SEC = 60.0
+
+
 def client_mute_enabled() -> bool:
     """Default on: mute client audio for automated runs (opt-out CLIENT_MUTE=0)."""
-    raw = (
-        os.environ.get("CLIENT_MUTE")
-        or os.environ.get("PLAYTEST_MUTE")
-        or os.environ.get("SEVEN_DAYS_TO_DIE_CLIENT_MUTE")
-        or "1"
-    )
-    return raw.strip().lower() not in ("0", "false", "no", "off")
+    return env_flag_from(CLIENT_MUTE_ENVVARS, True)
+
+
+def client_mute_timeout_sec() -> float:
+    """Seconds to wait for the audio stream. A junk value warns and keeps the
+    default: the mute helper is best-effort, so it must not abort a run that
+    is otherwise healthy (the same contract the lock's seconds override has)."""
+    for name in CLIENT_MUTE_TIMEOUT_ENVVARS:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            continue
+        try:
+            return positive_seconds(raw)
+        except argparse.ArgumentTypeError as ex:
+            warn(
+                f"client mute: invalid {name}={raw!r} ({ex}); "
+                f"using default {DEFAULT_MUTE_TIMEOUT_SEC:g}s"
+            )
+            return DEFAULT_MUTE_TIMEOUT_SEC
+    return DEFAULT_MUTE_TIMEOUT_SEC
 
 
 def mute_client_audio_async() -> None:
@@ -519,17 +601,14 @@ def mute_client_audio_async() -> None:
         log("client mute: off (CLIENT_MUTE=0)")
         return
     helper = CONNECT / "scripts" / "mute_client_audio.sh"
-    wait_s = os.environ.get(
-        "CLIENT_MUTE_TIMEOUT",
-        os.environ.get("SEVEN_DAYS_TO_DIE_CLIENT_MUTE_TIMEOUT", "60"),
-    )
+    wait_s = client_mute_timeout_sec()
     if not helper.is_file():
         warn(f"client mute: helper missing ({helper}); skip")
         return
-    log(f"client mute: on (opt-out CLIENT_MUTE=0); polling up to {wait_s}s")
+    log(f"client mute: on (opt-out CLIENT_MUTE=0); polling up to {wait_s:g}s")
     try:
         proc = subprocess.Popen(
-            ["bash", str(helper), str(wait_s)],
+            ["bash", str(helper), f"{wait_s:g}"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -2067,6 +2146,13 @@ def resolve_backend(
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Environment-supplied values are validated before the parser runs:
+    # argparse checks `choices` on a flag, not on a string default, so a typo
+    # in an env var would otherwise reach the run as a live value nobody saw
+    # rejected. PLAYTEST_BACKEND and a second, undocumented name for the same
+    # knob both existed; only the undocumented one was ever read.
+    env_choice("PLAYTEST_BACKEND", playtest_targets.BACKENDS, "stock")
+    provision_default = env_choice("PLAYTEST_PROVISION", playtest_targets.PROVISIONS, "")
     ap = argparse.ArgumentParser(
         description="stock-client playtest orchestrator",
         epilog=(
@@ -2088,7 +2174,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--provision",
         choices=playtest_targets.PROVISIONS,
-        default=os.environ.get("PLAYTEST_PROVISION", ""),
+        default=provision_default,
         help=(
             "who owns the server process (env PLAYTEST_PROVISION): managed "
             "brings it up on a Safehouse instance and tears it down; attach "
@@ -2099,7 +2185,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--readonly",
         action="store_true",
-        default=os.environ.get("PLAYTEST_READONLY", "") not in ("", "0"),
+        default=env_flag("PLAYTEST_READONLY", False),
         help=(
             "attach-only: the host must never be written to (a "
             "7dtd-server-container production server). No wipe, no mod "
@@ -2164,8 +2250,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--trace-entity",
         action="store_true",
-        default=os.environ.get("PLAYTEST_TRACE_ENTITY", "").strip().lower()
-        in ("1", "true", "yes", "on"),
+        default=env_flag("PLAYTEST_TRACE_ENTITY", False),
         help=(
             "emit per-second spawned-entity pose, renderer, grounding, and collision probes "
             "(env PLAYTEST_TRACE_ENTITY)"

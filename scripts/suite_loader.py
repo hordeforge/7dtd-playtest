@@ -155,6 +155,40 @@ class SuiteLoadError(ValueError):
     """Malformed, incomplete or self-contradictory suite document."""
 
 
+# Keys the loader honors. Anything else is a misspelling until proven
+# otherwise: `provison` used to be read as "unset", so the suite ran managed
+# (wiping the world) where it had meant to attach read-only to a production
+# host. Failing at load names the key instead of running the wrong topology.
+DOCUMENT_KEYS = frozenset(
+    {
+        "id",
+        "provision",
+        "backend",
+        "readonly",
+        "fresh",
+        "server",
+        "mods",
+        "server_mods",
+        "host",
+        "cases",
+        "notes",
+    }
+)
+HOST_KEYS = frozenset({"fixtures", "loadgen"})
+CASE_KEYS = frozenset({"id", "kind", "ref", "tags", "barriers"})
+
+
+def _reject_unknown(
+    obj: dict[str, Any], known: frozenset[str], *, path: str
+) -> None:
+    unknown = sorted(k for k in obj if k not in known)
+    if unknown:
+        raise SuiteLoadError(
+            f"{path}: unknown field(s) {', '.join(repr(k) for k in unknown)}; "
+            f"known fields are {', '.join(sorted(known))}"
+        )
+
+
 def _require_str(obj: dict[str, Any], key: str, *, path: str) -> str:
     raw = obj.get(key)
     if not isinstance(raw, str) or not raw.strip():
@@ -215,6 +249,7 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
     if not isinstance(data, dict):
         raise SuiteLoadError("suite document must be a JSON object")
     path = str(source) if source else "<suite>"
+    _reject_unknown(data, DOCUMENT_KEYS, path=path)
     suite_id = _require_str(data, "id", path=path)
 
     provision = _optional_str(data, "provision", "managed", path=path).lower()
@@ -269,6 +304,7 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
     host_raw = data.get("host", {})
     if not isinstance(host_raw, dict):
         raise SuiteLoadError(f"{path}: host must be an object")
+    _reject_unknown(host_raw, HOST_KEYS, path=f"{path}.host")
     host = SuiteHost(
         fixtures=_optional_bool(host_raw, "fixtures", False, path=path),
         loadgen=_optional_bool(host_raw, "loadgen", False, path=path),
@@ -283,6 +319,7 @@ def parse_suite_dict(data: dict[str, Any], *, source: Path | None = None) -> Sui
         cpath = f"{path}.cases[{i}]"
         if not isinstance(row, dict):
             raise SuiteLoadError(f"{cpath}: case must be an object")
+        _reject_unknown(row, CASE_KEYS, path=cpath)
         cid = _require_str(row, "id", path=cpath)
         if cid in seen:
             raise SuiteLoadError(f"{cpath}: duplicate case id {cid!r}")

@@ -69,6 +69,20 @@ namespace ZdtdPlaytest
             return null;
         }
 
+        /// <summary>
+        /// A boolean env value, using the same on/off spellings the host
+        /// orchestrator accepts (playtest_run.env_flag). A value outside both
+        /// sets is false: the mod has no startup validation to fail with, and
+        /// a knob that only turns extra logging or extra probes on is the safe
+        /// reading of a typo.
+        /// </summary>
+        static bool EnvTrue(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            string v = value.Trim().ToLowerInvariant();
+            return v == "1" || v == "true" || v == "yes" || v == "on";
+        }
+
         public static void ArmFromEnv()
         {
             // Canonical: PLAYTEST_SUITE. Legacy/Atomic host: ZDTD_PLAYTEST_SUITE.
@@ -88,8 +102,7 @@ namespace ZdtdPlaytest
                     if (trimmed.Length > 0) _declaredRefs.Add(trimmed);
                 }
             }
-            TraceEntity = traceEntity == "1"
-                || string.Equals(traceEntity, "true", StringComparison.OrdinalIgnoreCase);
+            TraceEntity = EnvTrue(traceEntity);
             if (!string.IsNullOrEmpty(laps) && int.TryParse(laps, out int n) && n > 0)
                 _benchmarkLaps = Math.Min(n, 20);
             else
@@ -100,7 +113,7 @@ namespace ZdtdPlaytest
                 _suites = Catalog.ExpandSuites(suiteEnv);
                 _armed = _suites.Length > 0;
             }
-            else if (legacy == "1" || string.Equals(legacy, "true", StringComparison.OrdinalIgnoreCase))
+            else if (EnvTrue(legacy))
             {
                 _suites = Catalog.ExpandSuites("demo");
                 _armed = true;

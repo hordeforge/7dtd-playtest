@@ -110,6 +110,24 @@ def test_reject_unknown_axes() -> None:
     expect_error({**MANAGED, "backend": "bedrock"}, "backend 'bedrock' not in")
 
 
+def test_reject_unknown_fields() -> None:
+    """A misspelled key reads as "unset", which is the dangerous direction:
+    `provison: attach` on a production suite left the run managed, so it
+    wiped the world it was meant to attach read-only to."""
+    expect_error({**MANAGED, "provison": "attach"}, "unknown field(s) 'provison'")
+    expect_error({**MANAGED, "read_only": True}, "unknown field(s) 'read_only'")
+    expect_error(
+        {**MANAGED, "host": {"fixture": True}}, "unknown field(s) 'fixture'"
+    )
+    expect_error(
+        {
+            **MANAGED,
+            "cases": [{"id": "c", "kind": "live", "ref": "a", "tag": "x"}],
+        },
+        "unknown field(s) 'tag'",
+    )
+
+
 def test_reject_empty_and_duplicate_cases() -> None:
     expect_error({**MANAGED, "cases": []}, "cases must be a non-empty list")
     expect_error(
@@ -264,6 +282,7 @@ TESTS = (
     ("managed_must_be_fresh", test_managed_must_be_fresh),
     ("readonly_requires_attach", test_readonly_requires_attach),
     ("reject_unknown_axes", test_reject_unknown_axes),
+    ("reject_unknown_fields", test_reject_unknown_fields),
     ("reject_empty_and_duplicate_cases", test_reject_empty_and_duplicate_cases),
     ("reject_invalid_json", test_reject_invalid_json),
     ("non_utf8_suite_file_fails_closed", test_non_utf8_suite_file_fails_closed),

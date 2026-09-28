@@ -452,7 +452,9 @@ the run order that both `make test` and `make coverage` expand):
     discover/load/report, and every contradiction refused: a managed run that
     is not fresh, an attach run that claims to be, an attach run carrying a
     `server` block or `mods` list it does not own, `readonly` outside attach,
-    an external suite shadowing a built-in id.
+    an external suite shadowing a built-in id, an unknown key anywhere but the
+    `server` block (a misspelled `provision` or `readonly` reads as unset, and
+    unset means a managed run that wipes the host).
 17. declared-ref surface (`scripts/test_suite_refs.py`): every `ref` in
     `suites/*.json` resolves to a real Catalog case, every declared suite
     declares all its cases, the `catalog.SUITE.CASE` format is pinned on both

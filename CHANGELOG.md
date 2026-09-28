@@ -66,6 +66,20 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- **One boolean spelling table for every env knob.** `PLAYTEST_READONLY`,
+  `PLAYTEST_TRACE_ENTITY` and `CLIENT_MUTE` accepted different token sets, so
+  `PLAYTEST_READONLY=false` armed readonly while `PLAYTEST_TRACE_ENTITY=yes`
+  armed nothing. All three now read `1/true/yes/on` and `0/false/no/off`, and
+  anything else is a harness error naming the variable rather than a silent
+  default. Empty still means unset.
+- **`PLAYTEST_PROVISION` / `PLAYTEST_BACKEND` are validated before argparse
+  runs.** argparse checks `choices` on a flag but not on a string default, so
+  a typo in either env var reached the run as a live value.
+- The startup `config:` line also reports the sandbox client instance, the
+  resolved lock file, and whether the client mute is on.
+- `CLIENT_MUTE_TIMEOUT` is validated as finite seconds > 0; a junk value warns
+  and keeps the default instead of handing the helper a wait argument that
+  does nothing.
 - **Shared Catalog.cs readers moved out of a gate.** The two offline gates
   that read `Catalog.cs` now import the readers from `scripts/catalog_surface.py`
   instead of one of them importing the other (`test_suite_refs` pulled
@@ -76,6 +90,12 @@ Release model (inferred practice, now pinned by `make test`):
   --help` told the reader to "prefer --target" and to use `--sandbox-name`
   "for --target sandbox"; the two-axis replacement has no `--target` flag,
   so both strings now name `--provision`.
+- **`make playtest*` no longer overrides the backend with its own default.**
+  Every target passed `--server "$(SERVER)"` with `SERVER ?= stock`, so a
+  documented `PLAYTEST_BACKEND=zdtd` was inert under make. `SERVER` now
+  defaults to `PLAYTEST_BACKEND`, and the flag is only passed when set.
+  `READONLY=` takes the same on/off spellings as `PLAYTEST_READONLY`, so
+  `READONLY=false` no longer arms `--readonly`.
 - `review_video.py` documents `--keep-raw-response` and `--force` (both are
   gateway passthroughs) and closes with examples and exit codes; `make help`
   lists `playtest-review-video`; the `playtest-repeat` comment no longer
@@ -99,7 +119,8 @@ Release model (inferred practice, now pinned by `make test`):
   stock dedicated instead. `PLAYTEST_BACKEND` was dead for the same reason:
   the argparse default was a literal `stock`, so `resolve_target` never
   reached its env fallback. The parser now reports a `None` default and
-  `resolve_backend` ranks flag, then env, then suite document.
+  `resolve_backend` ranks flag, then `PLAYTEST_BACKEND`, then suite document;
+  the undocumented second name for that knob is gone.
 - **A suite document's `kind` could contradict the case it names.** `kind` is
   the one field in a document that states how a case runs, and it is a copy of
   what `CaseDef.Live` / `CaseDef.Defer` already decided, with nothing
@@ -107,6 +128,13 @@ Release model (inferred practice, now pinned by `make test`):
   report then shows a skip the suite never declared) or `defer` for a live
   one (a green run that measured nothing). `catalog_surface` reads the factory
   per case and `test_suite_refs` fails on the drift.
+- **A misspelled suite field no longer reads as unset.** The declarative
+  suite loader ignored unknown keys, so `provison: attach` on a suite that
+  meant to join a production host read as "no provision" and the run went
+  managed (wiping the world it was supposed to leave alone). Unknown keys in
+  the document, in `host` and in a case now fail at load naming the key;
+  `server` stays open, since its keys are stock serverconfig properties.
+  `schema/suite.schema.json` says the same (`additionalProperties: false`).
 - **Reruns no longer answer with the previous run's state.** A run that died
   before its poll loop ended left `<logdir>/run-ended` behind, so a rerun's
   capture loop saw a stale end marker and stopped instead of photographing

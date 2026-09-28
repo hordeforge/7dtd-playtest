@@ -438,10 +438,24 @@ def main() -> int:
     assert "def client_mute_enabled" in orch
     assert "def mute_client_audio_async" in orch
     assert "mute_client_audio_async()" in orch
-    assert 'or "1"' in orch
+    assert "env_flag_from(CLIENT_MUTE_ENVVARS, True)" in orch, (
+        "mute must default on through the shared boolean env reader"
+    )
     assert "CLIENT_MUTE" in orch and "CLIENT_MUTE=0" in readme
     assert "mute" in readme.lower() and "default" in readme.lower()
     print("OK client mute default-on (opt-out CLIENT_MUTE=0)")
+
+    # The mod reads the same booleans from the same env, so a host that
+    # accepts `yes`/`on` must not hand the client a value it reads as false.
+    assert "static bool EnvTrue(string value)" in runner
+    for token in ('"1"', '"true"', '"yes"', '"on"'):
+        assert f"v == {token}" in runner, f"EnvTrue must accept {token}"
+    env_true_body = method_body(runner, r"static bool EnvTrue\(string value\)")
+    for token in ('"0"', '"false"', '"no"', '"off"'):
+        assert f"v == {token}" not in env_true_body, f"EnvTrue must not accept {token}"
+    assert "TraceEntity = EnvTrue(traceEntity);" in runner
+    assert "else if (EnvTrue(legacy))" in runner
+    print("OK client boolean env shares the host on/off spellings")
     return 0
 
 

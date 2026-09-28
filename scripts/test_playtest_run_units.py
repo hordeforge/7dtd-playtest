@@ -996,6 +996,169 @@ def test_main_default_port_reaches_preflight_refusal() -> None:
     print("PASS default_port_preflight omitted --port reaches preflight refusal")
 
 
+def _run_main_with_backend_env(
+    env: dict[str, str], argv: list[str]
+) -> tuple[int, str, str]:
+    """main() under a scrubbed environment; returns (rc, stdout, stderr)."""
+    host_env = (
+        "PLAYTEST_BACKEND",
+        "PLAYTEST_PROVISION",
+        "PLAYTEST_READONLY",
+        "PLAYTEST_TRACE_ENTITY",
+        "PLAYTEST_SESSION_ID",
+        "PLAYTEST_TELNET_PASSWORD",
+        "PLAYTEST_SUITE_FILE",
+        "PLAYTEST_LOCK_FILE",
+        "CLIENT_MUTE",
+        "PLAYTEST_MUTE",
+    )
+    saved = {n: os.environ.get(n) for n in host_env}
+    saved.update({k: os.environ.pop(k, None) for k in env})
+    os.environ.update(env)
+    out, errbuf = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(errbuf):
+            try:
+                rc = playtest_run.main(argv)
+            except SystemExit as ex:
+                rc = int(ex.code or 0)
+    finally:
+        for n in host_env:
+            if saved[n] is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = saved[n]  # type: ignore[assignment]
+    return rc, out.getvalue(), errbuf.getvalue()
+
+
+def test_env_readers_reject_junk_naming_the_variable() -> None:
+    """Boolean and choice env overrides accept the documented spellings and
+    nothing else. argparse checks `choices` on a flag but not on a string
+    default, so an env-supplied value reaches a run unvalidated unless the
+    reader refuses it here."""
+    assert playtest_run.env_flag("PT_TEST_FLAG", False) is False, "unset is the default"
+    assert playtest_run.env_flag("PT_TEST_FLAG", True) is True, "unset is the default"
+    for raw, want in (
+        ("1", True),
+        ("true", True),
+        ("YES", True),
+        (" on ", True),
+        ("0", False),
+        ("False", False),
+        ("no", False),
+        ("OFF", False),
+    ):
+        os.environ["PT_TEST_FLAG"] = raw
+        try:
+            assert playtest_run.env_flag("PT_TEST_FLAG", False) is want, raw
+        finally:
+            os.environ.pop("PT_TEST_FLAG", None)
+    os.environ["PT_TEST_FLAG"] = "maybe"
+    errbuf = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(errbuf):
+            try:
+                playtest_run.env_flag("PT_TEST_FLAG", False)
+            except SystemExit as ex:
+                assert ex.code == 2, f"junk env must be a harness error, got {ex.code}"
+            else:
+                raise AssertionError("junk boolean env value accepted")
+    finally:
+        os.environ.pop("PT_TEST_FLAG", None)
+    assert "PT_TEST_FLAG" in errbuf.getvalue(), errbuf.getvalue()
+
+    assert playtest_run.env_choice("PT_TEST_CHOICE", ("a", "b"), "a") == "a"
+    os.environ["PT_TEST_CHOICE"] = "B"
+    try:
+        assert playtest_run.env_choice("PT_TEST_CHOICE", ("a", "b"), "a") == "b"
+    finally:
+        os.environ.pop("PT_TEST_CHOICE", None)
+    os.environ["PT_TEST_CHOICE"] = "c"
+    errbuf = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(errbuf):
+            try:
+                playtest_run.env_choice("PT_TEST_CHOICE", ("a", "b"), "a")
+            except SystemExit as ex:
+                assert ex.code == 2, ex.code
+            else:
+                raise AssertionError("out-of-set choice env value accepted")
+    finally:
+        os.environ.pop("PT_TEST_CHOICE", None)
+    assert "PT_TEST_CHOICE" in errbuf.getvalue(), errbuf.getvalue()
+    print("PASS env_readers junk env values fail fast naming the variable")
+
+
+def test_backend_env_selects_the_server_under_test() -> None:
+    """PLAYTEST_BACKEND is the documented name for --server and must reach the
+    run. It was read by playtest_targets for its own fallback only, while the
+    flag default came from an undocumented PLAYTEST_SERVER, so the documented
+    env silently ran stock: the operator asked for zdtd, config: said stock,
+    and the suite overlay was suppressed by a value that changed nothing."""
+    assert "PLAYTEST_SERVER" not in PLAYTEST_RUN.read_text(encoding="utf-8"), (
+        "the undocumented second name for --server is back"
+    )
+    with tempfile.TemporaryDirectory(prefix="playtest-backend-env-") as td:
+        root = Path(td)
+        sb = root / "sandbox" / "scripts" / "sb"
+        sb.parent.mkdir(parents=True)
+        sb.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        sb.chmod(0o755)
+        argv = [
+            "--sandbox-root",
+            str(root / "sandbox"),
+            "--logdir",
+            str(root / "log"),
+            "--timeout",
+            "900",
+        ]
+        rc, out, _ = _run_main_with_backend_env({"PLAYTEST_BACKEND": "zdtd"}, argv)
+        assert "server=zdtd" in out, f"env backend never reached args.server: {out}"
+        assert rc == 2, f"the stub run must stop at a preflight refusal, got {rc}"
+
+        # An explicit flag still beats the env, and the suite overlay is not
+        # consulted when either one set the backend.
+        rc, out, _ = _run_main_with_backend_env(
+            {"PLAYTEST_BACKEND": "zdtd"}, [*argv, "--server", "stock"]
+        )
+        assert "server=stock" in out, out
+
+    rc, _, errout = _run_main_with_backend_env(
+        {"PLAYTEST_BACKEND": "zdtdd"}, ["--suite", "smoke"]
+    )
+    assert rc == 2, f"a typo'd backend env must be a harness error, got {rc}"
+    assert "PLAYTEST_BACKEND" in errout, f"error must name the variable: {errout!r}"
+    print("PASS backend_env PLAYTEST_BACKEND selects the server, junk fails fast")
+
+
+def test_client_mute_timeout_is_validated() -> None:
+    """CLIENT_MUTE_TIMEOUT reaches the helper as its wait argument, so junk
+    silently bought a no-op poll. Best-effort knob: warn and keep the default
+    rather than abort a healthy run."""
+    names = ("CLIENT_MUTE_TIMEOUT", "SEVEN_DAYS_TO_DIE_CLIENT_MUTE_TIMEOUT")
+    saved = {n: os.environ.get(n) for n in names}
+    try:
+        for n in names:
+            os.environ.pop(n, None)
+        assert playtest_run.client_mute_timeout_sec() == 60.0
+        os.environ["CLIENT_MUTE_TIMEOUT"] = "12.5"
+        assert playtest_run.client_mute_timeout_sec() == 12.5
+        for bad in ("0", "-5", "abc", "inf", "nan"):
+            os.environ["CLIENT_MUTE_TIMEOUT"] = bad
+            errbuf = io.StringIO()
+            with contextlib.redirect_stderr(errbuf):
+                got = playtest_run.client_mute_timeout_sec()
+            assert got == 60.0, f"{bad!r} must fall back to the default, got {got}"
+            assert "CLIENT_MUTE_TIMEOUT" in errbuf.getvalue(), errbuf.getvalue()
+    finally:
+        for n, old in saved.items():
+            if old is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = old
+    print("PASS client_mute_timeout junk wait values warn and keep the default")
+
+
 def test_peer_client_game_follows_its_instance() -> None:
     """A peer must run its own instance's tree, not the operator's install.
 
@@ -2069,6 +2232,9 @@ def main() -> int:
             test_lock_lost_abort_wired_into_poll_loops,
         ),
         ("client_mute_env_contract", test_client_mute_env_contract),
+        ("client_mute_timeout", test_client_mute_timeout_is_validated),
+        ("env_readers", test_env_readers_reject_junk_naming_the_variable),
+        ("backend_env", test_backend_env_selects_the_server_under_test),
         (
             "apm_dump_fail_closed",
             test_write_zdtd_apm_dump_fails_closed_without_markers,
