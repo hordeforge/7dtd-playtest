@@ -26,10 +26,12 @@ required-version = ">=0.12.13,<0.13"
 # Lint gate (make lint): defect-oriented rules only. E/W/F/I/B/SIM/UP/RUF plus
 # the free strictness of C4/RET/A/DTZ/FA/PIE and the error-only subsets of pylint
 # (PLE), pep8-naming-adjacent (RSE), import hygiene (TID), __slots__ (SLOT) and
-# isinstance/issubclass traps (YTT). Style suites that would fight the
-# hand-rolled gate scripts (D, ANN, S, TRY) are deliberately not selected, as
-# are the suites the tree does not yet pass (ARG, BLE, PLR, EXE, FBT, EM, PT,
-# PERF, FURB); a group lands here once a run proves it clean, not on faith.
+# isinstance/issubclass traps (YTT), plus the defect-bearing members of S, TRY,
+# PERF and PLR that the tree already passes (the rest of those categories are
+# style or have findings of their own). Style suites that would fight the
+# hand-rolled gate scripts (D) are deliberately not selected, as are the
+# suites the tree does not yet pass (ARG, ANN, BLE, EXE, FBT, EM, PT, FURB); a
+# group lands here once a run proves it clean, not on faith.
 # Lines hard-capped at 100 so two copies fit side-by-side.
 [tool.ruff]
 line-length = 100
@@ -63,6 +65,15 @@ select = [
     "YTT", # truthy tests on sys/typing internals
     "PGH", # no blanket noqa / bare type: ignore (suppression hygiene)
     "T10", # no debugger imports/breakpoints in shipped orchestrator code
+    # Rules pulled out of categories the tree does not yet pass whole (S, TRY,
+    # PERF and PLR each still have findings of their own). These are the
+    # defect-bearing members of those categories, and a run proves the tree is
+    # already clean for them, so they gate from today.
+    "S307",  # eval/exec on a runtime value
+    "TRY400", # logger.error inside except swallows the traceback
+    "PERF102", # dict mutated while iterated
+    "PERF203", # try/except inside a loop, re-raised per iteration
+    "PLR5501", # else: if() chains instead of else if
 ]
 
 # Coverage floor (make coverage). The badge published from this number read as
@@ -113,6 +124,10 @@ enable_error_code = [
     "deprecated",
     "mutable-override",
     "type-abstract",
+    # An `await` whose result is discarded compiles, runs, and silently does
+    # nothing, which in the lock's acquire/release path is a hold that is never
+    # taken or a release that never happens. Verified clean across scripts/.
+    "unused-awaitable",
 ]
 
 # Ratchet opt-outs (see comment above [tool.mypy]). Every entry is a module
