@@ -239,7 +239,7 @@ that module, or the simulation stops covering it.
 
 ```bash
 make test                 # offline gates (lint + typecheck + suites), no game install needed
-make lint                 # ruff + shellcheck over scripts/ ([tool.ruff])
+make lint                 # ruff + shellcheck over scripts/, yamllint over .github/
 make typecheck            # mypy over scripts/ ([tool.mypy])
 make test-one GATE=test_dst.py   # run one gate while iterating
 make check                # exactly what CI runs: test + dst DST_SEEDS=200
@@ -409,10 +409,14 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
-0. ruff over `scripts/` plus shellcheck over the bash helpers (`make lint`,
-   `[tool.ruff]` in pyproject.toml) and mypy over `scripts/` (`make
-   typecheck`, `[tool.mypy]`); ruff and mypy are pinned in the dev
-   dependency-group so local and CI versions match uv.lock.
+0. ruff over `scripts/`, shellcheck over the bash helpers and yamllint over
+   the shipped workflow YAML (`.github/`, config in `.yamllint.yml`), all
+   three under `make lint` with `[tool.ruff]` in pyproject.toml, plus mypy
+   over `scripts/` (`make typecheck`, `[tool.mypy]`); ruff and mypy are
+   pinned in the dev dependency-group so local and CI versions match
+   uv.lock. A host with no `yamllint` runs `make lint SKIP_YAML=1`; CI never
+   sets it. A ruff rule group lands in `select` only after a run proves the
+   tree clean.
 
 Then the gates, grouped by the surface each pins (`GATES` in the Makefile is
 the run order that both `make test` and `make coverage` expand):

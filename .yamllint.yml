@@ -1,0 +1,28 @@
+# yamllint config for the shipped workflow YAML (.github/), the one secondary
+# language in this repo with no analyzer until now. Extend `default` rather
+# than `relaxed`: the structural rules (indentation, braces, brackets, colons,
+# duplicate keys, trailing spaces) are the defect class, and the shipped
+# workflows already pass them. Every deviation below is a GitHub Actions
+# convention, not a loosened bar.
+extends: default
+
+rules:
+  # `on:` is the Actions trigger key, a YAML 1.1 boolean word that yamllint
+  # reads as a key. Rewriting it to `"on":` would work and is what some repos
+  # do, but the key is the documented spelling and GitHub's own docs use it
+  # unquoted. Key checking goes; VALUE checking stays, so a `yes:`/`no:` that
+  # silently means True stays an error.
+  truthy:
+    check-keys: false
+
+  # GitHub's own workflow examples start the document at the first key, with no
+  # `---` marker. Requiring one here would be a marker no reader of the raw
+  # workflow expects to see.
+  document-start: disable
+
+  # The repo caps lines at 100 ([tool.ruff] line-length), so two copies of any
+  # file fit side by side. The same cap holds here.
+  line-length:
+    max: 100
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true

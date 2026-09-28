@@ -32,8 +32,8 @@ jobs:
     timeout-minutes: 15
     steps:
       # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
         with:
           # A floating uv lets the resolver move under the gates without any
           # commit; the pin lives in this workflow's UV_VERSION.
@@ -69,14 +69,16 @@ jobs:
       contents: write
     steps:
       # Pinned to commit SHAs (mutable major tags are a supply-chain risk).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
         with:
           # A floating uv lets the resolver move under the gates without any
           # commit; the pin lives in this workflow's UV_VERSION.
           version: ${{ env.UV_VERSION }}
       - run: make coverage
-      - run: uv run --locked --project "$PWD" python scripts/coverage_badge.py "$RUNNER_TEMP/coverage.svg"
+      - run: >-
+          uv run --locked --project "$PWD"
+          python scripts/coverage_badge.py "$RUNNER_TEMP/coverage.svg"
       - name: Publish the badge to the badges branch
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -56,7 +56,7 @@ help:
 	@echo "Offline dev loop (no game install needed):"
 	@echo "  make test                        run all offline gates (lint + typecheck + suites)"
 	@echo "  make test-one GATE=test_dst.py   run one gate (file name under scripts/)"
-	@echo "  make lint                        ruff + shellcheck over scripts/ (pyproject.toml)"
+	@echo "  make lint                        ruff + shellcheck over scripts/, yamllint over .github/"
 	@echo "  make typecheck                   mypy over scripts/ ([tool.mypy] in pyproject.toml)"
 	@echo "  make dst [DST_SEEDS=200]         lock deterministic-simulation sweep"
 	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
@@ -142,18 +142,35 @@ require-uv:
 		echo "  see README: Requirements"; \
 		exit 2; }
 
+# The one gate a contributor's host can legitimately be unable to run (no
+# yamllint, no package manager to install it). CI never sets it, so a workflow
+# edit that only passes locally fails the push.
+SKIP_YAML ?=
+
 # Lint gate: ruff with the defect-oriented rule set from pyproject.toml
-# ([tool.ruff]) plus shellcheck over the bash helpers under scripts/. Both are
-# preinstalled on GitHub runners, so local and CI run one identical gate.
-# shellcheck is a host tool no lockfile can provide: name a missing one instead
-# of letting make print a bare "not found".
+# ([tool.ruff]), shellcheck over the bash helpers under scripts/, and yamllint
+# over the shipped workflow YAML (.github/, config in .yamllint.yml). All three
+# are preinstalled on GitHub runners, so local and CI run one identical gate.
+# shellcheck and yamllint are host tools no lockfile can provide: name a missing
+# one instead of letting make print a bare "not found".
 lint: require-uv
 	@command -v shellcheck >/dev/null 2>&1 || { \
 		echo "make lint: 'shellcheck' is not on PATH; it lints scripts/*.sh."; \
 		echo "  install it with your package manager, e.g.: sudo apt install shellcheck"; \
 		exit 2; }
+	@if [ "$(SKIP_YAML)" = 1 ]; then \
+		echo "make lint: SKIP_YAML=1, the .github/ YAML gate did not run locally"; \
+	elif command -v yamllint >/dev/null 2>&1; then :; \
+	else \
+		echo "make lint: 'yamllint' is not on PATH; it lints .github/**/*.yml."; \
+		echo "  install it with your package manager, e.g.: pipx install yamllint"; \
+		echo "  or, on a host that cannot install it, run: make lint SKIP_YAML=1"; \
+		echo "  (CI always runs it, so a skipped gate still blocks the merge)"; \
+		exit 2; \
+	fi
 	@cd "$(ROOT)" && uv run --locked ruff check scripts
 	@cd "$(ROOT)" && shellcheck scripts/*.sh
+	@if [ "$(SKIP_YAML)" != 1 ]; then cd "$(ROOT)" && yamllint -c .yamllint.yml .github/; fi
 
 # Type gate: mypy baseline strictness from pyproject.toml ([tool.mypy]).
 typecheck: require-uv

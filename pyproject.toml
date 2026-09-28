@@ -27,7 +27,9 @@ required-version = ">=0.12.13,<0.13"
 # the free strictness of C4/RET/A/DTZ/FA/PIE and the error-only subsets of pylint
 # (PLE), pep8-naming-adjacent (RSE), import hygiene (TID), __slots__ (SLOT) and
 # isinstance/issubclass traps (YTT). Style suites that would fight the
-# hand-rolled gate scripts (D, ANN, S, TRY) are deliberately not selected.
+# hand-rolled gate scripts (D, ANN, S, TRY) are deliberately not selected, as
+# are the suites the tree does not yet pass (ARG, BLE, PLR, EXE, FBT, EM, PT,
+# PERF, FURB); a group lands here once a run proves it clean, not on faith.
 # Lines hard-capped at 100 so two copies fit side-by-side.
 [tool.ruff]
 line-length = 100
@@ -54,12 +56,22 @@ select = [
     "RSE", # unnecessary paren on raised exception
     "TID", # tidy imports (no relative-import tricks)
     "ERA", # commented-out code left behind by a revert
+    "FIX", # no TODO/FIXME markers left in the tree
+    "TD",  # no TODO markers, and no banned debug module import
     "ISC001", # two string literals fused on one line inside a call
     "SLOT",# manual __slots__ subclassing of immutable types
     "YTT", # truthy tests on sys/typing internals
     "PGH", # no blanket noqa / bare type: ignore (suppression hygiene)
     "T10", # no debugger imports/breakpoints in shipped orchestrator code
 ]
+
+# Coverage floor (make coverage). The badge published from this number read as
+# a report card nobody could fail: a dropped line lowered it silently. The
+# floor is one point under the measured 82.75%, so a collapse blocks the job
+# that publishes it while a measurement wobble of a tenth of a point does not.
+# Ratchet it up, never down; the number only moves when the tree does.
+[tool.coverage.report]
+fail_under = 82
 
 # Type gate (make typecheck). The tree passes mypy's complete strict preset;
 # ratchet up as annotations spread. The two Any-oriented strict flags are on

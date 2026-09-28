@@ -35,8 +35,8 @@ jobs:
     steps:
       # Actions pinned by full commit SHA (tag in comment) so a moved tag or a
       # compromised major-version release cannot inject code into the pipeline.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
         with:
           # A floating uv lets the resolver move under the gates without any
           # commit; the pin lives in this workflow's UV_VERSION.
@@ -47,7 +47,10 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           MANIFEST="ModInfo.xml"
-          case "$TAG" in v*) ;; *) echo "ERROR: tag '$TAG' does not start with 'v'" >&2; exit 1;; esac
+          case "$TAG" in
+            v*) ;;
+            *) echo "ERROR: tag '$TAG' does not start with 'v'" >&2; exit 1;;
+          esac
           SHIPPED="$(sed -n 's/.*<Version[^>]*value="\([^"]*\)".*/\1/p' "$MANIFEST" | head -1)"
           if [ -z "$SHIPPED" ]; then
             echo "ERROR: no <Version value=\"...\"> found in $MANIFEST" >&2

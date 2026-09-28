@@ -66,8 +66,9 @@ suite JSON; **server-container** ships production, which playtest reaches
   (provides the `bot` telnet commands the orchestrator drives)
 - Host Python via **`uv`**, pinned to CPython 3.13 by `.python-version`
   (uv fetches it automatically; gates must not rely on a newer interpreter)
-- `shellcheck` for the lint gate (`make lint`; preinstalled on GitHub
-  runners, install locally with your package manager)
+- `shellcheck` and `yamllint` for the lint gate (`make lint`; preinstalled
+  on GitHub runners, install locally with your package manager; a host
+  without `yamllint` runs `make lint SKIP_YAML=1`, which CI never does)
 - dotnet SDK 8.0.400 or newer for the mod build (`global.json` sets that
   floor and rolls forward inside the 8.0 feature band, so a 9 or 10 SDK
   is not silently used to compile this source; found on `PATH` or under

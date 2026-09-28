@@ -240,7 +240,20 @@ Release model (inferred practice, now pinned by `make test`):
   `scripts/test_version_surface_units.py` fails if it drifts back. A host
   with only a newer major installed now gets dotnet's own "SDK not found"
   rather than a silently different compiler.
-
+- **`make lint` also lints the workflow YAML.** `.github/` was the one
+  shipped language with no analyzer: a duplicate key, a wrong indent or an
+  unbalanced bracket in a workflow parsed only when the push ran. `yamllint`
+  now covers it (config in `.yamllint.yml`, extending the `default` rules so
+  the structural checks stay at full strength), with a 100-column cap to
+  match `[tool.ruff]`. A host without `yamllint` runs
+  `make lint SKIP_YAML=1`; CI never sets it, so a skipped gate still blocks
+  the merge. `FIX` and `TD` join the ruff `select` (no `TODO`/`FIXME`
+  markers, siblings of the `ERA` group already selected), both clean on the
+  current tree.
+- **The coverage number can now fail.** `make coverage` printed a percentage
+  and published it as a badge; a dropped line lowered the badge and nothing
+  else. `[tool.coverage.report] fail_under` pins a floor one point under the
+  measured 82.75%, so a collapse exits non-zero instead of publishing.
 - **One copy of the capture scripts' shared plumbing.**
   `scripts/capture_common.sh` holds the live-run guard (three identical
   copies), the byte-offset log gate and the `stop_run` teardown (two copies
