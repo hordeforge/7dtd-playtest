@@ -957,7 +957,7 @@ namespace ZdtdPlaytest
                             var bv = ctx.World.GetBlock(ctx.TargetBlock);
                             if (bv.type != 0)
                             {
-                                bv.damage = (ushort)Math.Min(65535, ctx.IntA + 5 + pulse);
+                                bv.damage = (ushort)Math.Max(0, Math.Min(65535, ctx.IntA + 5 + pulse));
                                 Helpers.SetBlockRpc(ctx.World, ctx.TargetBlock, bv);
                             }
                         }
@@ -1106,8 +1106,8 @@ namespace ZdtdPlaytest
             {
                 try
                 {
-                    var pos = ctx.Player.GetPosition();
-                    var def = ctx.World.GetBiome((int)pos.x, (int)pos.z);
+                    var column = Helpers.BlockColumn(ctx.Player.GetPosition());
+                    var def = ctx.World.GetBiome(column.x, column.z);
                     int id = def != null ? def.m_Id : -1;
                     ctx.IntA = id;
                     ctx.Detail = "biome=" + id + (def != null ? " name=" + def.m_sBiomeName : "");
@@ -1186,8 +1186,8 @@ namespace ZdtdPlaytest
                     int biomeId = -1;
                     try
                     {
-                        var pos = ctx.Player.GetPosition();
-                        var def = ctx.World.GetBiome((int)pos.x, (int)pos.z);
+                        var column = Helpers.BlockColumn(ctx.Player.GetPosition());
+                        var def = ctx.World.GetBiome(column.x, column.z);
                         biomeId = def != null ? def.m_Id : -1;
                         var bw = wm.FindBiomeWeather(biomeId);
                         ctx.Detail = "global=" + global + " biome=" + biomeId
@@ -1836,7 +1836,7 @@ namespace ZdtdPlaytest
                             var bv = ctx.World.GetBlock(ctx.TargetBlock);
                             if (bv.type != 0)
                             {
-                                bv.damage = (ushort)Math.Min(65535, ctx.IntA + 5 + pulse);
+                                bv.damage = (ushort)Math.Max(0, Math.Min(65535, ctx.IntA + 5 + pulse));
                                 Helpers.SetBlockRpc(ctx.World, ctx.TargetBlock, bv);
                             }
                         }

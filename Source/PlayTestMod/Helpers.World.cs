@@ -11,6 +11,21 @@ namespace ZdtdPlaytest
     public static partial class Helpers
     {
 
+        /// <summary>The block column a world position occupies.</summary>
+        /// <para>Floor, not a truncating cast: a 7 Days to Die world is centred
+        /// on the origin and spans roughly -4096..4095, so a position west or
+        /// north of it has a negative coordinate, and <c>(int)(-3.7)</c> is
+        /// -3, the next column over. Every terrain and biome read keyed on x,z
+        /// has to name the column the position is in.</para>
+        public static Vector3i BlockColumn(Vector3 pos)
+        {
+            return new Vector3i(
+                Mathf.FloorToInt(pos.x),
+                Mathf.FloorToInt(pos.y),
+                Mathf.FloorToInt(pos.z));
+        }
+
+
         public static Vector3i FindAirNear(World world, Vector3i origin, params Vector3i[] prefs)
         {
             foreach (var t in prefs)
@@ -234,10 +249,7 @@ namespace ZdtdPlaytest
             int max = 0;
             try
             {
-                var o = new Vector3i(
-                    Mathf.FloorToInt(center.x),
-                    Mathf.FloorToInt(center.y),
-                    Mathf.FloorToInt(center.z));
+                var o = BlockColumn(center);
                 for (int dx = -radiusBlocks; dx <= radiusBlocks; dx++)
                 for (int dz = -radiusBlocks; dz <= radiusBlocks; dz++)
                 for (int dy = -2; dy <= 6; dy++)
@@ -276,10 +288,7 @@ namespace ZdtdPlaytest
             int n = 0;
             try
             {
-                var o = new Vector3i(
-                    Mathf.FloorToInt(center.x),
-                    Mathf.FloorToInt(center.y),
-                    Mathf.FloorToInt(center.z));
+                var o = BlockColumn(center);
                 for (int dx = -radiusBlocks; dx <= radiusBlocks; dx += 2)
                 for (int dz = -radiusBlocks; dz <= radiusBlocks; dz += 2)
                 for (int dy = -4; dy <= 2; dy++)

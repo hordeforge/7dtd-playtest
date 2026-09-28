@@ -686,7 +686,8 @@ namespace ZdtdPlaytest
                 var absolute = alive.GetPosition();
                 if (world != null && hasRenderedBounds)
                 {
-                    terrainTop = world.GetHeight((int)absolute.x, (int)absolute.z) + 1f;
+                    var column = Helpers.BlockColumn(absolute);
+                    terrainTop = world.GetHeight(column.x, column.z) + 1f;
                     TryGroundSurface(
                         alive, absolute.x, absolute.y, absolute.z,
                         out surfaceRay, out surfaceHit);
@@ -797,7 +798,8 @@ namespace ZdtdPlaytest
             // Y 61, so the old harness forced a healthy creature nearly one
             // full block into the road every tick. GetHeight returns the loaded
             // top block; +1 is its standing surface.
-            float voxelTop = world.GetHeight((int)x, (int)z) + 1f;
+            var column = Helpers.BlockColumn(new Vector3(x, alive.GetPosition().y, z));
+            float voxelTop = world.GetHeight(column.x, column.z) + 1f;
             float surface;
             string surfaceHit;
             if (!TryGroundSurface(alive, x, alive.GetPosition().y, z, out surface, out surfaceHit))
