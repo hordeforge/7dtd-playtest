@@ -36,10 +36,6 @@
     "ServerPassword": "",
     "PlayerKillingMode": "0"
   },
-  "host": {
-    "fixtures": false,
-    "loadgen": false
-  },
   "cases": [
     {
       "id": "parachute_equip",
