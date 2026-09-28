@@ -1311,11 +1311,21 @@ def write_text_atomic(path: Path, text: str) -> None:
     a sibling temp file, flush it to disk, then rename over the target: rename
     is atomic within a directory, so a reader sees either the old payload or
     the new one, and a failure before the rename leaves the old one intact.
+
+    The payload is this run's evidence and can carry the operator's home
+    directory, world names and the server's APM dump, so it is created 0600
+    rather than at the umask's 0644. O_EXCL means a file or symlink already
+    sitting at the temp name fails the open instead of being truncated and
+    written through, and the rename would publish its contents as this run's
+    report.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}")
+    # Never entered when the open fails, so the unlink below only ever removes
+    # a file this call created.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        with open(tmp, "w", encoding="utf-8") as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
@@ -3363,8 +3373,13 @@ def main(argv: list[str] | None = None) -> int:
                 # What the world actually was, recorded for the report: `sb`
                 # rebuilds the instance config from the base template plus
                 # exactly these declarations, so this list reproduces the run.
+                # The per-run telnet secret is the one declaration that cannot
+                # be reproduced, so it is dropped; the loader already refuses a
+                # suite that declares it.
                 args._applied_server_config = {
-                    k: v for k, v in config.items() if k != "TelnetPassword"
+                    k: v
+                    for k, v in config.items()
+                    if k.lower() != "telnetpassword"
                 }
                 # The orchestrator's own telnet surface is not the suite's to
                 # declare: it must match what TelnetAdmin authenticates with.

@@ -32,7 +32,6 @@
     "ZombieMove": "0",
     "DayNightLength": "60",
     "DayLightLength": "40",
-    "TelnetEnabled": "true",
     "BuildCreate": "true",
     "ServerPassword": "",
     "PlayerKillingMode": "0"

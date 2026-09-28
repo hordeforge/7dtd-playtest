@@ -26,7 +26,6 @@
     "EnemySpawnMode": "false",
     "MaxSpawnedZombies": "0",
     "MaxSpawnedAnimals": "0",
-    "TelnetEnabled": "true",
     "BuildCreate": "true",
     "ServerPassword": "",
     "PlayerKillingMode": "0"

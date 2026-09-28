@@ -201,6 +201,27 @@ def test_server_values_are_stringified_for_the_game() -> None:
     }
 
 
+def test_suite_cannot_declare_the_admin_plane() -> None:
+    """TelnetEnabled / TelnetRemoteAllowedIPs / TelnetPassword are the orchestrator's.
+
+    A suite that declares the password gets a declaration the orchestrator
+    overwrites, a second line the exact-case filter does not replace when the
+    capitalisation differs, and the value itself echoed into the run report in
+    plaintext. The remote allow list is the admin plane's reachability: pinned
+    to loopback by the orchestrator so a LAN peer that reaches the port is
+    refused even with the password.
+    """
+    for key in ("TelnetEnabled", "TelnetRemoteAllowedIPs", "TelnetPassword"):
+        for spelling in (key, key.lower(), key.upper()):
+            expect_error({**MANAGED, "server": {spelling: "true"}}, "orchestrator's")
+    # A suite that states anything else on that plane is still refused, and the
+    # shipped suites state none of the three.
+    for suite in sorted(SUITES.glob("*.json")):
+        text = suite.read_text(encoding="utf-8")
+        for key in sl.ORCHESTRATOR_TELNET_KEYS:
+            assert key not in text.lower(), f"{suite.name} declares {key}"
+
+
 def test_external_suite_cannot_shadow_a_builtin() -> None:
     with tempfile.TemporaryDirectory(prefix="suite-loader-") as td:
         path = write(Path(td), {**MANAGED, "id": "smoke"}, "smoke.json")
@@ -294,6 +315,11 @@ def test_published_schema_matches_the_loader() -> None:
     assert case_props["kind"]["enum"] == list(sl.ALLOWED_KINDS)
     assert props["mods"]["default"] == list(sl.DEFAULT_MODS)
     assert props["server_mods"]["default"] == list(sl.DEFAULT_SERVER_MODS)
+    # The admin-plane names the schema refuses must be the loader's, or an
+    # external author is told a suite may declare what the loader rejects.
+    assert props["server"]["propertyNames"]["not"]["enum"] == list(
+        sl.ORCHESTRATOR_TELNET_KEYS
+    )
     # The defaults the schema states must be the ones an omitted field gets.
     managed = sl.parse_suite_dict(MANAGED)
     assert managed.mods == tuple(props["mods"]["default"])
@@ -539,6 +565,7 @@ TESTS = (
     ("non_utf8_suite_file_fails_closed", test_non_utf8_suite_file_fails_closed),
     ("non_ascii_suite_fields_load_verbatim", test_non_ascii_suite_fields_load_verbatim),
     ("server_values_are_stringified_for_the_game", test_server_values_are_stringified_for_the_game),
+    ("suite_cannot_declare_the_admin_plane", test_suite_cannot_declare_the_admin_plane),
     ("external_suite_cannot_shadow_a_builtin", test_external_suite_cannot_shadow_a_builtin),
     ("resolve_mods_short_names_and_paths", test_resolve_mods_short_names_and_paths),
     ("suite_to_report_shape", test_suite_to_report_shape),

@@ -22,6 +22,7 @@ import os
 import pathlib
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -464,6 +465,27 @@ def _main_source() -> str:
     segment = ast.get_source_segment(PLAYTEST_RUN.read_text(encoding="utf-8"), mains[0])
     assert segment is not None
     return segment
+
+
+def test_run_artifacts_are_written_owner_only() -> None:
+    """The report, junit XML, run-ended marker and apm dump are this run's
+    evidence and carry the operator's home directory, the world name and the
+    server's internal dump. They are created through write_text_atomic, so a
+    0644 file at the umask default is readable by every local user; the
+    published file and its temp file must both be 0600."""
+    with tempfile.TemporaryDirectory(prefix="playtest-artifact-mode-") as td:
+        logdir = Path(td)
+        target = logdir / "report-1.json"
+        playtest_run.write_text_atomic(target, "{}\n")
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600, (
+            oct(stat.S_IMODE(target.stat().st_mode))
+        )
+        # The temp file is gone, and a reader watching the directory during the
+        # write never saw a wider mode on it.
+        assert sorted(p.name for p in logdir.iterdir()) == ["report-1.json"]
+        playtest_run.write_text_atomic(target, '{"a":1}\n')
+        assert target.read_text(encoding="utf-8") == '{"a":1}\n', "rewrite still lands"
+    print("PASS run artifacts are published 0600, temp file excluded from the read")
 
 
 def test_run_ended_marker_is_per_run() -> None:
@@ -2486,8 +2508,9 @@ def test_telnet_admin_pinned_to_loopback() -> None:
         "the generated server config must pin the telnet admin plane to loopback; "
         "TelnetAdmin only ever connects from 127.0.0.1, so any other source is refused"
     )
-    # Orchestrator-owned, so a suite must not be able to widen it. The suites
-    # declare TelnetEnabled/TelnetPassword inputs, never the remote allow list.
+    # Orchestrator-owned, so a suite must not be able to widen it. No suite
+    # declares any of the three; the loader refuses them in any capitalisation
+    # (test_suite_loader.py covers that half).
     for suite in sorted(SUITES_DIR.glob("*.json")):
         assert "TelnetRemoteAllowedIPs" not in suite.read_text(encoding="utf-8"), (
             f"{suite.name} declares TelnetRemoteAllowedIPs; the admin-plane reachability "
@@ -2577,6 +2600,7 @@ def main() -> int:
             "prune_run_artifacts_failure",
             test_prune_run_artifacts_warns_on_a_failed_delete,
         ),
+        ("run_artifacts_owner_only", test_run_artifacts_are_written_owner_only),
         ("run_ended_marker_per_run", test_run_ended_marker_is_per_run),
         (
             "loadgen_events_truncated_per_run",

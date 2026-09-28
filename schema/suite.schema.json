@@ -35,7 +35,12 @@
     },
     "server": {
       "type": "object",
-      "description": "Stock serverconfig properties for this suite, handed to `sb render-config`. Managed only.",
+      "description": "Stock serverconfig properties for this suite, handed to `sb render-config`. Managed only. The telnet properties are the orchestrator's and are refused here in any capitalisation: it sets TelnetEnabled, TelnetRemoteAllowedIPs and a per-run TelnetPassword itself.",
+      "propertyNames": {
+        "not": {
+          "enum": ["TelnetEnabled", "TelnetPassword", "TelnetRemoteAllowedIPs"]
+        }
+      },
       "additionalProperties": {
         "type": ["string", "number", "boolean"]
       }

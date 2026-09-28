@@ -35,6 +35,27 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Security
+
+- **A suite can no longer declare the telnet admin plane.** A `server` block
+  naming `TelnetEnabled`, `TelnetRemoteAllowedIPs` or `TelnetPassword` in any
+  capitalisation now fails closed with a `SuiteLoadError`. The orchestrator
+  sets all three after copying the suite's block in, so a declaration was
+  either silently overridden or, with a different capitalisation, a second
+  property line the orchestrator's exact-case filter did not replace, leaving
+  which value the game honours to the server's config reader. A suite-declared
+  password was also echoed verbatim into `report-*.json`. The shipped suites
+  declared only the redundant `TelnetEnabled`, now dropped.
+  `schema/suite.schema.json` states the three names so an external suite
+  author is refused by their editor too.
+- **Run artifacts are published 0600.** `write_text_atomic` created its temp
+  file with the umask's mode and followed anything already sitting at the temp
+  name, so the report, junit XML, run-ended marker and apm dump landed
+  world-readable (they carry the operator's home directory, the world name and
+  the server's internal dump), and a file or symlink planted at the temp name
+  would be written through and then renamed into place as this run's report.
+  The temp file is now opened `O_EXCL` at 0600.
+
 ### Changed
 
 - **Host CLI help and exit codes, aligned across the scripts.**

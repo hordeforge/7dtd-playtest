@@ -28,6 +28,8 @@ Minimal document::
 ``server`` is a flat map of stock serverconfig property names to values, handed
 straight to ``sb render-config``. It is the only place a suite states the world
 it needs, so an A/B of one config knob is two suites differing by one line.
+The telnet properties are not part of it: the orchestrator owns the admin plane
+(see :data:`ORCHESTRATOR_TELNET_KEYS`).
 
 Omitted fields follow ``provision`` / the constants below: a managed run gets
 ``fresh`` true, both mod lists set to :data:`DEFAULT_MODS`, and no host
@@ -68,6 +70,20 @@ ALLOWED_KINDS = ("live", "staged", "defer")
 # `server_mods` explicitly.
 DEFAULT_MODS = ("playtest", "fastconnect")
 DEFAULT_SERVER_MODS = DEFAULT_MODS
+
+# The admin plane belongs to the orchestrator, which sets all three after the
+# suite's own server block is copied in. A suite that declares one of them is
+# either silently overridden (and, for the password, echoed into the run report
+# in plaintext) or, with a different capitalisation, a second property line the
+# orchestrator's exact-case filter does not replace, so the question of which
+# one the game honours is left to the server's config reader. Matched
+# case-insensitively for the same reason.
+ORCHESTRATOR_TELNET_KEYS: tuple[str, ...] = (
+    "TelnetEnabled",
+    "TelnetPassword",
+    "TelnetRemoteAllowedIPs",
+)
+_ORCHESTRATOR_TELNET_KEYS_LOWER = frozenset(k.lower() for k in ORCHESTRATOR_TELNET_KEYS)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITES_DIR = ROOT / "suites"
@@ -229,6 +245,12 @@ def _server_map(obj: dict[str, Any], *, path: str) -> tuple[tuple[str, str], ...
     for key, value in raw.items():
         if not isinstance(key, str) or not key.strip():
             raise SuiteLoadError(f"{path}: server property names must be non-empty strings")
+        if key.strip().lower() in _ORCHESTRATOR_TELNET_KEYS_LOWER:
+            raise SuiteLoadError(
+                f"{path}: server property {key!r} is the orchestrator's, not a suite's "
+                "to declare; it sets TelnetEnabled, TelnetRemoteAllowedIPs and the "
+                "per-run TelnetPassword itself after copying this block"
+            )
         if isinstance(value, bool):
             # Stock ParseBool accepts only true/false, never Python's True/False.
             text = "true" if value else "false"

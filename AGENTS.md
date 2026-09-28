@@ -484,7 +484,10 @@ the run order that both `make test` and `make coverage` expand):
     `server` block or `mods` list it does not own, `readonly` outside attach,
     an external suite shadowing a built-in id, an unknown key anywhere but the
     `server` block (a misspelled `provision` or `readonly` reads as unset, and
-    unset means a managed run that wipes the host). A seeded grammar fuzzer drives
+    unset means a managed run that wipes the host), and a `server` block that
+    declares the admin plane (`TelnetEnabled`, `TelnetRemoteAllowedIPs`,
+    `TelnetPassword`, in any capitalisation: the orchestrator owns those, and a
+    suite-declared password would be echoed into the run report in plaintext). A seeded grammar fuzzer drives
     hostile suite documents (and raw/truncated/non-UTF-8 file bytes): each one
     either fails closed with `SuiteLoadError` or, when accepted, holds every
     cross-field rule and round-trips file -> `SuiteDoc` -> run report -> doc.
