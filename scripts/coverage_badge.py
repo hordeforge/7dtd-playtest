@@ -15,6 +15,15 @@ from pathlib import Path
 
 USAGE = "usage: coverage_badge.py OUTPUT.svg"
 
+# `coverage json` re-reads and re-parses the whole measured tree, so it is
+# bounded like every other external call: an unbounded one hangs `make
+# coverage` forever on a large or network-mounted tree.
+COVERAGE_JSON_TIMEOUT_SEC = 300.0
+
+
+class CoverageDataError(ValueError):
+    """The `.coverage.json` report is not the shape this reader needs."""
+
 
 def percentage() -> int:
     out = Path(".coverage.json")
@@ -26,12 +35,22 @@ def percentage() -> int:
             [sys.executable, "-m", "coverage", "json", "-q", "-o", str(out)],
             check=True,
             stdout=subprocess.DEVNULL,
+            timeout=COVERAGE_JSON_TIMEOUT_SEC,
         )
         data = json.loads(out.read_text(encoding="utf-8"))
     finally:
         out.unlink(missing_ok=True)
-    totals = data["totals"]
-    return round(float(totals["percent_covered"]))
+    try:
+        totals = data["totals"]
+        return round(float(totals["percent_covered"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        # A report written by a different coverage version parses as JSON and
+        # then has no `totals`; name the file and the key rather than leaving
+        # the operator with a bare KeyError.
+        raise CoverageDataError(
+            f"{out.name} has no usable 'totals.percent_covered' ({exc}); it was "
+            "written by a different coverage version or truncated"
+        ) from exc
 
 
 def colour(pct: int) -> str:
@@ -83,8 +102,12 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         pct = percentage()
-    except (OSError, ValueError, KeyError) as exc:
-        print(f"coverage_badge: cannot compute coverage: {exc}", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print(
+            f"coverage_badge: `coverage json` did not finish within "
+            f"{COVERAGE_JSON_TIMEOUT_SEC:g}s",
+            file=sys.stderr,
+        )
         return 1
     except subprocess.CalledProcessError as exc:
         print(
@@ -93,7 +116,14 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    Path(args[0]).write_text(badge(pct, colour(pct)), encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        print(f"coverage_badge: cannot compute coverage: {exc}", file=sys.stderr)
+        return 1
+    try:
+        Path(args[0]).write_text(badge(pct, colour(pct)), encoding="utf-8")
+    except OSError as exc:
+        print(f"coverage_badge: cannot write {args[0]}: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

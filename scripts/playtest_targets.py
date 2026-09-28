@@ -249,8 +249,12 @@ def load_sandbox_env(sandbox_root: Path, name: str) -> dict[str, str]:
             # reading it as if it were absent would hand the run someone
             # else's ports. Name it instead.
             raise TargetError(f"{inst_env} is not valid UTF-8: {ex}") from ex
-        except OSError:
-            return {}
+        except OSError as ex:
+            # The file is there (is_file() passed) but will not read: EACCES,
+            # EIO, or a race with sb rewriting it. An empty contract means no
+            # SERVER_PORT, so the run plans onto a pre-`sb up` placeholder,
+            # which is the same wrong-port outcome the decode case avoids.
+            raise TargetError(f"cannot read {inst_env}: {ex}") from ex
         return parse_sb_env_output(text)
     return {}
 

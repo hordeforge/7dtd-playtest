@@ -600,10 +600,21 @@ def run_review(
     try:
         result = execute(argv, timeout_seconds)
         if result.returncode != 0:
-            message = (result.stderr or result.stdout or "").strip().splitlines()
+            # Both streams and their tail: a gateway whose stderr is a
+            # progress trace and whose reason (a provider 401, a prompt-size
+            # refusal) is on stdout would otherwise report the trace's last
+            # line as the cause.
+            message = " | ".join(
+                part
+                for part in (
+                    terminal_safe(result.stderr or "").strip(),
+                    terminal_safe(result.stdout or "").strip(),
+                )
+                if part
+            )
             raise ReviewError(
-                f"the {GATEWAY} gateway refused the review"
-                + (f": {message[-1]}" if message else "")
+                f"the {GATEWAY} gateway refused the review (exit {result.returncode})"
+                + (f": {message}" if message else "")
             )
         try:
             envelope = json.loads(result.stdout)

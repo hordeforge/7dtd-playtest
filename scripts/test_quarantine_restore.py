@@ -159,6 +159,91 @@ def test_prune_names_the_last_copy_it_deletes() -> None:
         print("PASS prune names the last copy it deletes")
 
 
+def test_prune_keeps_an_entry_whose_manifest_cannot_be_read() -> None:
+    """An unreadable manifest is a fault, not an empty record.
+
+    Both read as "no pairs", but only one of them licenses deleting the entry
+    that holds the only copy of a swept-aside world. The prune must keep it
+    and say why.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        qroot = Path(td) / "q"
+        old = qroot / "20200101T000000Z-zdtd-world--gone"
+        old.mkdir(parents=True)
+        (old / "state").mkdir()
+        (old / "state" / "players.zsv").write_text("players", encoding="utf-8")
+        qr.record(old, Path("/worlds/gone/players.zsv"), old / "state" / "players.zsv")
+        for i in range(1, 3):
+            (qroot / f"20200101T00000{i}Z-client-log").mkdir()
+
+        real_read_text = Path.read_text
+        manifest = qr.manifest_path(old)
+
+        def refuse(self: Path, *a: object, **kw: object) -> str:
+            if self == manifest:
+                raise PermissionError(13, "Permission denied")
+            return real_read_text(self, *a, **kw)  # type: ignore[arg-type]
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(Path, "read_text", refuse),
+            contextlib.redirect_stderr(stderr),
+        ):
+            playtest_run.prune_quarantine(qroot, keep=2)
+        assert old.exists(), (
+            "an entry whose manifest will not read must survive the prune; it "
+            "may be the only copy of the world it holds"
+        )
+        assert str(manifest) in stderr.getvalue(), (
+            f"the prune must name the manifest it could not read, got: {stderr.getvalue()!r}"
+        )
+        print("PASS prune keeps an entry whose manifest cannot be read")
+
+
+def test_manifest_read_failure_is_not_an_empty_manifest() -> None:
+    """`show` on an unreadable manifest fails closed instead of reporting none."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        entry = Path(td) / "q" / "20260101T000000Z-x"
+        entry.mkdir(parents=True)
+        manifest = qr.manifest_path(entry)
+        manifest.write_text('{"src": "/a", "dest": "/b"}\n', encoding="utf-8")
+
+        with mock.patch.object(
+            Path, "read_text", side_effect=PermissionError(13, "Permission denied")
+        ):
+            try:
+                qr.read_manifest(entry)
+            except qr.ManifestUnreadableError as ex:
+                assert str(manifest) in str(ex), f"the error must name the file: {ex}"
+            else:
+                raise AssertionError("an unreadable manifest must raise, not return []")
+        print("PASS manifest read failure is not an empty manifest")
+
+
+def test_a_failed_restore_leaves_no_temp_copy_in_the_world_directory() -> None:
+    """copy2 is interrupted: its partial temp file must not outlive the run."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "q"
+        entry = qroot / "20260101T000000Z-x"
+        entry.mkdir(parents=True)
+        (entry / "players.zsv").write_text("players", encoding="utf-8")
+        src = root / "worlds" / "playtest_auto" / "players.zsv"
+        src.parent.mkdir(parents=True)
+        qr.record(entry, src, entry / "players.zsv")
+
+        def interrupt(*a: object, **kw: object) -> None:
+            raise OSError(28, "No space left on device")
+
+        stderr = io.StringIO()
+        with mock.patch("shutil.copy2", interrupt), contextlib.redirect_stderr(stderr):
+            rc = qr.restore(entry, apply=True, force=False, move=False)
+        assert rc == 1, f"a blocked restore must exit nonzero, got {rc}"
+        leftovers = [p.name for p in src.parent.iterdir() if p.name.startswith(".")]
+        assert not leftovers, f"the temp copy must not survive the failure: {leftovers}"
+        print("PASS a failed restore leaves no temp copy in the world directory")
+
+
 def test_entry_lookup_accepts_a_timestamp_prefix() -> None:
     with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
         qroot = Path(td) / "q"
@@ -205,6 +290,18 @@ def main() -> int:
         (
             "prune_names_the_last_copy_it_deletes",
             test_prune_names_the_last_copy_it_deletes,
+        ),
+        (
+            "prune_keeps_an_entry_whose_manifest_cannot_be_read",
+            test_prune_keeps_an_entry_whose_manifest_cannot_be_read,
+        ),
+        (
+            "manifest_read_failure_is_not_an_empty_manifest",
+            test_manifest_read_failure_is_not_an_empty_manifest,
+        ),
+        (
+            "a_failed_restore_leaves_no_temp_copy_in_the_world_directory",
+            test_a_failed_restore_leaves_no_temp_copy_in_the_world_directory,
         ),
         (
             "entry_lookup_accepts_a_timestamp_prefix",

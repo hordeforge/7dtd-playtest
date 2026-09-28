@@ -402,11 +402,15 @@ def load_suite_file(path: Path) -> SuiteDoc:
 def discover_suites(suites_dir: Path | None = None) -> dict[str, SuiteDoc]:
     """Load all ``*.json`` suite docs under suites_dir (id -> doc).
 
-    Duplicate ids fail closed. Missing directory yields {}.
+    Duplicate ids fail closed, and so does a missing directory: an empty
+    result is what the callers read as "this repo declares no suites", which
+    lets a renamed or un-checked-out `suites/` fall through to the C#-catalog
+    default of a managed run, and lets an external suite file claim a
+    built-in stock-fidelity id. Name the path instead.
     """
     root = suites_dir or DEFAULT_SUITES_DIR
     if not root.is_dir():
-        return {}
+        raise SuiteLoadError(f"no suite directory at {root}")
     found: dict[str, SuiteDoc] = {}
     for path in sorted(root.glob("*.json")):
         doc = load_suite_file(path)

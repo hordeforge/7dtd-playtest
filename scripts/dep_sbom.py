@@ -314,7 +314,10 @@ def main(argv: list[str]) -> int:
     for path in (UV_LOCK, NUGET_LOCK, MOD_INFO):
         if not path.is_file():
             # 1, not 2: nothing about the invocation was wrong, the tree is.
-            print(f"dep_sbom: missing {path}", file=sys.stderr)
+            # is_file() is False for any stat failure, not only ENOENT, so
+            # say "missing" as a fact about the checkout and let the read
+            # below name the real cause when there is one.
+            print(f"dep_sbom: missing or unreadable {path}", file=sys.stderr)
             return 1
 
     # Every failure below is a 1 with a message on stderr, as the epilog
@@ -322,6 +325,9 @@ def main(argv: list[str]) -> int:
     # describe the tree (a truncated TOML document, a package with no
     # recorded license, a ModInfo.xml with no <Version>), and without this
     # the traceback was the whole interface for the case the help text names.
+    # A read failure is named the same way: an unreadable lockfile is a fact
+    # about the tree, and a traceback past that contract makes a release job
+    # report a crash instead of a missing inventory input.
     try:
         document = build_sbom(
             as_object(tomllib.loads(UV_LOCK.read_text(encoding="utf-8")), "uv.lock"),

@@ -144,8 +144,10 @@ def load_results(path: Path) -> dict:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as ex:
-        print(f"ERROR: cannot read {path}: {ex}", file=sys.stderr)
-        text = ""
+        # Not an empty input. Substituting "" makes every case on this side
+        # MISSING, and the diff of a read failure is written to the baseline
+        # as a set of bugs on the side that failed to be read.
+        raise CompareError(f"cannot read {path}: {ex}") from ex
     payload = None
     if text:
         try:

@@ -73,6 +73,23 @@ def test_load_suite_by_id_missing_is_none() -> None:
     assert sl.load_suite_by_id("smoke", SUITES) is not None
 
 
+def test_a_missing_suite_directory_is_named_not_read_as_no_suites() -> None:
+    """An absent `suites/` is a fault, not an empty declaration.
+
+    Callers read {} as "this repo declares no suites", which falls through to
+    the C#-catalog default of a managed run (the run that wipes the host) and
+    lets an external suite file claim a built-in id.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-suites-") as td:
+        absent = Path(td) / "suites"
+        try:
+            sl.load_suite_by_id("smoke", absent)
+        except sl.SuiteLoadError as ex:
+            assert str(absent) in str(ex), ex
+        else:
+            raise AssertionError("a missing suite directory must be named, not read as empty")
+
+
 def test_defaults_are_managed_stock_fresh() -> None:
     doc = sl.parse_suite_dict(dict(MANAGED))
     assert doc.provision == "managed"
@@ -551,6 +568,10 @@ def test_fuzz_suite_documents_fail_closed_or_hold_invariants() -> None:
 TESTS = (
     ("discover_builtin_suites", test_discover_builtin_suites),
     ("load_suite_by_id_missing_is_none", test_load_suite_by_id_missing_is_none),
+    (
+        "a_missing_suite_directory_is_named",
+        test_a_missing_suite_directory_is_named_not_read_as_no_suites,
+    ),
     ("defaults_are_managed_stock_fresh", test_defaults_are_managed_stock_fresh),
     ("attach_is_never_fresh_and_writes_nothing", test_attach_is_never_fresh_and_writes_nothing),
     ("managed_must_be_fresh", test_managed_must_be_fresh),

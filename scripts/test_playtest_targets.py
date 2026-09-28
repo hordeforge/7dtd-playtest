@@ -17,6 +17,7 @@ import stat
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
@@ -322,6 +323,31 @@ def test_non_utf8_instance_env_is_named_not_ignored() -> None:
             raise AssertionError("expected TargetError for a non-UTF-8 instance.env")
 
 
+def test_unreadable_instance_env_is_named_not_ignored() -> None:
+    """The file is there but will not read: same wrong-port outcome, so it
+    must be named rather than read as an absent contract."""
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
+        root = Path(td)
+        inst = root / "instances" / "srv-x"
+        inst.mkdir(parents=True)
+        inst_env = inst / "instance.env"
+        inst_env.write_text("SERVER_PORT=27105\n", encoding="utf-8")
+        real_read_text = Path.read_text
+
+        def refuse(self: Path, *a: object, **kw: object) -> str:
+            if self == inst_env:
+                raise PermissionError(13, "Permission denied")
+            return real_read_text(self, *a, **kw)  # type: ignore[arg-type]
+
+        with mock.patch.object(Path, "read_text", refuse):
+            try:
+                pt.load_sandbox_env(root, "srv-x")
+            except pt.TargetError as ex:
+                assert str(inst_env) in str(ex), ex
+            else:
+                raise AssertionError("expected TargetError for an unreadable instance.env")
+
+
 def test_malformed_port_in_instance_env_is_named_not_ignored() -> None:
     """A port that does not parse must not read as "not allocated": the run
     would keep the pre-`sb up` placeholder and report an unusable number."""
@@ -384,6 +410,10 @@ def main() -> int:
         (
             "non_utf8_instance_env_is_named_not_ignored",
             test_non_utf8_instance_env_is_named_not_ignored,
+        ),
+        (
+            "unreadable_instance_env_is_named_not_ignored",
+            test_unreadable_instance_env_is_named_not_ignored,
         ),
         (
             "resolving_a_target_never_creates_an_instance",

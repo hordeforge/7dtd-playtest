@@ -58,6 +58,16 @@ _SRC = "src"
 _DEST = "dest"
 
 
+class ManifestUnreadableError(OSError):
+    """An entry's manifest exists but cannot be read.
+
+    Distinct from "the entry has no manifest": the first is a fault on this
+    host, the second is a fact about the entry. A caller that treats the two
+    alike (a prune that deletes on an empty read) destroys the only copy of
+    whatever the entry held while reporting nothing.
+    """
+
+
 def manifest_path(entry: Path) -> Path:
     return entry / MANIFEST_NAME
 
@@ -83,6 +93,11 @@ def _read_manifest(entry: Path) -> tuple[list[tuple[Path, Path]], int]:
     A line that is not a JSON object with two string paths is skipped rather
     than guessed at: restoring to a path this file did not record is a
     write the operator did not ask for. The caller reports the skip count.
+
+    A manifest that exists but will not read raises
+    :class:`ManifestUnreadableError` rather than returning no pairs: the
+    difference between "nothing was recorded" and "the record is
+    unreachable" decides whether the caller may delete the entry.
     """
     path = manifest_path(entry)
     pairs: list[tuple[Path, Path]] = []
@@ -91,8 +106,9 @@ def _read_manifest(entry: Path) -> tuple[list[tuple[Path, Path]], int]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as ex:
-        print(f"WARNING: cannot read {path}: {ex}", file=sys.stderr)
-        return pairs, 0
+        raise ManifestUnreadableError(
+            f"cannot read quarantine manifest {path}: {ex}"
+        ) from ex
     dropped = 0
     for line in text.splitlines():
         line = line.strip()
@@ -136,7 +152,10 @@ def resolve_entry(qroot: Path, name: str) -> Path | None:
         return direct
     try:
         matches = sorted(p for p in qroot.glob(f"{name}*") if p.is_dir())
-    except OSError:
+    except OSError as ex:
+        # Name the cause: without it the caller reports "no entry matches"
+        # and the operator goes looking for a typo in the entry name.
+        print(f"ERROR: cannot list {qroot}: {ex}", file=sys.stderr)
         return None
     return matches[-1] if matches else None
 
@@ -156,7 +175,9 @@ def _describe(pairs: list[tuple[Path, Path]], entry: Path, dropped: int) -> list
         state = "present" if dest.is_file() else "MISSING"
         lines.append(f"  {src}  <-  {dest}  [{state}]")
     if not pairs:
-        lines.append(f"  (no {MANIFEST_NAME}: nothing to restore from this entry)")
+        lines.append(
+            f"  (no {MANIFEST_NAME} under {entry}: this entry recorded no moves)"
+        )
     if dropped:
         lines.append(f"  ({dropped} unreadable manifest line(s) skipped)")
     return lines
@@ -188,13 +209,21 @@ def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
             )
             blocked += 1
             continue
+        tmp = src.with_name(f".{src.name}.restore.{os.getpid()}")
         try:
             src.parent.mkdir(parents=True, exist_ok=True)
-            tmp = src.with_name(f".{src.name}.restore.{os.getpid()}")
             shutil.copy2(dest, tmp)
             os.replace(tmp, src)
         except OSError as ex:
-            print(f"ERROR: could not restore {src}: {ex}", file=sys.stderr)
+            # A half-written copy2 or a refused replace leaves the temp file
+            # sitting in the world directory, where the next sweep can mistake
+            # it for world state. Remove it, and say so when that also fails.
+            leftover = ""
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            if tmp.exists():
+                leftover = f"; remove the leftover copy at {tmp} by hand"
+            print(f"ERROR: could not restore {src}: {ex}{leftover}", file=sys.stderr)
             blocked += 1
             continue
         restored += 1
@@ -251,10 +280,18 @@ def main(argv: list[str] | None = None) -> int:
         if not found:
             print(f"no quarantine entries under {qroot}")
             return 0
+        unreadable = 0
         for qentry in found:
-            pairs = read_manifest(qentry)
+            try:
+                pairs = read_manifest(qentry)
+            except ManifestUnreadableError as ex:
+                print(f"  {qentry.name}  files=?  {ex}", file=sys.stderr)
+                unreadable += 1
+                continue
             print(f"{qentry.name}  files={len(pairs)}  manifest={manifest_path(qentry).name}")
-        return 0
+        # An entry whose manifest cannot be read is not an empty entry; exit 0
+        # here would read as "this entry recorded nothing to restore".
+        return 2 if unreadable else 0
 
     if not args.entry:
         print("ERROR: this action needs an entry name or timestamp prefix",
@@ -266,11 +303,16 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
-    if args.action == "show":
-        pairs, dropped = _read_manifest(entry)
-        print("\n".join(_describe(pairs, entry, dropped)))
-        return 0 if pairs else 1
-    return restore(entry, args.apply, args.force, args.move)
+    try:
+        if args.action == "show":
+            pairs, dropped = _read_manifest(entry)
+        else:
+            return restore(entry, args.apply, args.force, args.move)
+    except ManifestUnreadableError as ex:
+        print(f"ERROR: {ex}", file=sys.stderr)
+        return 2
+    print("\n".join(_describe(pairs, entry, dropped)))
+    return 0 if pairs else 1
 
 
 if __name__ == "__main__":

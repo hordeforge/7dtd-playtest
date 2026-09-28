@@ -165,6 +165,32 @@ def test_directory_input_refuses_diff(tmp_path: Path) -> None:
     assert not (tmp_path / "out" / "playtest-compare.json").exists()
 
 
+def test_unreadable_input_refuses_diff_instead_of_scoring_every_case_missing(
+    tmp_path: Path,
+) -> None:
+    """A file that exists but will not read is not an empty run.
+
+    Diffing it as empty makes every case on that side MISSING, and the result
+    is written to the committed baseline as a set of bugs on the side that
+    failed to be read.
+    """
+    stock = tmp_path / "stock.log"
+    stock.write_text(STOCK_LOG, encoding="utf-8")
+    real_read_text = Path.read_text
+
+    def refuse(self: Path, *a: object, **kw: object) -> str:
+        if self == stock:
+            raise PermissionError(13, "Permission denied")
+        return real_read_text(self, *a, **kw)  # type: ignore[arg-type]
+
+    with (
+        mock.patch.object(Path, "read_text", refuse),
+        pytest.raises(playtest_compare.CompareError) as excinfo,
+    ):
+        playtest_compare.load_results(stock)
+    assert "stock.log" in str(excinfo.value)
+
+
 def test_exit_codes_documented_in_help() -> None:
     """The 0/1/2/3 contract is part of the CLI surface; --help must show it."""
     r = _run_cli("--help")

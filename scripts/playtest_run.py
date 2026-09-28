@@ -752,6 +752,7 @@ class DetachedPopen(subprocess.Popen[bytes]):
     """
 
     log_fh: IO[str] | None = None
+    log_path: Path | None = None
 
 
 def wait_zdtd_ready(proc: subprocess.Popen, server_log_path: Path) -> bool:
@@ -794,6 +795,7 @@ def _popen_to_logfile(
         fh.close()
         raise
     proc.log_fh = fh
+    proc.log_path = log_path
     return proc
 
 
@@ -1081,6 +1083,10 @@ def read_loadgen_events(path: Path) -> list[dict]:
     after the suite ends so every observer check sees one consistent view.
     Polling loops must use :class:`LoadgenEventReader` instead, which feeds
     only newly appended lines through the same filter.
+
+    An unreadable file raises: an empty read is indistinguishable from a
+    loadgen that emitted nothing, and charging a host-side I/O failure to the
+    bots is a verdict about the wrong system.
     """
     try:
         lines = split_log_lines(path.read_text(encoding="utf-8", errors="replace"))
@@ -1112,11 +1118,17 @@ def read_loadgen_latest_state(
     """Whole-file read of the final observer snapshot (see read_loadgen_events).
 
     ``None`` is a stream this run could not empty, so it has no snapshot of
-    its own to report.
+    its own to report. A file that exists but will not read is named in the
+    run log, so the observer verdict below is not read as a bot fault.
     """
     if path is None:
         return None, {}
-    return loadgen_latest_state(read_loadgen_events(path))
+    try:
+        events = read_loadgen_events(path)
+    except OSError as ex:
+        warn(f"loadgen: cannot read the events file {path}: {ex}")
+        return None, {}
+    return loadgen_latest_state(events)
 
 
 class LoadgenEventReader:
@@ -2058,7 +2070,14 @@ def prune_quarantine(
         if os.fspath(old) in protected:
             continue
         if old.is_dir():
-            recorded = quarantine_restore.read_manifest(old)
+            try:
+                recorded = quarantine_restore.read_manifest(old)
+            except quarantine_restore.ManifestUnreadableError as ex:
+                # Deleting an entry whose manifest cannot be read destroys the
+                # only record of where its files came from, so an unreadable
+                # manifest costs disk and is reported instead.
+                warn(f"quarantine: keeping {old.name}, {ex}")
+                continue
             if recorded:
                 names = ", ".join(str(src) for src, _ in recorded[:3])
                 more = f" (+{len(recorded) - 3} more)" if len(recorded) > 3 else ""
@@ -3073,7 +3092,10 @@ def main(argv: list[str] | None = None) -> int:
         # Missing id is fine: most suites still live in the C# catalog only.
         first_suite = args.suite.split(",")[0].strip()
         if first_suite:
-            suite_doc = suite_loader.load_suite_by_id(first_suite)
+            try:
+                suite_doc = suite_loader.load_suite_by_id(first_suite)
+            except suite_loader.SuiteLoadError as ex:
+                ap.error(f"--suite {first_suite!r} cannot be resolved: {ex}")
 
     # Resolve provision/backend. An explicit flag beats the suite's declaration;
     # the suite is what makes an undecorated `--suite core` reproducible.
@@ -4695,10 +4717,21 @@ def main(argv: list[str] | None = None) -> int:
                         )
                 if args.loadgen_teleport is not None and loadgen_teleported_entity is None:
                     observer_failures.append("joined loadgen entity was never teleported")
-                if loadgen_proc is None or loadgen_proc.poll() is not None:
+                if loadgen_proc is None:
                     observer_failures.append(
-                        "loadgen observer process exited before suite completion"
+                        "loadgen observer process was never started"
                     )
+                else:
+                    # Name the status and the log: a crash, a bad argument and a
+                    # clean early exit are the same string without them.
+                    loadgen_code = loadgen_proc.poll()
+                    if loadgen_code is not None:
+                        loadgen_log = getattr(loadgen_proc, "log_path", None)
+                        where = f"; see {loadgen_log}" if loadgen_log else ""
+                        observer_failures.append(
+                            f"loadgen observer process exited before suite "
+                            f"completion (exit {loadgen_code}){where}"
+                        )
                 if observer_failures:
                     for failure in observer_failures:
                         err(f"loadgen observer: {failure}")
