@@ -143,10 +143,6 @@ class SuiteDoc:
         return tuple(c.ref for c in self.cases)
 
     @property
-    def case_ids(self) -> tuple[str, ...]:
-        return tuple(c.id for c in self.cases)
-
-    @property
     def server_config(self) -> dict[str, str]:
         return dict(self.server)
 

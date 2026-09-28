@@ -390,9 +390,9 @@ def wait_file_contains(path: Path, needle: str, timeout: float) -> bool:
     return False
 
 
-# Cold-load wait budgets for the two server backends, shared by the initial
-# start and the rejoin restart so one path cannot drift from the other again.
-STOCK_READY_TIMEOUT_SEC = 600.0
+# Cold-load wait budget for the zdtd backend, shared by the initial start and
+# the rejoin restart so one path cannot drift from the other again. A stock
+# run has no budget here: `sb up` returns once the game port is listening.
 ZDTD_READY_TIMEOUT_SEC = 60.0
 
 

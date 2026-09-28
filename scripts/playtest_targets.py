@@ -61,8 +61,6 @@ class TargetPlan:
     userdata: Path | None = None
     port: int | None = None
     telnet_port: int | None = None
-    server_config: Path | None = None
-    server_log: Path | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -174,8 +172,6 @@ def resolve_target(
         userdata=_optional_path(env_map.get("SERVER_USERDATA")),
         port=_optional_int(env_map.get("SERVER_PORT")),
         telnet_port=_optional_int(env_map.get("SERVER_TELNET_PORT")),
-        server_config=_optional_path(env_map.get("SERVER_CONFIG")),
-        server_log=_optional_path(env_map.get("SERVER_LOG")),
         notes=("Safehouse owns isolation, ports, fresh save and teardown",),
     )
 

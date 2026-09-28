@@ -58,7 +58,6 @@ fi
 echo "playtest_repeat: suite=$SUITE laps=$LAPS report_dir=$REPORT_DIR"
 declare -i laps_passed=0 laps_total=0
 declare -i sum_pass=0 sum_fail=0 sum_skip=0
-declare -a reports=()
 
 # Newest report for a lap (report-<epoch>.json). Pure bash: no ls -t parsing,
 # paths with spaces survive.
@@ -90,7 +89,6 @@ for lap in $(seq 1 "$LAPS"); do
     echo "playtest_repeat: lap $lap produced no report under $REPORT_DIR" >&2
     continue
   fi
-  reports+=("$latest")
   laps_total+=1
   if counts="$(summary_counts "$latest")"; then
     read -r p f sk <<<"$counts"
