@@ -2144,11 +2144,12 @@ def main(argv: list[str] | None = None) -> int:
         "--server",
         choices=playtest_targets.BACKENDS,
         # None means "the operator said nothing": the suite document may then
-        # speak for the backend. Whether a flag was passed is the parser's
-        # job, not a search through sys.argv (which misses --server=zdtd).
-        default=os.environ.get("PLAYTEST_SERVER") or None,
+        # speak for the backend, and PLAYTEST_BACKEND is read by resolve_backend.
+        # Whether a flag was passed is the parser's job, not a search through
+        # sys.argv (which misses --server=zdtd).
+        default=None,
         help=(
-            "which server is under test (env PLAYTEST_SERVER; a suite "
+            "which server is under test (env PLAYTEST_BACKEND; a suite "
             "document supplies it when neither is given; default stock)"
         ),
     )

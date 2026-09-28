@@ -37,6 +37,7 @@ if str(_SCRIPTS) not in sys.path:
 import playtest_lock as pl  # noqa: E402
 import playtest_log  # noqa: E402
 import playtest_run  # noqa: E402
+import playtest_targets  # noqa: E402
 
 ROOT = _SCRIPTS.parent
 SUITES_DIR = ROOT / "suites"
@@ -1921,6 +1922,42 @@ def test_explicit_server_flag_beats_the_suite_document() -> None:
     print("PASS explicit_server_flag_beats_the_suite")
 
 
+def test_server_backend_env_matches_documented_name() -> None:
+    """--server reads the documented PLAYTEST_BACKEND, not an invented name.
+
+    README/AGENTS.md document `PLAYTEST_BACKEND` as the env form of
+    `--server`, and both resolve_backend and playtest_targets.resolve_target
+    read it. A default read from a different variable makes the documented
+    export a no-op, and a `PLAYTEST_BACKEND=zdtd` run silently drives the
+    stock dedicated.
+    """
+    src = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert "PLAYTEST_SERVER" not in src, (
+        "an undocumented env name still selects --server; the documented one is "
+        "PLAYTEST_BACKEND and the two spellings cannot both be honoured"
+    )
+    assert 'os.environ.get("PLAYTEST_BACKEND")' in src, (
+        "--server must resolve from PLAYTEST_BACKEND so the documented export "
+        "reaches resolve_target as an explicit backend"
+    )
+    saved = os.environ.get("PLAYTEST_BACKEND")
+    try:
+        os.environ["PLAYTEST_BACKEND"] = "zdtd"
+        plan = playtest_targets.resolve_target(workspace=Path(__file__).resolve().parent)
+        assert plan.backend == "zdtd" and plan.start_server, (
+            "PLAYTEST_BACKEND=zdtd must resolve to the zdtd managed backend"
+        )
+        assert playtest_run.resolve_backend(None, None, "zdtd") == "zdtd", (
+            "main() must hand PLAYTEST_BACKEND to resolve_target as the backend"
+        )
+    finally:
+        if saved is None:
+            os.environ.pop("PLAYTEST_BACKEND", None)
+        else:
+            os.environ["PLAYTEST_BACKEND"] = saved
+    print("PASS server_backend_env PLAYTEST_BACKEND is the --server env form")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -2051,6 +2088,10 @@ def main() -> int:
         (
             "explicit_server_flag_beats_the_suite",
             test_explicit_server_flag_beats_the_suite_document,
+        ),
+        (
+            "server_backend_env",
+            test_server_backend_env_matches_documented_name,
         ),
     ):
         try:
