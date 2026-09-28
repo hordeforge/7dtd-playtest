@@ -29,9 +29,15 @@ make install-pair
 ```
 
 To build the release archive instead of installing it, `make package` writes
-`dist/7dtd-playtest/7dtd-playtest-<version>.zip` (the version `ModInfo.xml`
-ships). Its entries are rooted at `7dtd-playtest/`, so the archive extracts into
-a game install's `Mods/` without moving files.
+`dist/7dtd-playtest-<version>.zip` (the version `ModInfo.xml` ships). Its
+entries are rooted at `7dtd-playtest/`, so the archive extracts into a game
+install's `Mods/` without moving files. The archive is a function of the source
+tree: the compile is deterministic and path-mapped, `make build` pins the
+clock, locale and timezone, and `scripts/mod_package.py` pins the entry set,
+order, timestamps, modes and host byte. `make verify-reproducible` proves it on
+a machine with a game install, by building the archive twice from a clean tree
+and comparing the bytes. Set `SOURCE_DATE_EPOCH` to stamp both steps from one
+instant (unset, both fall back to the 1980 zip epoch).
 
 Everything below is reference detail, including the offline development loop
 and live suite commands.
@@ -1207,8 +1213,8 @@ and pushes it to the `badges` branch. A `vX.Y.Z` tag runs
 committed lockfiles and records its serial number and component count in the
 run summary. The mod archive is still built by a maintainer with a game
 install, with `make package`, and attached to the release: it builds the mod
-and writes `dist/7dtd-playtest/7dtd-playtest-<version>.zip`, whose entries are
-rooted at `7dtd-playtest/` so it extracts into a game install's `Mods/` without
+and writes `dist/7dtd-playtest-<version>.zip`, whose entries are rooted at
+`7dtd-playtest/`, so it extracts into a game install's `Mods/` without
 moving files.
 
 ### Host orchestrator secrets

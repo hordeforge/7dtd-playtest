@@ -32,6 +32,15 @@ ADMIN_PORT ?= 8081
 # the previous run's terrain rather than on anything the server did.
 LAPS ?= 1
 
+# One clock for the whole build, so the assembly and the archive that wraps it
+# are stamped from the same instant. Unset falls back to the zip epoch
+# (1980-01-01, mod_package.DEFAULT_EPOCH) rather than the host clock, so two
+# builds of one commit agree without the maintainer setting anything; export
+# sends it to `make build`'s dotnet invocation and to mod_package.py, which
+# reads the same variable from the environment.
+SOURCE_DATE_EPOCH ?= 315532800
+export SOURCE_DATE_EPOCH
+
 # Bare `make` prints the target list instead of starting a dotnet build that
 # fails cryptically on machines without the game SDK layout.
 .DEFAULT_GOAL := help
@@ -45,12 +54,12 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help doctor build install package uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke \
+.PHONY: help doctor build install package uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke verify-reproducible \
 	playtest-core \
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
 	playtest-residual install-pair playtest-compare playtest-repeat \
-	playtest-review-video package
+	playtest-review-video
 
 help:
 	@echo "Offline dev loop (no game install needed):"
@@ -69,6 +78,7 @@ help:
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
 	@echo "  make build | install | install-pair | package | uninstall | clean"
 	@echo "  make package                    the release zip: dist/7dtd-playtest-<version>.zip [PACKAGE=path]"
+	@echo "  make verify-reproducible        build the archive twice from a clean tree and compare the bytes"
 	@echo
 	@echo "Live suites (needs game client; see README):"
 	@echo "  make playtest SUITE=demo [SERVER=stock|zdtd] [PROVISION=attach READONLY=1]"
@@ -129,6 +139,7 @@ build:
 			echo "the game install must be complete (0_TFP_Harmony too) before make build"; \
 			exit 2; }; \
 	done
+	LC_ALL=C TZ=UTC SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)" \
 	DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
 	dotnet build "$(ROOT)/Source/PlayTestMod/PlayTestMod.csproj" -c Release -v q \
 		-p:GameRoot="$(GAME)" -p:RestoreLockedMode=true
@@ -162,6 +173,33 @@ PACKAGE ?=
 package: build
 	$(UV) "$(ROOT)/scripts/mod_package.py" --dist "$(DIST)" \
 		$(if $(PACKAGE),--out "$(PACKAGE)",)
+
+# Rebuild-and-compare. The archive is reproducible by construction
+# (scripts/mod_package.py pins the entry set, order, timestamps, modes and host
+# byte) and the assembly is deterministic (csproj: Deterministic + PathMap + no
+# SDK git query, over a clock and locale `make build` pins), but nothing ran
+# the two halves end to end twice on one machine, so a stale dist/ or a build
+# that reads the host would still produce an archive. `clean` runs between the
+# two builds, so the second one is a full rebuild rather than an up-to-date
+# no-op. Not in CI: it needs a game install. The scratch lives under .local/
+# (gitignored) because `make clean` removes dist/ wholesale.
+VERIFY_DIR := $(ROOT)/.local/verify
+verify-reproducible:
+	@command -v cmp >/dev/null 2>&1 || { \
+		echo "'cmp' is not on PATH; it is what compares the two archives."; \
+		exit 2; }
+	@mkdir -p "$(VERIFY_DIR)"
+	$(MAKE) clean
+	$(MAKE) package PACKAGE="$(VERIFY_DIR)/first.zip"
+	$(MAKE) clean
+	$(MAKE) package PACKAGE="$(VERIFY_DIR)/second.zip"
+	@if cmp -s "$(VERIFY_DIR)/first.zip" "$(VERIFY_DIR)/second.zip"; then \
+		echo "OK: two clean builds produced identical archives"; \
+	else \
+		echo "FAIL: the archive is not a function of the source tree."; \
+		echo "  compare them with: diffoscope $(VERIFY_DIR)/first.zip $(VERIFY_DIR)/second.zip"; \
+		exit 1; \
+	fi
 
 clean:
 	rm -rf "$(ROOT)/dist" "$(ROOT)/Source/PlayTestMod/bin" "$(ROOT)/Source/PlayTestMod/obj"
@@ -245,7 +283,8 @@ GATES := \
 	test_windows_path_surface.py \
 	test_gate_list.py \
 	test_dep_sbom.py \
-	test_coverage_badge.py
+	test_coverage_badge.py \
+	test_build_surface.py
 
 test: lint typecheck
 	@for gate in $(GATES); do \

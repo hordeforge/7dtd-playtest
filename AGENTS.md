@@ -251,6 +251,7 @@ make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
 make sbom                       # CycloneDX inventory of both committed lockfiles
 make package                    # release zip: dist/7dtd-playtest-<version>.zip (needs GAME=)
+make verify-reproducible        # build + package twice from a clean tree, compare the zips (needs GAME=)
 make playtest-review-video SUITE=<id> INTENT=<path>  # capture staged clips, then vision-review them through deadeye
 make playtest SUITE=core SERVER=stock       # managed Safehouse instance
 make playtest SUITE=smoke PROVISION=attach READONLY=1  # live host, attach-only
@@ -572,6 +573,18 @@ the run order that both `make test` and `make coverage` expand):
     usage line promises, and the `.coverage.json` scratch, which must be gone
     after a read that failed as well as after one that succeeded. Only the one
     thing a test cannot have, a measured `.coverage` file, is substituted.
+23. mod build surface (`scripts/test_build_surface.py`): the mod cannot
+    compile on a hosted runner, so the build config has no CI job and every
+    property that makes its output trustworthy is one nobody notices losing.
+    The gate reads the committed config: `RestorePackagesWithLockFile` plus
+    `-p:RestoreLockedMode=true` on the recipe, every `PackageReference` an
+    exact range the committed `packages.lock.json` already resolved with a
+    content hash, `Deterministic` / `PathMap` /
+    `EnableSourceControlManagerQueries=false` / a numeric `LangVersion`,
+    Release output under `dist/`, the `AssemblyName` the file both shipping
+    paths copy, `make install` and `scripts/mod_package.py` shipping one list,
+    the `SOURCE_DATE_EPOCH` / `LC_ALL=C` / `TZ=UTC` the build recipe pins, and
+    an exact `global.json` SDK whose `rollForward` stays inside the band.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

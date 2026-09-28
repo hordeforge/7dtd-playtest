@@ -121,6 +121,17 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- **`scripts/test_build_surface.py` gates the mod build's own contract.** The
+  mod cannot compile on a hosted runner (it references the game's assemblies),
+  so the build has no CI job and the properties that make its output
+  trustworthy are the ones nobody would notice losing: the lockfile is
+  written and restore runs locked, every `PackageReference` is an exact range
+  the committed `packages.lock.json` already resolved with a content hash,
+  `Deterministic` / `PathMap` / no SDK git query / a numeric `LangVersion`
+  stay set, Release output lands in `dist/`, the `AssemblyName` is the file
+  both shipping paths copy, `make install` and `scripts/mod_package.py` ship
+  one list, and `global.json` pins an exact SDK whose `rollForward` stays
+  inside the pinned band.
 - **`make package`: the release archive, built the same way twice.**
   The release workflow documented a `make package` target that did not exist,
   so the maintainer path to a shipped zip stopped at "attach something". The
@@ -279,6 +290,15 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- **`make package` writes the archive beside the build output, not inside
+  it.** With no `PACKAGE=`, `scripts/mod_package.py` named the archive in the
+  dist directory it was cutting from
+  (`dist/7dtd-playtest/7dtd-playtest-<version>.zip`), which is a build output
+  `make clean` deletes with the folder. It now names it in the parent
+  (`dist/7dtd-playtest-<version>.zip`), the path the README, the Makefile help
+  and AGENTS.md already documented. `--out` is unchanged, and the entry set is
+  named rather than globbed, so the archive could never have swallowed the
+  previous one.
 - **The WalkEntity renderer/grounding probe moved out of the provider
   contract.** `ReportWalkEntityRenderProbe`, `GroundYFor` and
   `TryGroundSurface` were private members of `CaseDef` (CaseDef.cs), the type
@@ -431,6 +451,13 @@ Migration, by symbol:
   stderr, while the result path flattened the same class of text through
   `terminal_safe`. Both now go through it, so an escape sequence or a forged
   `PASS` line in a refusal is flattened like any other model output.
+- **The compile step read the host clock, locale and timezone.** The archive
+  was already reproducible (`scripts/mod_package.py` pins entry order,
+  timestamps, modes and the host byte) and the assembly already deterministic,
+  but `make build` invoked `dotnet build` with none of that pinned. It now
+  runs with `LC_ALL=C TZ=UTC` and a `SOURCE_DATE_EPOCH` the Makefile defaults
+  to the zip epoch and exports, so the assembly and the archive wrapping it are
+  stamped from one clock and an unset variable still yields fixed bytes.
 - **A Unicode line separator in chat text can no longer forge a log line.**
   `str.splitlines()` also breaks on U+000B, U+000C, U+001C-U+001E, NEL,
   U+2028 and U+2029, and the game's logger emits none of them, so a peer who

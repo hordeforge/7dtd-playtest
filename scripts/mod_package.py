@@ -14,6 +14,11 @@ clock), the mode is 0644 for all of them, and create_system is fixed to Unix so
 an archive built on Windows does not record a different host. Two builds of the
 same commit produce the same file, which is what lets a rebuild be compared
 against a release instead of trusted.
+
+With no --out the archive is named in the parent of the dist tree
+(`dist/7dtd-playtest-<version>.zip`), beside the build output rather than
+inside the folder it was cut from, which is a build output `make clean` would
+otherwise delete along with the folder.
 """
 
 from __future__ import annotations
@@ -138,7 +143,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--out",
         type=Path,
-        help="archive path, or a directory to name from the manifest (default: the dist dir)",
+        help=(
+            "archive path, or a directory to name from the manifest "
+            "(default: the parent of --dist, so the archive lands in dist/ "
+            "beside the build output rather than inside the tree it was cut from)"
+        ),
     )
     parser.add_argument(
         "--epoch",
@@ -151,7 +160,7 @@ def main(argv: list[str]) -> int:
         epoch = args.epoch
         if epoch is None:
             epoch = resolve_epoch(os.environ.get("SOURCE_DATE_EPOCH"))
-        target = package(args.dist, args.out or args.dist, epoch)
+        target = package(args.dist, args.out or args.dist.parent, epoch)
     except PackageError as exc:
         print(f"mod_package: {exc}", file=sys.stderr)
         return 1
