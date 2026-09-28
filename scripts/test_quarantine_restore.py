@@ -15,6 +15,7 @@ import contextlib
 import io
 import json
 import os
+import random
 import shutil
 import sys
 import tempfile
@@ -26,6 +27,9 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_run  # noqa: E402
 import quarantine_restore as qr  # noqa: E402
+
+# Rounds per fuzz case: each one writes a manifest and reads it back.
+FUZZ_ROUNDS = 200
 
 
 def test_wiped_world_is_restorable_from_its_manifest() -> None:
@@ -411,6 +415,134 @@ def test_entry_lookup_accepts_a_timestamp_prefix() -> None:
         print("PASS entry lookup takes an exact name or a timestamp prefix")
 
 
+_MANIFEST_LINES = (
+    "{}",
+    "[]",
+    "null",
+    '{"src": 1, "dest": 2}',
+    '{"src": "/a", "dest": null}',
+    '{"dest": "/a", "src": ""}',
+    '{"src": "/a"}',
+    '{"src": "/a\\u0000b", "dest": "/c"}',
+    '{"src": "/a", "dest": "/c\\u0000"}',
+    '{"src": "/a", "dest": "/c"} trailing',
+    '{"src": "/a", "dest": "/c"}{"src": "/d", "dest": "/e"}',
+    '{"src": "' + "a" * 4000 + '", "dest": "/c"}',
+    '{"src": "/a\\u00e9\\u4e2d", "dest": "/c"}',
+    '{"src": "/a\\u2028b", "dest": "/c"}',
+    '{"src": "../escape", "dest": "../../etc"}',
+    '{"src": "/a", "dest": "/c"} ',
+    "not json at all",
+    "\x00\x00\x00",
+    " \x01\x02 control bytes",
+    '{"src": ["/a"], "dest": ["/c"]}',
+)
+
+_MANIFEST_NAMES = (
+    "20260101T000000Z-world",
+    "*",
+    "?",
+    "[",
+    "[a-z]",
+    "..",
+    "../..",
+    "a/b",
+    "a\\b",
+    "",
+    ".",
+    "20260101T000000Z",
+    "\x00",
+    "nomatch",
+    "20260101T000000Z-worl",
+)
+
+
+def test_fuzz_manifest_reader_never_guesses_a_path() -> None:
+    """Seeded grammar fuzzer over `restore.jsonl` bytes and entry names.
+
+    The manifest is the only record of where a swept-aside world went, and
+    it is read back after a crash, a half-finished append or a hand edit.
+    Every line is either a pair this file really recorded or a skip the
+    operator is told about; no byte may turn into a path to write, and no
+    entry name may resolve outside the quarantine root.
+    """
+    rng = random.Random(20260928)
+    accepted = 0
+    skipped_total = 0
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-fuzz-") as td:
+        qroot = Path(td) / "q"
+        qroot.mkdir()
+        (qroot / "20260101T000000Z-world").mkdir()
+        entry = qroot / "20260101T000000Z-world"
+        for _ in range(FUZZ_ROUNDS):
+            lines = [rng.choice(_MANIFEST_LINES) for _ in range(rng.randint(1, 4))]
+            text = "\n".join(lines) + "\n"
+            (entry / qr.MANIFEST_NAME).write_text(text, encoding="utf-8")
+            pairs = qr.read_manifest(entry)
+            for src, dest in pairs:
+                assert src.name or str(src) == "/", f"degenerate recorded path {src!r}"
+                assert "\0" not in str(src) and "\0" not in str(dest), (
+                    f"an unusable path was accepted: {src!r} <- {dest!r}"
+                )
+            # Whatever survived must be a line that really recorded a pair.
+            for src, dest in pairs:
+                assert json.dumps({qr._SRC: str(src), qr._DEST: str(dest)}) in text, (
+                    f"{src!r} <- {dest!r} was not in the manifest"
+                )
+            skipped = qr.skipped_manifest_lines(entry)
+            blank = sum(1 for line in text.splitlines() if not line.strip())
+            assert skipped + len(pairs) == len(text.splitlines()) - blank, (
+                f"unaccounted manifest lines: {text!r}"
+            )
+            skipped_total += skipped
+            accepted += len(pairs)
+
+            name = rng.choice(_MANIFEST_NAMES)
+            found = qr.resolve_entry(qroot, name)
+            if found is not None:
+                assert found.parent == qroot, f"entry name {name!r} resolved to {found}"
+                assert found.is_dir()
+
+            # A dry run must describe the entry and write nothing at all.
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = qr.restore(entry, apply=False, force=False, move=False)
+            assert code in (0, 1), code
+            assert "entry " in out.getvalue(), out.getvalue()
+
+    assert accepted > 0, f"fuzzer read no pairs at all: corpus is too weak ({skipped_total} skips)"
+    assert skipped_total > 0, "fuzzer never reached the skip path"
+
+    # The read side is only half the boundary: an unusable recorded path
+    # must not take the whole restore down with it. `os.stat` and
+    # `shutil.copy2` raise ValueError on a NUL, which would abandon every
+    # pair after it, including the ones that can be restored.
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-fuzz-") as td:
+        root = Path(td)
+        kept = root / "kept.zsv"
+        kept.write_text("world", encoding="utf-8")
+        entry = root / "entry"
+        entry.mkdir()
+        (entry / qr.MANIFEST_NAME).write_text(
+            json.dumps({"src": str(root / "d\x00st"), "dest": str(kept)}) + "\n"
+            + json.dumps({"src": str(root / "back"), "dest": str(kept)}) + "\n",
+            encoding="utf-8",
+        )
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = qr.restore(entry, apply=True, force=True, move=False)
+        assert code == 0, code
+        assert (root / "back").read_text(encoding="utf-8") == "world", (
+            "one unusable line abandoned the rest of the entry"
+        )
+        assert "unreadable manifest line" in out.getvalue(), out.getvalue()
+
+    print(
+        f"PASS manifest_fuzz {FUZZ_ROUNDS} manifests, {accepted} pairs kept, "
+        f"{skipped_total} lines skipped"
+    )
+
+
 def test_default_root_follows_the_orchestrator_logdir() -> None:
     """The CLI's default root is the same logdir a run writes to."""
     with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
@@ -478,6 +610,10 @@ def main() -> int:
         (
             "entry_lookup_accepts_a_timestamp_prefix",
             test_entry_lookup_accepts_a_timestamp_prefix,
+        ),
+        (
+            "fuzz_manifest_reader_never_guesses_a_path",
+            test_fuzz_manifest_reader_never_guesses_a_path,
         ),
         (
             "default_root_follows_the_orchestrator_logdir",

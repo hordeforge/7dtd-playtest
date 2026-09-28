@@ -50,6 +50,23 @@ SANDBOX_UP_TIMEOUT_SEC = 240
 # the live client and exclusive-lock claim are stranded.
 SB_COMMAND_TIMEOUT_SEC = 900.0
 
+# The pair name is one directory under <sandbox_root>/instances and one
+# argument to every `sb` call, so it must stay a single path component: a
+# name carrying a separator walks out of the instance directory (`srv-../..`
+# is the sandbox root's parent) and hands `sb` a path the run never named.
+# A leading `-` would be read as a flag instead, and a leading `.` names a
+# hidden or relative component, so neither starts the name.
+SANDBOX_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+# Long enough for any readable instance pair, short enough that a pasted
+# sentence is refused rather than turned into a directory name.
+SANDBOX_NAME_MAX_LEN = 64
+
+# The contract ports the run connects to. A value outside the range is a
+# corrupt contract line, not a port the run may carry into a connect attempt.
+MIN_PORT = 1
+MAX_PORT = 65535
+
 _ENV_ASSIGN = re.compile(
     r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(?:'([^']*)'|\"([^\"]*)\"|(.*))$"
 )
@@ -172,7 +189,9 @@ def resolve_target(
 
     ws = workspace or Path(__file__).resolve().parents[2]
     sb_root = sandbox_root or (ws / "7dtd-sandbox")
-    pair = (sandbox_name or os.environ.get("PLAYTEST_SANDBOX_NAME") or "playtest").strip()
+    pair = normalize_sandbox_name(
+        sandbox_name or os.environ.get("PLAYTEST_SANDBOX_NAME") or "playtest"
+    )
     srv_name = f"srv-{pair}"
     cli_name = f"client-{pair}"
     env_map = load_sandbox_env(sb_root, srv_name)
@@ -182,12 +201,30 @@ def resolve_target(
         sandbox_server=srv_name,
         sandbox_client=cli_name,
         sandbox_root=sb_root,
-        game_srv=_optional_path(env_map.get("SERVER_GAME")),
-        userdata=_optional_path(env_map.get("SERVER_USERDATA")),
+        game_srv=_optional_path(env_map.get("SERVER_GAME"), "SERVER_GAME"),
+        userdata=_optional_path(env_map.get("SERVER_USERDATA"), "SERVER_USERDATA"),
         port=_optional_int(env_map.get("SERVER_PORT"), "SERVER_PORT"),
         telnet_port=_optional_int(env_map.get("SERVER_TELNET_PORT"), "SERVER_TELNET_PORT"),
         notes=("Safehouse owns isolation, ports, fresh save and teardown",),
     )
+
+
+def normalize_sandbox_name(raw: str) -> str:
+    """A pair name that can only ever name one instance directory.
+
+    Raised as a ValueError like the other argument checks, so a name the
+    caller cannot have meant stops the run before it stages, wipes or stops
+    anything: the name reaches `sb` as an argv element and every instance
+    path is built from it.
+    """
+    name = str(raw).strip()
+    if not SANDBOX_NAME_RE.fullmatch(name) or len(name) > SANDBOX_NAME_MAX_LEN:
+        raise ValueError(
+            f"invalid sandbox name {raw!r}; expected one path component of "
+            f"[A-Za-z0-9_.-] starting alphanumeric, at most "
+            f"{SANDBOX_NAME_MAX_LEN} characters"
+        )
+    return name
 
 
 def _optional_int(raw: str | None, key: str) -> int | None:
@@ -195,23 +232,43 @@ def _optional_int(raw: str | None, key: str) -> int | None:
 
     A port that fails to parse used to read as absent, which left the run on
     the pre-`sb up` placeholder (or the lab default) and reported the unusable
-    number rather than the corrupt line that caused it.
+    number rather than the corrupt line that caused it. A number outside the
+    port range is the same fault: the run would carry it into every connect
+    attempt and time out against an address no listener can own.
     """
     if raw is None or not str(raw).strip():
         return None
     value = str(raw).strip()
     try:
-        return int(value)
+        number = int(value)
     except ValueError:
         raise TargetError(
             f"{key}={value!r} in the instance contract is not an integer"
         ) from None
+    if not MIN_PORT <= number <= MAX_PORT:
+        raise TargetError(
+            f"{key}={value!r} in the instance contract is outside the port "
+            f"range {MIN_PORT}-{MAX_PORT}"
+        )
+    return number
 
 
-def _optional_path(raw: str | None) -> Path | None:
+def _optional_path(raw: str | None, key: str) -> Path | None:
+    """A contract path: unset is None, relative or unusable is a TargetError.
+
+    `sb` writes the absolute location it created. A relative one resolves
+    against whatever directory the step runs in, so a run would wipe or
+    stage a path the contract never named.
+    """
     if raw is None or not str(raw).strip():
         return None
-    return Path(str(raw).strip())
+    value = str(raw).strip()
+    path = Path(value)
+    if not path.is_absolute():
+        raise TargetError(
+            f"{key}={value!r} in the instance contract is not an absolute path"
+        )
+    return path
 
 
 def parse_sb_env_output(text: str) -> dict[str, str]:
@@ -503,8 +560,8 @@ def overlay_instance_env(args: argparse.Namespace, env_map: dict[str, str]) -> N
     """
     port = _optional_int(env_map.get("SERVER_PORT"), "SERVER_PORT")
     telnet = _optional_int(env_map.get("SERVER_TELNET_PORT"), "SERVER_TELNET_PORT")
-    game = _optional_path(env_map.get("SERVER_GAME"))
-    userdata = _optional_path(env_map.get("SERVER_USERDATA"))
+    game = _optional_path(env_map.get("SERVER_GAME"), "SERVER_GAME")
+    userdata = _optional_path(env_map.get("SERVER_USERDATA"), "SERVER_USERDATA")
     if port is not None:
         args.port = port
     if telnet is not None:

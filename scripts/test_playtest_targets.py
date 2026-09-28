@@ -13,6 +13,8 @@ import argparse
 import contextlib
 import io
 import os
+import random
+import re
 import stat
 import sys
 import tempfile
@@ -24,6 +26,12 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import playtest_targets as pt  # noqa: E402
+
+# Rounds per fuzz case. The generator is cheap (string building, no disk in
+# the first loop), so this stays well inside the gate's budget.
+FUZZ_ROUNDS = 400
+
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def test_axes_tuples() -> None:
@@ -138,6 +146,234 @@ def test_target_report_fields() -> None:
     assert fields["sandbox_server"] == "srv-pt"
     assert fields["sandbox_client"] == "client-pt"
     assert isinstance(fields["notes"], list)
+
+
+_NAME_TOKENS = (
+    "lab",
+    "playtest",
+    "pt-1",
+    "..",
+    ".",
+    "",
+    " ",
+    "../../etc",
+    "a/b",
+    "a\\b",
+    "-flag",
+    ".hidden",
+    "with space",
+    "srv-lab",
+    "láb",
+    "n" * 80,
+    "l;n",
+    "l$(id)",
+    "l`id`",
+    "l\tx",
+)
+
+_PORT_VALUES = (
+    "27100",
+    " 27100 ",
+    "27100 # trailing",
+    "0",
+    "-1",
+    "65536",
+    "999999999999999999999",
+    "0x10",
+    "٢٧٠٠٠",
+    "'27100'",
+    '"27100"',
+    "",
+    "   ",
+    "not-a-port",
+    "27100\nSERVER_TELNET_PORT=27101",
+    "∞",
+    "1_000",
+)
+
+_ENV_LINE_HEADS = (
+    "SERVER_PORT=",
+    "export SERVER_PORT=",
+    "SERVER_PORT =",
+    "SERVER_PORT",
+    "SERVER_GAME=",
+    "SERVER_USERDATA=",
+    "SERVER_TELNET_PORT=",
+    "# SERVER_PORT=",
+    "1SERVER_PORT=",
+    "SERVER_PORT:",
+)
+
+
+def _fuzz_name(rng: random.Random) -> str:
+    parts = [rng.choice(_NAME_TOKENS) for _ in range(rng.randint(1, 3))]
+    return rng.choice(("", " ", "\n")).join(parts)
+
+
+def _fuzz_env_text(rng: random.Random) -> str:
+    lines: list[str] = []
+    for _ in range(rng.randint(0, 6)):
+        head = rng.choice(_ENV_LINE_HEADS)
+        value = rng.choice(_PORT_VALUES + _NAME_TOKENS)
+        if rng.random() < 0.3:
+            value = value.replace("=", "", 1)
+        lines.append(head + value)
+    text = "\n".join(lines)
+    if rng.random() < 0.2:
+        text += "\n"
+    return text
+
+
+def _declares_port(text: str) -> bool:
+    """Does this contract text carry a SERVER_PORT assignment at all?
+
+    The parser may skip a malformed line, but a well-formed
+    `SERVER_PORT=` assignment must never disappear: a dropped port leaves the
+    run on the pre-`sb up` placeholder and points it at the wrong server.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if re.match(r"^(?:export\s+)?SERVER_PORT=", stripped):
+            return True
+    return False
+
+
+def _assert_single_component(kind: str, name: str | None, root: Path) -> None:
+    """An instance name must name one directory under `<root>/instances`.
+
+    The name is an argv element of every `sb` call and a path component of
+    every instance path, so a name with a separator or a `..` walks the run
+    outside the sandbox it was pointed at, onto an instance the operator
+    never named.
+    """
+    assert name is not None, f"{kind} was not derived from the pair name"
+    path = Path(name)  # mypy: name is not None from here on
+    assert path.name == name, f"{kind}={name!r} is more than one path component"
+    assert name != "." and name != "..", f"{kind}={name!r} is a relative directory"
+    assert not name.startswith(("-", ".")), f"{kind}={name!r} is a flag or hidden name"
+    assert len(name) <= 255, f"{kind}={name!r} is not a usable directory component"
+    assert (root / "instances" / name).parent == root / "instances"
+
+
+def test_fuzz_sandbox_name_and_instance_env_hold_the_instance_boundary() -> None:
+    """Seeded grammar fuzzer over the two inputs a managed stock run trusts.
+
+    The pair name comes from `--sandbox-name` or `PLAYTEST_SANDBOX_NAME`, and
+    the contract text from an `instance.env` a Safehouse write half finished
+    or a hand edit corrupted. Neither may crash the resolver, and neither may
+    resolve to an instance outside the sandbox root or to a port that is not
+    a number.
+    """
+    rng = random.Random(20260928)
+    accepted_names = 0
+    resolved = 0
+    refused = 0
+    for _ in range(FUZZ_ROUNDS):
+        name = _fuzz_name(rng)
+        try:
+            plan = pt.resolve_target(
+                provision="managed",
+                backend="stock",
+                sandbox_name=name,
+                sandbox_root=Path("/nonexistent-sandbox-root"),
+            )
+        except ValueError:
+            refused += 1
+            continue
+        accepted_names += 1
+        _assert_single_component("sandbox_server", plan.sandbox_server, Path("/sb"))
+        _assert_single_component("sandbox_client", plan.sandbox_client, Path("/sb"))
+
+        text = _fuzz_env_text(rng)
+        env = pt.parse_sb_env_output(text)
+        for key, value in env.items():
+            assert _IDENT_RE.fullmatch(key), f"contract key {key!r} is not an identifier"
+            assert isinstance(value, str), f"contract value for {key!r} is not a string"
+        assert ("SERVER_PORT" in env) == _declares_port(text), (
+            f"a declared SERVER_PORT was dropped: {text!r} -> {env!r}"
+        )
+        resolved += 1
+
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-fuzz-") as td:
+        root = Path(td)
+        inst = root / "instances" / "srv-lab"
+        inst.mkdir(parents=True)
+        for _ in range(FUZZ_ROUNDS // 2):
+            text = _fuzz_env_text(rng)
+            (inst / "instance.env").write_text(text, encoding="utf-8")
+            try:
+                plan = pt.resolve_target(
+                    provision="managed",
+                    backend="stock",
+                    sandbox_name="lab",
+                    sandbox_root=root,
+                )
+            except pt.TargetError as ex:
+                # A corrupt port is named, never dropped: the run must not
+                # fall through to a placeholder port it did not get.
+                assert "in the instance contract" in str(ex), ex
+                assert any(
+                    k in str(ex)
+                    for k in ("SERVER_PORT", "SERVER_TELNET_PORT", "SERVER_GAME", "SERVER_USERDATA")
+                ), ex
+                continue
+            if plan.port is not None:
+                assert isinstance(plan.port, int) and not isinstance(plan.port, bool)
+                assert 0 <= plan.port <= 65535, f"resolved port {plan.port} out of range"
+            for attr in ("game_srv", "userdata"):
+                got = getattr(plan, attr)
+                if got is not None:
+                    assert not str(got).startswith(".."), f"{attr}={got} walks out"
+
+    assert accepted_names >= 5, f"fuzzer only resolved {accepted_names} names: corpus is too weak"
+    assert resolved >= FUZZ_ROUNDS - refused
+    assert refused >= 5, "fuzzer never reached the refusal path"
+    print(
+        f"PASS target_fuzz {FUZZ_ROUNDS} names and contracts, "
+        f"{accepted_names} resolved, {refused} refused"
+    )
+
+
+def test_contract_port_and_path_outside_their_range_are_named() -> None:
+    """A contract line the run cannot use is named, not carried.
+
+    An out-of-range port or a relative instance path reads as a healthy
+    value to every later step, so the failure only surfaces as a connect
+    timeout against an address no listener can own.
+    """
+    cases = (
+        ("SERVER_PORT", "0", "outside the port range"),
+        ("SERVER_PORT", "65536", "outside the port range"),
+        ("SERVER_PORT", "99999999999999999999", "outside the port range"),
+        ("SERVER_GAME", "game/rel", "not an absolute path"),
+        ("SERVER_USERDATA", "../../elsewhere", "not an absolute path"),
+    )
+    for key, value, expected in cases:
+        try:
+            pt.overlay_instance_env(argparse.Namespace(), {key: value})
+        except pt.TargetError as ex:
+            assert expected in str(ex), ex
+            assert key in str(ex) and value in str(ex), ex
+        else:
+            raise AssertionError(f"expected TargetError for {key}={value!r}")
+
+
+def test_sandbox_name_outside_one_component_is_refused() -> None:
+    for name in ("../../etc", "lab/../x", "-flag", ".hidden", "l b", "n" * 80):
+        try:
+            pt.resolve_target(
+                provision="managed",
+                backend="stock",
+                sandbox_name=name,
+                sandbox_root=Path("/nonexistent-sandbox-root"),
+            )
+        except ValueError as ex:
+            assert "sandbox name" in str(ex), ex
+        else:
+            raise AssertionError(f"expected ValueError for sandbox name {name!r}")
+    assert pt.normalize_sandbox_name(" lab-1 ") == "lab-1"
 
 
 def test_parse_sb_env_output() -> None:
@@ -401,6 +637,18 @@ def main() -> int:
         ),
         ("target_report_fields", test_target_report_fields),
         ("parse_sb_env_output", test_parse_sb_env_output),
+        (
+            "sandbox_name_outside_one_component_is_refused",
+            test_sandbox_name_outside_one_component_is_refused,
+        ),
+        (
+            "contract_port_and_path_outside_their_range_are_named",
+            test_contract_port_and_path_outside_their_range_are_named,
+        ),
+        (
+            "fuzz_sandbox_name_and_instance_env_hold_the_instance_boundary",
+            test_fuzz_sandbox_name_and_instance_env_hold_the_instance_boundary,
+        ),
         ("missing_sb_names_the_path", test_missing_sb_names_the_path),
         ("sb_failure_surfaces_its_message", test_sb_failure_surfaces_its_message),
         (
