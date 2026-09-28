@@ -827,6 +827,20 @@ Migration, by symbol:
   `make coverage` also wrote `.coverage` to the caller's directory rather than
   the repo root. `dotnet build` now runs with telemetry and the first-run
   banner off, so a build does not write first-run sentinels to `$HOME`.
+- **Three operations no longer change the world when they run twice.** A
+  `chat_echo:<token>` barrier sent the same identifier token to the server
+  chat twice, once unquoted and once quoted, so every player on the server saw
+  every echo twice; the token is identifier-shaped by the time it reaches the
+  console, so only the bare `say` is sent now. A `spawn_loadgen_bots` barrier
+  stopped the running loadgen and started three bots on every fire, so a
+  replayed line, or a rejoin phase re-reading the marker, disconnected the
+  roster the case was already measuring; the loadgen role is tracked, and a
+  fire for the role already up consumes its edge as `spawn_loadgen_peer`
+  already did. `quarantine_restore.py restore --apply` over an entry it had
+  already restored reported the reclaimed copies as missing and exited 1, so
+  the rerun an operator performs after an interrupted restore read as a lost
+  world; a pair whose original is in place and holds the same bytes, or whose
+  copy `--move` already deleted, is now reported as already restored.
 ## [0.13.0] - 2026-09-21
 
 

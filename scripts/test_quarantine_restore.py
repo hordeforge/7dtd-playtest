@@ -114,7 +114,42 @@ def test_restore_is_dry_run_by_default_and_refuses_to_clobber() -> None:
         assert qr.main([*base, "--apply", "--force", "--move"]) == 0
         assert original.read_text(encoding="utf-8") == "previous run"
         assert not kept.exists(), "--move reclaims the quarantined copy"
+        # Re-running the same command is what an operator does after an
+        # interrupted restore. The file is in place, so the run must report
+        # that rather than reading the reclaimed copy as a lost one.
+        assert qr.main([*base, "--apply", "--force", "--move"]) == 0, (
+            "a completed restore must be a no-op on a second run"
+        )
+        assert original.read_text(encoding="utf-8") == "previous run"
         print("PASS restore is dry-run by default and never clobbers silently")
+
+
+def test_restore_run_twice_reaches_the_same_state() -> None:
+    """A restore rerun after a completed one changes nothing and succeeds.
+
+    The second run is the recovery path for a restore interrupted between two
+    pairs: whatever it already put back must be left alone, whatever it had
+    not must still be restored, and the exit code must say the entry is in
+    place rather than reporting the reclaimed copies as blocked.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "logdir" / "quarantine"
+        world = root / "worlds" / "playtest_auto"
+        world.mkdir(parents=True)
+        for name in ("players.zsv", "blockmeta.zbm"):
+            (world / name).write_text(name, encoding="utf-8")
+
+        playtest_run.fresh_zdtd_world(world, qroot)
+        entry = qr.entries(qroot)[0]
+        base = ["restore", entry.name, "--quarantine", str(qroot), "--apply"]
+
+        assert qr.main(base) == 0
+        first = {p.name: p.read_bytes() for p in sorted(world.iterdir())}
+        assert qr.main(base) == 0, "a second --apply over a restored entry must succeed"
+        second = {p.name: p.read_bytes() for p in sorted(world.iterdir())}
+        assert first == second, f"a second run changed the world: {first} -> {second}"
+        print("PASS restore run twice reaches the same state and exits 0")
 
 
 def test_cli_fails_closed_on_a_missing_quarantine_or_entry() -> None:
@@ -399,6 +434,10 @@ def main() -> int:
         (
             "restore_is_dry_run_by_default_and_refuses_to_clobber",
             test_restore_is_dry_run_by_default_and_refuses_to_clobber,
+        ),
+        (
+            "restore_run_twice_reaches_the_same_state",
+            test_restore_run_twice_reaches_the_same_state,
         ),
         (
             "cli_fails_closed_on_a_missing_quarantine_or_entry",

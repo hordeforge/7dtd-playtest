@@ -2352,12 +2352,45 @@ def test_bot_barriers_converge_instead_of_adding_a_bot() -> None:
     print("PASS bot_barrier_convergence a repeated fire adds no bot")
 
 
+def test_loadgen_barrier_reuse_matches_role_and_liveness() -> None:
+    """A repeated loadgen fire must not restart the roster it already asked
+    for: the mp cases measure the peer and the bot roster separately, and a
+    restart disconnects whichever one is up. A process for the other role, or
+    one that has exited, is not the roster the barrier wants."""
+
+    class Proc:
+        def __init__(self, alive: bool) -> None:
+            self._alive = alive
+
+        def poll(self) -> int | None:
+            return None if self._alive else 0
+
+    peer, bots, dead = Proc(True), Proc(True), Proc(False)
+    serving = playtest_run.loadgen_already_serving
+    assert serving(playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_BOTS, bots)
+    assert serving(playtest_run.LOADGEN_ROLE_PEER, playtest_run.LOADGEN_ROLE_PEER, peer)
+    assert not serving(
+        playtest_run.LOADGEN_ROLE_PEER, playtest_run.LOADGEN_ROLE_BOTS, bots
+    ), "the bots roster must not answer the peer barrier"
+    assert not serving(
+        playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_PEER, peer
+    ), "the peer must not answer the bots barrier"
+    assert not serving(
+        playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_BOTS, dead
+    ), "an exited roster has to be started again"
+    assert not serving(None, playtest_run.LOADGEN_ROLE_BOTS, bots), (
+        "a process nobody recorded a role for cannot be reused"
+    )
+    assert not serving(playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_BOTS, None)
+    print("PASS loadgen_barrier_reuse a repeat fire keeps the live roster")
+
+
 def test_safe_barrier_param_rejects_command_shapes() -> None:
     """Barrier parameters are lifted from client-log lines (attacker-reachable
     via remote chat) and interpolated into telnet console commands. Only
     identifier-shaped tokens may cross: whitespace would smuggle a second
-    command onto the next telnet line, quotes break out of the quoted
-    `say "<token>"` form."""
+    command onto the next telnet line, quotes and metacharacters reach the
+    unquoted `say <token>` form as commands."""
     for good in (
         "ptchat12345",
         "zombieBoe",
@@ -2405,6 +2438,39 @@ def test_safe_barrier_param_gates_both_telnet_handlers() -> None:
         f"safe_barrier_param, found {calls} call(s) in main()"
     )
     print("PASS barrier_param_wiring both parameterised handlers validated")
+
+
+def test_chat_echo_says_each_token_once() -> None:
+    """`say` reaches every player on the server, so one serviced fire must
+    emit one command. The handler used to send the bare and the quoted form of
+    the same identifier token, which printed every token twice on every
+    serviced barrier; the token is identifier-shaped by the time it gets
+    there, so the second form bought nothing."""
+    tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
+    mains = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+    ]
+    assert len(mains) == 1
+    loops = [
+        n
+        for n in ast.walk(mains[0])
+        if isinstance(n, ast.For)
+        and "chat_echo:" in ast.unparse(n.iter)
+    ]
+    assert len(loops) == 1, f"expected one chat_echo service loop, found {len(loops)}"
+    says = [
+        n
+        for n in ast.walk(loops[0])
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "exec"
+        and ast.unparse(n.args[0]).startswith("f'say ")
+    ]
+    assert len(says) == 1, (
+        f"one chat_echo fire must send one say, found {len(says)}: "
+        f"{[ast.unparse(s.args[0]) for s in says]}"
+    )
+    print("PASS chat_echo echo one say per token, not the same line twice")
 
 
 def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
@@ -3271,6 +3337,10 @@ def main() -> int:
             test_bot_barriers_converge_instead_of_adding_a_bot,
         ),
         (
+            "loadgen_barrier_reuse",
+            test_loadgen_barrier_reuse_matches_role_and_liveness,
+        ),
+        (
             "repeat_lap_marks",
             test_repeat_lap_marks_do_not_accumulate_across_runs,
         ),
@@ -3283,6 +3353,7 @@ def main() -> int:
             "barrier_param_wiring",
             test_safe_barrier_param_gates_both_telnet_handlers,
         ),
+        ("chat_echo_once", test_chat_echo_says_each_token_once),
         ("log_scrub", test_scrub_strips_control_chars_from_echoed_log_text),
         (
             "result_row_echo",

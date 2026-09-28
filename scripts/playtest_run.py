@@ -99,6 +99,12 @@ class Clock(Protocol):
     def sleep(self, seconds: float) -> None: ...
 
 
+class LiveProcess(Protocol):
+    """What a barrier needs of a child process: is it still running."""
+
+    def poll(self) -> int | None: ...
+
+
 class SystemClock:
     """Real time. The only clock a managed run uses."""
 
@@ -2453,8 +2459,8 @@ def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:
 # commands (`say`, `spawnentityat`). Log bytes are attacker-reachable through
 # remote chat text, so a parameter must be a plain identifier before it may
 # cross into the admin plane: no whitespace or CR (the telnet session is one
-# command per line), no quotes (one handler form wraps it in double quotes),
-# no console metacharacters. Entity class names (`zombieBoe`,
+# command per line), no quotes (a token is interpolated unquoted into the
+# command), no console metacharacters. Entity class names (`zombieBoe`,
 # `vehicleMotorcycle`) and chat tokens (`ptchat12345`) all match.
 BARRIER_PARAM_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
 
@@ -2492,6 +2498,25 @@ def barrier_spawn_zombie(tn: TelnetAdmin) -> None:
     if n == 0:
         pause(1.0)
         tn.spawn_near_players("zombieBoe")
+
+
+# The two loadgen barriers want different worlds: a single joined peer the
+# mp cases measure, and a three-bot roster. Starting either one stops whatever
+# the other started, so a barrier that fires twice for the same role must read
+# the state it wants rather than restart on top of it.
+LOADGEN_ROLE_PEER = "peer"
+LOADGEN_ROLE_BOTS = "bots"
+
+
+def loadgen_already_serving(
+    role: str | None, required: str, proc: LiveProcess | None
+) -> bool:
+    """True when the running loadgen is the roster ``required`` asks for.
+
+    A process started for the other role is a different roster, so it does
+    not answer, and an exited one is a roster nobody is in any more.
+    """
+    return role == required and proc is not None and proc.poll() is None
 
 
 def listed_bots(out: str) -> int:
@@ -3443,6 +3468,10 @@ def main(argv: list[str] | None = None) -> int:
     client_proc = None
     peer_client_proc = None
     loadgen_proc = None
+    # What loadgen_proc was started for ("peer" / "bots"), so a barrier that
+    # fires again for the same role consumes its edge instead of tearing a
+    # live roster down and starting another one.
+    loadgen_role: str | None = None
     loadgen_events_path = args.logdir / "loadgen_events.jsonl"
     # Incremental reader created before any loadgen start so every appended
     # event is parsed exactly once (same discipline as the client-log tail).
@@ -4348,8 +4377,10 @@ def main(argv: list[str] | None = None) -> int:
                     barrier_counts["spawn_loadgen_peer"]
                     < barrier_seen["spawn_loadgen_peer"]
                 ):
-                    if loadgen_proc is not None and loadgen_proc.poll() is None:
-                        # Already running; consume this edge without restart.
+                    if loadgen_already_serving(loadgen_role, LOADGEN_ROLE_PEER, loadgen_proc):
+                        # Already running for this barrier; consume this edge
+                        # without restart. A roster started for the other
+                        # barrier is a different one, so it does not answer.
                         barrier_counts["spawn_loadgen_peer"] += 1
                         continue
                     if loadgen_proc is not None:
@@ -4359,6 +4390,7 @@ def main(argv: list[str] | None = None) -> int:
                         # closes its log handle before the rebind.
                         stop_proc(loadgen_proc)
                         loadgen_proc = None
+                        loadgen_role = None
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
                         count=1,
@@ -4371,6 +4403,7 @@ def main(argv: list[str] | None = None) -> int:
                     if loadgen_proc is None:
                         warn("loadgen peer start failed; will retry next poll")
                         break
+                    loadgen_role = LOADGEN_ROLE_PEER
                     barrier_counts["spawn_loadgen_peer"] += 1
 
                 if (
@@ -4411,7 +4444,16 @@ def main(argv: list[str] | None = None) -> int:
                     barrier_counts["spawn_loadgen_bots"]
                     < barrier_seen["spawn_loadgen_bots"]
                 ):
+                    if loadgen_already_serving(loadgen_role, LOADGEN_ROLE_BOTS, loadgen_proc):
+                        # The roster this barrier asks for is up. Restarting it
+                        # would disconnect the three bots the case is already
+                        # measuring, so a repeat fire (a replayed log line, a
+                        # rejoin phase re-reading the marker) consumes its edge
+                        # instead, exactly as the peer barrier does.
+                        barrier_counts["spawn_loadgen_bots"] += 1
+                        continue
                     stop_proc(loadgen_proc)
+                    loadgen_proc = None
                     loadgen_proc = start_loadgen(
                         game_port=args.port,
                         count=3,
@@ -4421,6 +4463,7 @@ def main(argv: list[str] | None = None) -> int:
                     if loadgen_proc is None:
                         warn("loadgen bots start failed; will retry next poll")
                         break
+                    loadgen_role = LOADGEN_ROLE_BOTS
                     barrier_counts["spawn_loadgen_bots"] += 1
 
                 for full in barrier_hits_prefix(chunk, "chat_echo:"):
@@ -4442,9 +4485,11 @@ def main(argv: list[str] | None = None) -> int:
                         warn(f"chat_echo:{token} telnet connect fail; retry")
                         continue
                     try:
-                        for cmd in (f"say {token}", f'say "{token}"'):
-                            r = tn.exec(cmd)
-                            log(f"telnet {cmd} → {r[:100]!r}")
+                        # One say per token. The token passed safe_barrier_param,
+                        # so the quoted form is the same command: sending both
+                        # printed the token to every connected player twice.
+                        r = tn.exec(f"say {token}")
+                        log(f"telnet say {token} → {r[:100]!r}")
                         # Same trust rule as spawn_near_players: a session that
                         # died mid-exchange returns "" exactly like silence. Not
                         # counting the fire leaves it visibly unserviced in the

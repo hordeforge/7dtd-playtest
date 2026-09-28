@@ -16,16 +16,22 @@ its entry and this tool reads it back.
 
 `restore` prints the plan and writes nothing until `--apply`. An existing
 file at the original path is kept unless `--force` overwrites it, and
-`--move` deletes the quarantined copy after a successful copy-back.
+`--move` deletes the quarantined copy after a successful copy-back. A second
+run of the same command is a no-op over what it already put back: a pair
+whose original is in place and whose quarantined copy is gone is reported as
+already restored, not as a blocked one, so re-running after an interrupted
+restore never reports a file that is in place as missing.
 
 Everything here works off the recorded absolute paths, so a restore on a
 different machine writes where the run said it wrote. That is the point of
 the manifest: no operator has to remember which `--world` produced an entry.
 
 Exit codes:
-  0  the requested listing or plan is complete, or the restore wrote every file
+  0  the requested listing or plan is complete, or the restore left every file
+     in place (written now or already there)
   1  the entry recorded no files, or a restore left one blocked (a path
-     already occupied without --force, or a copy that failed)
+     already occupied without --force, or a copy that failed, or neither
+     copy of the file can be found)
   2  bad usage, or the named quarantine root or entry does not exist
 """
 from __future__ import annotations
@@ -222,6 +228,34 @@ def _describe(pairs: list[tuple[Path, Path]], entry: Path, dropped: int) -> list
     return lines
 
 
+# Read size for the two-file comparison, so a world file of a different size
+# is not read end to end to learn that it differs.
+COMPARE_CHUNK = 1 << 20
+
+
+def same_content(a: Path, b: Path) -> bool:
+    """True when two regular files hold the same bytes.
+
+    Used only to tell a restore that already happened from one whose
+    original path is occupied by a different file (this run's log, say), so
+    it must not raise on anything it cannot read: an unreadable file is not a
+    match.
+    """
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                ca = fa.read(COMPARE_CHUNK)
+                cb = fb.read(COMPARE_CHUNK)
+                if ca != cb:
+                    return False
+                if not ca:
+                    return True
+    except OSError:
+        return False
+
+
 def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
     pairs, dropped = _read_manifest(entry)
     print("\n".join(_describe(pairs, entry, dropped)))
@@ -235,13 +269,31 @@ def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
         return 0
 
     restored = 0
+    already = 0
     blocked = 0
     for src, dest in pairs:
         if not dest.is_file():
+            if src.exists():
+                # A copy the run had already put back, and (with --move) then
+                # deleted the quarantined one. Re-running the same command is
+                # the normal thing to do after an interrupted restore, and it
+                # must not read as a failure over a file that is in place.
+                print(f"SKIP {src}: already restored")
+                already += 1
+                continue
             print(f"SKIP {src}: {dest} is gone", file=sys.stderr)
             blocked += 1
             continue
         if src.exists() and not force:
+            if same_content(src, dest):
+                # The original already holds what the quarantine copy holds,
+                # so the copy-back this invocation was asked for has happened
+                # (a rerun, or a run whose earlier attempt was interrupted).
+                # Reporting it as blocked would make the recovery path for an
+                # interrupted restore exit non-zero over nothing.
+                print(f"SKIP {src}: already restored")
+                already += 1
+                continue
             print(
                 f"SKIP {src}: already exists (pass --force to overwrite)",
                 file=sys.stderr,
@@ -272,8 +324,8 @@ def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
             with contextlib.suppress(OSError):
                 dest.unlink()
                 fsync_dir(dest.parent)
-    print(f"restored={restored} blocked={blocked}")
-    return 0 if restored and not blocked else 1
+    print(f"restored={restored} already={already} blocked={blocked}")
+    return 0 if (restored or already) and not blocked else 1
 
 
 def main(argv: list[str] | None = None) -> int:

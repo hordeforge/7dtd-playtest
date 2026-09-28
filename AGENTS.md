@@ -321,6 +321,9 @@ import) carries the timestamp and nothing else.
   wants a *state* rather than one more entity reads it first (`bot list`) and
   acts only on the deficit, so a barrier emitted twice leaves the world as one
   emission left it. `bot spawn 1` adds a bot and must stay behind such a read.
+  The loadgen barriers hold one roster per role (`spawn_loadgen_peer` vs
+  `spawn_loadgen_bots`) and consume a repeat fire for the role already up,
+  because starting either one stops whatever the other started.
 - Staged frame: `scene staged <name> <detail>` (`Report.Staged`). Emitted the
   moment a scene is on screen, for an external screenshot loop to key on. A
   case detail is flushed with its *result*, tens of seconds later, so a loop
@@ -512,7 +515,8 @@ the run order that both `make test` and `make coverage` expand):
 11b. quarantine restore (`scripts/test_quarantine_restore.py`): every
    quarantined move records `{src, dest}` in the entry's `restore.jsonl`, and
    `scripts/quarantine_restore.py` puts a swept-aside world back from it (dry
-   run without `--apply`, never clobbers an existing original). A quarantine
+   run without `--apply`, never clobbers an existing original, and a second
+   `--apply` over the same entry is a no-op that exits 0). A quarantine
    is the only copy of what a run moved aside, so a regression here is
    unrecoverable data, not a wrong verdict.
 12. compare diff (`scripts/test_playtest_compare.py`, pytest via uv), which

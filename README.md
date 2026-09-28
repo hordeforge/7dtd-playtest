@@ -477,7 +477,7 @@ provider cases):
 | `settime_day` / `settime_bloodmoon` | Set world time via telnet |
 | `spawn_vehicle:<entityClass>` | Host-owned vehicle of that class (bare `spawn_vehicle` = bicycle) |
 | `chat_echo:<token>` | Server chat `say <token>` (once per token) |
-| `spawn_loadgen_peer` / `spawn_loadgen_bots` | Start loadgen peers/bots |
+| `spawn_loadgen_peer` / `spawn_loadgen_bots` | Start loadgen peers/bots (one roster per role; a repeat fire for the role already up is a no-op) |
 | `bot_spawn` / `bot_player_near` | Server-side `BotMod` commands |
 | `teleport_persist_pad` | Teleport players to the persist pad |
 | `persist_setup_done` / `rejoin_setup_done` | No host action: the client reports its own phase (persist setup, rejoin setup) |
@@ -727,10 +727,14 @@ Recovery facts:
 
   `restore` writes nothing without `--apply`, keeps a file that already sits
   at the original path unless `--force` is passed, and takes `--move` to
-  delete the quarantined copy afterwards. Paths are the absolute ones the run
-  recorded, so a restore on another machine writes where the run said it
-  wrote. The quarantine is on the same local disk as the logdir and has no
-  off-host copy: losing that disk loses the entry.
+  delete the quarantined copy afterwards. Re-running the same restore is a
+  no-op over what it already put back: a pair whose original is in place and
+  holds the same bytes (or whose quarantined copy `--move` already deleted)
+  is reported as already restored, so the rerun after an interrupted restore
+  exits 0 rather than reporting files that are in place as blocked. Paths are
+  the absolute ones the run recorded, so a restore on another machine writes
+  where the run said it wrote. The quarantine is on the same local disk as
+  the logdir and has no off-host copy: losing that disk loses the entry.
 - **Interrupted run:** kill leftovers with the orchestrator's own clean pass,
   then clear the lock per the [Live-client exclusivity lock](#live-client-exclusivity-lock)
   rules (fresh heartbeat means another holder is alive; stale plus no live
