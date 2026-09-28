@@ -199,6 +199,37 @@ def test_suite_to_report_shape() -> None:
     assert str(cases[0]["ref"]).startswith("catalog.")
 
 
+def test_published_schema_matches_the_loader() -> None:
+    """schema/suite.schema.json is what an external suite author reads.
+
+    A default or enum documented there and contradicted by the loader is the
+    worst failure this surface has: the document is well formed, so nothing
+    fails closed and the suite runs with mods on the wrong side.
+    """
+    schema = json.loads((ROOT / "schema" / "suite.schema.json").read_text(encoding="utf-8"))
+    props = schema["properties"]
+    assert props["provision"]["enum"] == list(sl.ALLOWED_PROVISIONS)
+    assert props["backend"]["enum"] == list(sl.ALLOWED_BACKENDS)
+    case_props = props["cases"]["items"]["properties"]
+    assert case_props["kind"]["enum"] == list(sl.ALLOWED_KINDS)
+    assert props["mods"]["default"] == list(sl.DEFAULT_MODS)
+    assert props["server_mods"]["default"] == list(sl.DEFAULT_SERVER_MODS)
+    # The defaults the schema states must be the ones an omitted field gets.
+    managed = sl.parse_suite_dict(MANAGED)
+    assert managed.mods == tuple(props["mods"]["default"])
+    assert managed.server_mods == tuple(props["server_mods"]["default"])
+
+
+def test_resolve_mods_refuses_an_unknown_side() -> None:
+    doc = sl.parse_suite_dict(MANAGED)
+    try:
+        sl.resolve_mods(doc, workspace=Path("/ws"), repo=Path("/repo"), side="clientt")
+    except sl.SuiteLoadError as ex:
+        assert "side must be client or server" in str(ex)
+    else:
+        raise AssertionError("expected SuiteLoadError for an unknown side")
+
+
 TESTS = (
     ("discover_builtin_suites", test_discover_builtin_suites),
     ("load_suite_by_id_missing_is_none", test_load_suite_by_id_missing_is_none),
@@ -213,6 +244,8 @@ TESTS = (
     ("external_suite_cannot_shadow_a_builtin", test_external_suite_cannot_shadow_a_builtin),
     ("resolve_mods_short_names_and_paths", test_resolve_mods_short_names_and_paths),
     ("suite_to_report_shape", test_suite_to_report_shape),
+    ("published_schema_matches_the_loader", test_published_schema_matches_the_loader),
+    ("resolve_mods_refuses_an_unknown_side", test_resolve_mods_refuses_an_unknown_side),
 )
 
 

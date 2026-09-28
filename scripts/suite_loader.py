@@ -29,6 +29,17 @@ Minimal document::
 straight to ``sb render-config``. It is the only place a suite states the world
 it needs, so an A/B of one config knob is two suites differing by one line.
 
+Omitted fields follow ``provision`` / the constants below: a managed run gets
+``fresh`` true, both mod lists set to :data:`DEFAULT_MODS`, and no host
+fixtures; an attach run gets ``fresh`` false and empty mod lists, because it
+owns neither the save it joins nor the instances it would stage into.
+
+``kind`` and ``barriers`` on a case are declarative. The host arms the client
+with :attr:`SuiteDoc.case_refs` only, so the ``ref`` implementation decides
+whether a case runs live, stages a scene, or is deferred, and a case asks the
+host for a fixture from inside the client with ``Report.Barrier(...)`` rather
+than through the ``barriers`` list.
+
 Unknown fields are ignored. Missing or contradictory fields fail closed.
 """
 
@@ -60,6 +71,19 @@ DEFAULT_SUITES_DIR = ROOT / "suites"
 
 @dataclass(frozen=True)
 class SuiteCase:
+    """One declared case.
+
+    Attributes:
+        id: Unique within the suite; the host keys results on it.
+        kind: ``live`` / ``staged`` / ``defer``, declarative only. The ``ref``
+            implementation decides the real shape.
+        ref: ``catalog.<suite>.<case>`` or a provider case id. This is what the
+            host hands the client, so a case no implementation backs never runs.
+        tags: Informational.
+        barriers: Host fixtures the case wants, informational. The case emits
+            ``Report.Barrier(...)`` itself.
+    """
+
     id: str
     kind: str
     ref: str
@@ -69,12 +93,38 @@ class SuiteCase:
 
 @dataclass(frozen=True)
 class SuiteHost:
+    """Host-side services a suite arms.
+
+    Attributes:
+        fixtures: Let the host answer client barriers (telnet/admin setup).
+        loadgen: Start extra peers/bots alongside the run.
+    """
+
     fixtures: bool = False
     loadgen: bool = False
 
 
 @dataclass(frozen=True)
 class SuiteDoc:
+    """A validated suite document.
+
+    Attributes:
+        id: Suite id matched by ``PLAYTEST_SUITE`` / ``--suite``.
+        provision: ``managed`` (Safehouse owns the pair) or ``attach``.
+        backend: ``stock`` or ``zdtd``.
+        readonly: Attach-only: never write to this host.
+        fresh: A managed run is always fresh; an attach run never claims it.
+        mods: Modlets staged into the client instance (managed only).
+        server_mods: Modlets staged into the server instance (managed only).
+            Defaults to the same set as ``mods``.
+        server: Ordered ``(name, value)`` serverconfig pairs for
+            ``sb render-config``; empty on an attach run.
+        host: Which host services the suite arms.
+        cases: The declared cases, in run order.
+        source: File the document was read from, or None for a mapping.
+        notes: Informational lines from the document.
+    """
+
     id: str
     provision: str
     backend: str
@@ -332,7 +382,7 @@ def resolve_mods(
     a separator is a path, taken relative to the suite file when relative.
     """
     if side not in ("client", "server"):
-        raise ValueError(f"side must be client or server, not {side!r}")
+        raise SuiteLoadError(f"side must be client or server, not {side!r}")
     known = {
         "playtest": repo / "dist" / "7dtd-playtest",
         "fastconnect": workspace / "7dtd-fastconnect" / "dist" / "7dtd-fastconnect",

@@ -31,7 +31,7 @@
     },
     "fresh": {
       "type": "boolean",
-      "description": "Managed runs are always fresh (must be true). Attach runs do not own the save they join (must be false)."
+      "description": "Managed runs are always fresh (must be true). Attach runs do not own the save they join (must be false). Omitted, it follows `provision`: true for managed, false for attach."
     },
     "server": {
       "type": "object",
@@ -42,15 +42,15 @@
     },
     "mods": {
       "type": "array",
-      "description": "Modlets staged into the CLIENT instance. A short name resolves to a sibling repo's dist/; anything else is a path relative to the suite file. Managed only.",
+      "description": "Modlets staged into the CLIENT instance. A short name resolves to a sibling repo's dist/; anything else is a path relative to the suite file. Omit on a managed run to stage the built-in pair. Managed only: an attach run must not stage mods into an instance it does not own.",
       "items": { "type": "string", "minLength": 1 },
       "default": ["playtest", "fastconnect"]
     },
     "server_mods": {
       "type": "array",
-      "description": "Modlets staged into the SERVER instance. Empty by default: the scenario runner and the join helper are client mods, and a client Harmony DLL loaded by a dedicated throws at load. A mod declaring blocks or items belongs in both lists, since a multiplayer client receives those definitions from the server. Managed only.",
+      "description": "Modlets staged into the SERVER instance. Defaults to the same set as `mods`: the modlet itself must sit in the dedicated server's Mods folder too, and a mod declaring blocks or items has to be on both sides because a multiplayer client receives those definitions from the server. Set it explicitly for an asymmetric pair (a client-only mod that loads no Harmony patch into the dedicated). Managed only: an attach run must not stage mods into an instance it does not own.",
       "items": { "type": "string", "minLength": 1 },
-      "default": []
+      "default": ["playtest", "fastconnect"]
     },
     "host": {
       "type": "object",
@@ -69,7 +69,11 @@
         "additionalProperties": true,
         "properties": {
           "id": { "type": "string", "minLength": 1 },
-          "kind": { "type": "string", "enum": ["live", "staged", "defer"] },
+          "kind": {
+            "type": "string",
+            "enum": ["live", "staged", "defer"],
+            "description": "How the case reads, for tooling and reports. It does NOT select the C# factory: the `ref` implementation (Catalog / IScenarioProvider) decides whether a case runs live, stages a scene, or is deferred."
+          },
           "ref": {
             "type": "string",
             "minLength": 1,
@@ -81,6 +85,7 @@
           },
           "barriers": {
             "type": "array",
+            "description": "Host fixtures this case needs, for tooling. The host does NOT act on it: a case requests a fixture from inside the client with Report.Barrier(\"spawn_zombie\") in its own callback.",
             "items": { "type": "string", "minLength": 1 }
           }
         }

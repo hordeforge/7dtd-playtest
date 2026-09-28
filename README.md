@@ -234,6 +234,33 @@ Another client mod can add a suite without forking this harness by referencing
 `IScenarioProvider`. Install that mod **alongside** `7dtd-playtest`, then set
 the suite env (see below) to your provider suite id.
 
+### The suite document
+
+A suite is a JSON file beside your mod, passed with `--suite-file` (or
+`PLAYTEST_SUITE_FILE`). The full contract is
+[schema/suite.schema.json](schema/suite.schema.json);
+[suites/smoke.json](suites/smoke.json) is a complete worked example.
+
+| Field | Meaning | Omitted |
+|---|---|---|
+| `id` | Suite id matched by `--suite` | required |
+| `provision` | `managed` (Safehouse owns the pair) or `attach` (server already up) | `managed` |
+| `backend` | `stock` or `zdtd` | `stock` |
+| `readonly` | Attach only: never write to the host | `false` |
+| `fresh` | Fresh save. Hard true on managed, refused on attach | follows `provision` |
+| `server` | serverconfig pairs handed to `sb render-config` | empty |
+| `mods` / `server_mods` | Modlets staged per side. A short name is a built-in; anything else is a path relative to the suite file | `playtest`, `fastconnect` on both sides |
+| `host` | `fixtures` (host answers client barriers), `loadgen` | both `false` |
+| `cases[]` | `id`, `kind`, `ref`, `tags`, `barriers` | required |
+
+`server`, `mods`, and `server_mods` are managed-only: an attach run owns
+neither the config nor the instances, so the loader refuses one that carries
+them. `kind` and `barriers` are declarative and the host does not act on them:
+the `ref` implementation decides whether a case runs live, stages a scene, or
+is deferred, and a case requests a fixture from inside the client with
+`Report.Barrier("spawn_zombie")`. Unknown fields are ignored; missing or
+contradictory ones fail closed with the file and field in the message.
+
 ### Minimal provider
 
 Discovery scans loaded mod assemblies for public `IScenarioProvider`
