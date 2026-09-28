@@ -1114,6 +1114,16 @@ runs exactly what CI runs, in one step. No game install needed - these are pure 
 build itself is not CI-able (references game DLLs), so the offline gates are
 the push-time guard for catalog/doc drift.
 
+Every workflow pins the same uv (`UV_VERSION`) that `pyproject.toml`'s
+`[tool.uv] required-version` names, and the version-surface gate fails when
+the two drift. On a push to `main`, a second job renders the coverage badge
+and pushes it to the `badges` branch. A `vX.Y.Z` tag runs
+`.github/workflows/release.yml`: it fails unless the tag matches
+`ModInfo.xml`, then builds the CycloneDX inventory for that tag from the two
+committed lockfiles and records its serial number and component count in the
+run summary. The mod archive is still built by a maintainer with a game
+install and attached to the release.
+
 ### Host orchestrator secrets
 
 The stock dedicated telnet password is local-only. When the orchestrator

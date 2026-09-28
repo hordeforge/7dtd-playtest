@@ -16,8 +16,10 @@ from pathlib import Path
 from version_surface import (
     BREAKING_MARKER,
     discover_tag_versions,
+    required_uv_floor,
     uncovered_tag_versions,
     undeclared_breaking_sections,
+    uv_pin_problems,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,8 @@ MOD_INFO = ROOT / "ModInfo.xml"
 DIST_MOD_INFO = ROOT / "dist" / "7dtd-playtest" / "ModInfo.xml"
 MOD_API = ROOT / "Source" / "PlayTestMod" / "ModIdentity.cs"
 CHANGELOG = ROOT / "CHANGELOG.md"
+PYPROJECT = ROOT / "pyproject.toml"
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def read_mod_info_version(path: Path) -> str:
@@ -93,6 +97,16 @@ def main() -> int:
 
     print(f"OK mod version {manifest} matches ModIdentity.Version")
     print("OK CHANGELOG.md has [Unreleased] and the current release entry")
+
+    assert PYPROJECT.is_file(), "pyproject.toml is missing; the uv pin has no source of truth"
+    floor = required_uv_floor(PYPROJECT.read_text(encoding="utf-8"))
+    for workflow in sorted(WORKFLOWS.glob("*.y*ml")):
+        problems = uv_pin_problems(workflow.read_text(encoding="utf-8"), floor)
+        assert not problems, (
+            f"{workflow.relative_to(ROOT)}: " + "; ".join(problems) + f". Bump UV_VERSION to "
+            f'{floor} (pyproject [tool.uv] required-version) in the same commit as the workflows.'
+        )
+        print(f"OK {workflow.relative_to(ROOT)} pins uv {floor} like pyproject")
     return 0
 
 

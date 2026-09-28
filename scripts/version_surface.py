@@ -9,6 +9,21 @@ SECTION_RE = re.compile(r"^##\s+\[([^\]]+)\]", re.MULTILINE)
 REMOVED_HEADING_RE = re.compile(r"^###\s+Removed\b", re.MULTILINE)
 BREAKING_MARKER = "**Breaking.**"
 
+# The uv that wrote uv.lock is named in two places: the floor in
+# pyproject.toml ([tool.uv] required-version) and the version every workflow
+# installs. A bump that moves one and not the other is quiet in one direction
+# (CI keeps running the old uv against a lock it did not write) and fatal in
+# the other (a contributor's newer uv is refused), so the pair is checked.
+UV_REQUIRED_VERSION_RE = re.compile(r'required-version\s*=\s*">=([0-9]+\.[0-9]+\.[0-9]+)')
+UV_VERSION_ENV_RE = re.compile(
+    r'^\s*UV_VERSION:\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', re.MULTILINE
+)
+SETUP_UV_USE_RE = re.compile(r"uses:\s*astral-sh/setup-uv@")
+UV_VERSION_REF = "${{ env.UV_VERSION }}"
+# How many lines after a `uses: astral-sh/setup-uv@` line still belong to that
+# step: the pinned action line, `with:`, and the version pin under it.
+SETUP_UV_STEP_LINES = 6
+
 
 def _git_dir(root: Path) -> Path | None:
     """Resolve root/.git to a directory, following a worktree pointer file."""
@@ -81,3 +96,45 @@ def undeclared_breaking_sections(changelog: str) -> list[str]:
         if REMOVED_HEADING_RE.search(body) and BREAKING_MARKER not in body:
             undeclared.append(heading)
     return undeclared
+
+
+def required_uv_floor(pyproject: str) -> str:
+    """The uv version [tool.uv] required-version demands, as X.Y.Z."""
+    match = UV_REQUIRED_VERSION_RE.search(pyproject)
+    assert match, (
+        'pyproject.toml has no [tool.uv] required-version = ">=X.Y.Z,<..."; '
+        "the workflows' uv pin has no floor to match against"
+    )
+    return match.group(1)
+
+
+def uv_pin_problems(workflow: str, floor: str) -> list[str]:
+    """Why a workflow's uv pin does not match the floor pyproject declares.
+
+    Empty for a workflow that never sets uv up, and empty when every
+    setup-uv step reads the workflow-level ``UV_VERSION`` and that value is
+    the floor. Each returned string names one way the pair can drift.
+    """
+    if SETUP_UV_USE_RE.search(workflow) is None:
+        return []
+
+    problems: list[str] = []
+    declared = UV_VERSION_ENV_RE.search(workflow)
+    if declared is None:
+        problems.append("sets uv up but declares no workflow-level UV_VERSION")
+    elif declared.group(1) != floor:
+        problems.append(
+            f"pins UV_VERSION {declared.group(1)}, pyproject requires >= {floor}"
+        )
+
+    lines = workflow.splitlines()
+    for index, line in enumerate(lines):
+        if SETUP_UV_USE_RE.search(line) is None:
+            continue
+        step = "\n".join(lines[index + 1 : index + 1 + SETUP_UV_STEP_LINES])
+        pin = re.search(r"^\s*version:\s*(.+?)\s*$", step, re.MULTILINE)
+        if pin is None:
+            problems.append("runs setup-uv with no version pin")
+        elif pin.group(1) != UV_VERSION_REF:
+            problems.append(f"pins setup-uv to {pin.group(1)}, not {UV_VERSION_REF}")
+    return problems

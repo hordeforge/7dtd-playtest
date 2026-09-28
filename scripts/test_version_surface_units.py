@@ -25,12 +25,27 @@ if str(_SCRIPTS) not in sys.path:
 from version_surface import (  # noqa: E402
     BREAKING_MARKER,
     discover_tag_versions,
+    required_uv_floor,
     uncovered_tag_versions,
     undeclared_breaking_sections,
+    uv_pin_problems,
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
 GATE = Path(__file__).resolve().parent / "test_version_surface.py"
+UV_FLOOR = "0.12.13"
+PYPROJECT = '[tool.uv]\nrequired-version = ">=0.12.13,<0.13"\n'
+
+
+def make_uv_workflow(path: Path, *, uv_version: str, inline: bool) -> None:
+    pin = f'"{uv_version}"' if inline else "${{ env.UV_VERSION }}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"env:\n  UV_VERSION: \"{uv_version}\"\n\njobs:\n  gate:\n    steps:\n"
+        f"      - uses: astral-sh/setup-uv@deadbeef\n        with:\n"
+        f"          version: {pin}\n      - run: make test\n",
+        encoding="utf-8",
+    )
 
 
 def assert_nuget_pins() -> None:
@@ -141,6 +156,8 @@ def make_root(
     (root / "CHANGELOG.md").write_text(
         "# Changelog\n\n## [Unreleased]\n\n- note\n\n" + entries, encoding="utf-8"
     )
+    (root / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    make_uv_workflow(root / ".github" / "workflows" / "ci.yml", uv_version=UV_FLOOR, inline=False)
     if git:
         make_git_dir(root / ".git", {"v9.9.9": "c" * 40}, [("v0.8.0", "d" * 40)])
 
@@ -245,6 +262,45 @@ def main() -> int:
     assert undeclared_breaking_sections(real) == [], undeclared_breaking_sections(real)
     assert "### Removed" in real, "CHANGELOG.md must keep the removal this gate polices"
     print("OK the shipped changelog has no undeclared removal section")
+
+    with tempfile.TemporaryDirectory(prefix="version-surface-uv-") as td:
+        base = Path(td)
+
+        assert required_uv_floor(PYPROJECT) == UV_FLOOR
+        print("OK the uv floor is read out of pyproject's required-version")
+
+        no_uv = "jobs:\n  gate:\n    steps:\n      - run: make test\n"
+        assert uv_pin_problems(no_uv, UV_FLOOR) == []
+        print("OK a workflow that never sets uv up has nothing to pin")
+
+        matched = base / "matched.yml"
+        make_uv_workflow(matched, uv_version=UV_FLOOR, inline=False)
+        assert uv_pin_problems(matched.read_text(encoding="utf-8"), UV_FLOOR) == []
+        print("OK a workflow reading the shared UV_VERSION pin passes")
+
+        stale = base / "stale.yml"
+        make_uv_workflow(stale, uv_version="0.11.9", inline=False)
+        problems = uv_pin_problems(stale.read_text(encoding="utf-8"), UV_FLOOR)
+        assert len(problems) == 1 and "0.11.9" in problems[0], problems
+        print("OK a workflow pinned below the pyproject floor is reported")
+
+        inline = base / "inline.yml"
+        make_uv_workflow(inline, uv_version=UV_FLOOR, inline=True)
+        problems = uv_pin_problems(inline.read_text(encoding="utf-8"), UV_FLOOR)
+        assert len(problems) == 1 and "not ${{ env.UV_VERSION }}" in problems[0], problems
+        print("OK a second literal uv pin beside the shared one is reported")
+
+        drifted_root = base / "drifted"
+        make_root(drifted_root, version="0.8.0", headings=["0.8.0", "9.9.9"])
+        make_uv_workflow(
+            drifted_root / ".github" / "workflows" / "ci.yml",
+            uv_version=UV_FLOOR,
+            inline=True,
+        )
+        proc = run_gate(drifted_root)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "UV_VERSION" in proc.stderr, proc.stderr
+        print("OK the gate fails a workflow whose uv pin drifted from pyproject")
 
     print("RESULT PASS")
     return 0

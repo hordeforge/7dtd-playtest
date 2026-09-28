@@ -74,6 +74,13 @@ Release model (inferred practice, now pinned by `make test`):
   so an unchanged tree re-runs to the same id. Gated offline by
   `scripts/test_dep_sbom.py`, and built for the tag in
   `.github/workflows/release.yml`.
+- **One uv pin across the toolchain, checked.** The workflows install the uv
+  that wrote `uv.lock` from a workflow-level `UV_VERSION` instead of a literal
+  repeated in every `setup-uv` step, and `scripts/test_version_surface.py`
+  fails when that value drifts from the `[tool.uv] required-version` floor in
+  `pyproject.toml` or when a step pins a second literal beside it. The tag's
+  SBOM also records its serial number and component count in the run summary,
+  which the runner temp dir alone did not leave behind.
 - **Gate-list surface** (`scripts/test_gate_list.py`, wired into the Makefile
   `GATES` list): fails when a `scripts/test_*.py` file is missing from `GATES`
   (it would run under neither `make test` nor CI) or when a `GATES` entry has

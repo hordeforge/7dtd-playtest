@@ -18,6 +18,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # The uv that wrote the committed uv.lock, and the floor pyproject declares
+  # in [tool.uv] required-version. test_version_surface.py fails when this and
+  # required-version drift apart.
+  UV_VERSION: "0.12.13"
+
 jobs:
   verify-tag:
     runs-on: ubuntu-24.04
@@ -28,10 +34,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
-          # The uv that wrote the committed uv.lock, matching
-          # required-version in pyproject.toml. A floating uv lets the
-          # resolver move under the gates without any commit.
-          version: "0.12.13"
+          # A floating uv lets the resolver move under the gates without any
+          # commit; the pin lives in this workflow's UV_VERSION.
+          version: ${{ env.UV_VERSION }}
       - name: Check the tag matches ModInfo.xml
         shell: bash
         run: |
@@ -56,4 +61,18 @@ jobs:
       # which is a reason not to ship the tag, not a flake. A maintainer
       # publishing the release attaches the same file the release notes link.
       - name: Build the SBOM for this tag
-        run: make sbom SBOM="$RUNNER_TEMP/7dtd-playtest.cdx.json"
+        run: |
+          set -euo pipefail
+          SBOM="$RUNNER_TEMP/7dtd-playtest.cdx.json"
+          make sbom SBOM="$SBOM"
+          # $RUNNER_TEMP dies with the job, so an inventory that exists only
+          # there leaves the tag with no record of what it shipped. The run
+          # summary keeps the identifying fields where someone reading the
+          # tagged run can check them against the attached file.
+          {
+            echo "### SBOM for \`$GITHUB_REF_NAME\`"
+            echo
+            echo "- file: \`$SBOM\` (runner temp dir; the maintainer attaches it to the release)"
+            echo "- serialNumber: \`$(sed -n 's/.*"serialNumber": "\([^"]*\)".*/\1/p' "$SBOM")\`"
+            echo "- components: $(grep -c '"purl"' "$SBOM")"
+          } >> "$GITHUB_STEP_SUMMARY"

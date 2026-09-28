@@ -14,6 +14,13 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # The uv that wrote the committed uv.lock, and the floor pyproject declares
+  # in [tool.uv] required-version. One pin for both jobs instead of a literal
+  # per setup-uv step; test_version_surface.py fails when this and
+  # required-version drift apart, so a bump lands in both files at once.
+  UV_VERSION: "0.12.13"
+
 jobs:
   offline-tests:
     # Pinned image: ubuntu-latest floats (currently 24.04, was 22.04) and a
@@ -28,10 +35,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
-          # The uv that wrote the committed uv.lock, matching
-          # required-version in pyproject.toml. A floating uv lets the
-          # resolver move under the gates without any commit.
-          version: "0.12.13"
+          # A floating uv lets the resolver move under the gates without any
+          # commit; the pin lives in this workflow's UV_VERSION.
+          version: ${{ env.UV_VERSION }}
       # setup-uv caches uv's wheel/install store automatically on GitHub-hosted
       # runners (enable-cache defaults to auto), keyed off the uv.lock file.
       # `make test` = ruff lint + mypy typecheck (both pinned in the dev
@@ -66,10 +72,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
-          # The uv that wrote the committed uv.lock, matching
-          # required-version in pyproject.toml. A floating uv lets the
-          # resolver move under the gates without any commit.
-          version: "0.12.13"
+          # A floating uv lets the resolver move under the gates without any
+          # commit; the pin lives in this workflow's UV_VERSION.
+          version: ${{ env.UV_VERSION }}
       - run: make coverage
       - run: uv run --locked --project "$PWD" python scripts/coverage_badge.py "$RUNNER_TEMP/coverage.svg"
       - name: Publish the badge to the badges branch
