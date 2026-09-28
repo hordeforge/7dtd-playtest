@@ -131,6 +131,80 @@ namespace ZdtdPlaytest
         // so a shared array avoids a heap alloc per frame (see LocomotionDrive).
         static readonly object[] WaterProbeArgs = new object[3];
 
+        // Block type -> its name, resolved once per type.
+        // A radius scan reads tens of thousands of cells that hold a few
+        // hundred distinct block types, so asking each cell's block for its
+        // name (a managed-to-native call returning a fresh string) and then
+        // searching that string repeats the same answer thousands of times
+        // per scan. A block's name does not change while the world is loaded,
+        // so the first cell of a type decides for the rest. Type 0 is air and
+        // has no name; it is seeded so the commonest cell never calls out.
+        static readonly Dictionary<int, string> BlockNameByType = new Dictionary<int, string>
+        {
+            { 0, "" },
+        };
+
+        /// <summary>A block type's name, resolved at most once per type.</summary>
+        /// <remarks>
+        /// The lookup is guarded exactly as each call site guarded it: a null
+        /// block or a throwing accessor yields "" rather than propagating. A
+        /// type that answered "" is not cached, so a block whose name was not
+        /// resolvable yet is re-asked later rather than pinned to empty.
+        /// </remarks>
+        static string BlockName(BlockValue b)
+        {
+            string known;
+            if (BlockNameByType.TryGetValue(b.type, out known)) return known;
+            string name = "";
+            try { name = b.Block?.GetBlockName() ?? ""; } catch { /* */ }
+            if (name.Length == 0) return "";
+            BlockNameByType[b.type] = name;
+            return name;
+        }
+
+        /// <summary>Whether a block type's name contains <paramref name="needle"/>
+        /// (case-insensitively), memoized per type.</summary>
+        static bool BlockNameContains(BlockValue b, string needle, Dictionary<int, bool> memo)
+        {
+            bool known;
+            if (memo.TryGetValue(b.type, out known)) return known;
+            bool hit = BlockName(b).IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+            memo[b.type] = hit;
+            return hit;
+        }
+
+        static readonly Dictionary<int, bool> WaterNameByType = new Dictionary<int, bool>
+        {
+            { 0, false },
+        };
+        static readonly Dictionary<int, bool> DecoNameByType = new Dictionary<int, bool>
+        {
+            { 0, false },
+        };
+
+        /// <summary>Whether a block's name reads as water.</summary>
+        public static bool IsWaterName(BlockValue b)
+        {
+            return BlockNameContains(b, "water", WaterNameByType);
+        }
+
+        /// <summary>Whether a block's name reads as plant/wood-ish decoration.</summary>
+        public static bool IsDecoName(BlockValue b)
+        {
+            bool known;
+            if (DecoNameByType.TryGetValue(b.type, out known)) return known;
+            // The five needles stay in one place: the memo exists so this list
+            // is evaluated once per block type rather than once per cell.
+            string name = BlockName(b);
+            bool deco = name.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("plant", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("bush", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("grass", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("deco", StringComparison.OrdinalIgnoreCase) >= 0;
+            DecoNameByType[b.type] = deco;
+            return deco;
+        }
+
 
         /// <summary>Read water mass at world cell if API available.</summary>
         public static bool CellHasWaterMass(World world, Vector3i pos)
@@ -139,9 +213,7 @@ namespace ZdtdPlaytest
             {
                 var b = world.GetBlock(pos);
                 if (b.isWater) return true;
-                string n = "";
-                try { n = b.Block?.GetBlockName() ?? ""; } catch { /* */ }
-                if (n.IndexOf("water", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                if (IsWaterName(b)) return true;
             }
             catch { /* */ }
             try
@@ -302,20 +374,9 @@ namespace ZdtdPlaytest
                 for (int dy = -4; dy <= 2; dy++)
                 {
                     var b = world.GetBlock(o + new Vector3i(dx, dy, dz));
-                    if (b.isWater || b.isair == false && b.Block != null)
-                    {
-                        try
-                        {
-                            if (b.isWater) { n++; continue; }
-                            string name = b.Block.GetBlockName() ?? "";
-                            if (name.IndexOf("water", StringComparison.OrdinalIgnoreCase) >= 0)
-                                n++;
-                        }
-                        catch
-                        {
-                            if (b.isWater) n++;
-                        }
-                    }
+                    if (b.isWater) { n++; continue; }
+                    if (b.isair || b.Block == null) continue;
+                    if (IsWaterName(b)) n++;
                 }
             }
             catch { /* */ }

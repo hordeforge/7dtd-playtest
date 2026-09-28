@@ -1229,14 +1229,7 @@ namespace ZdtdPlaytest
                         var b = ctx.World.GetBlock(o + new Vector3i(dx, dy, dz));
                         if (b.type == 0 || b.isair) continue;
                         total++;
-                        string n = "";
-                        try { n = b.Block?.GetBlockName() ?? ""; } catch { n = ""; }
-                        if (n.IndexOf("tree", StringComparison.OrdinalIgnoreCase) >= 0
-                            || n.IndexOf("plant", StringComparison.OrdinalIgnoreCase) >= 0
-                            || n.IndexOf("bush", StringComparison.OrdinalIgnoreCase) >= 0
-                            || n.IndexOf("grass", StringComparison.OrdinalIgnoreCase) >= 0
-                            || n.IndexOf("deco", StringComparison.OrdinalIgnoreCase) >= 0)
-                            plantish++;
+                        if (Helpers.IsDecoName(b)) plantish++;
                     }
                     ctx.IntA = plantish;
                     ctx.IntB = total;
@@ -1303,16 +1296,8 @@ namespace ZdtdPlaytest
                 // Real water only: voxel mass, isWater flag, or water-named / non-air water cell.
                 // Package send alone is not enough (C2S without observable mass is a soft pass).
                 bool any = n > 0 || mass || b.isWater;
-                if (!any && b.type != 0)
-                {
-                    try
-                    {
-                        string bn = b.Block?.GetBlockName() ?? "";
-                        if (bn.IndexOf("water", StringComparison.OrdinalIgnoreCase) >= 0)
-                            any = true;
-                    }
-                    catch { /* */ }
-                }
+                if (!any && b.type != 0 && Helpers.IsWaterName(b))
+                    any = true;
                 ctx.Detail = "water=" + n + " mass=" + mass + " type=" + b.type
                     + " isWater=" + b.isWater + " sent=" + (ctx.PlaceBlockType == 1);
                 return any;
