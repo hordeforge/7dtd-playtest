@@ -402,11 +402,20 @@ def test_orchestrator_payload_keys_match_consumer_contract() -> None:
     for key in ('"results"', '"summary"', '"server"', '"wall_sec"', '"ran_epoch"'):
         assert key in src, f"producer payload lost consumer key {key}"
     # The stamp reads the orchestrator's clock seam, so a simulated run names
-    # its report the same way a real one does. Pinned by name to keep the seam
-    # from being bypassed, and by behaviour so what is actually checked is that
-    # the consumer parses the filename the producer builds.
-    assert 'report-{int(epoch_now())}.json' in src, (
+    # its report the same way a real one does, and one run's report filename,
+    # junit filename and ran_epoch field carry the same epoch rather than
+    # whatever second each of three independent clock reads happened to land
+    # in. Pinned by name to keep the seam from being bypassed, and by
+    # behaviour so what is actually checked is that the consumer parses the
+    # filename the producer builds.
+    assert "run_epoch = int(epoch_now())" in src, (
+        "run epoch no longer reads the orchestrator's clock seam"
+    )
+    assert 'report-{run_epoch}.json' in src, (
         "producer report filename no longer matches newest_report's glob"
+    )
+    assert 'junit-{run_epoch}.xml' in src, (
+        "producer junit filename is no longer the report's twin epoch"
     )
     produced = f"report-{int(playtest_run.epoch_now())}.json"
     assert playtest_compare.ran_epoch_of(Path(produced), {}) is not None, (

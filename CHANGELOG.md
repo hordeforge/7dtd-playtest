@@ -316,6 +316,24 @@ Migration, by symbol:
   "what the world actually was" list could not reproduce the run it described.
   The snapshot now follows the forced keys and still drops the per-run
   password, which must not leave the machine.
+- **The quarantine stamp read the real clock.** `_quarantine_entry` named its
+  directory from `time.strftime`/`time.gmtime` instead of the injected clock,
+  so a run on a simulated clock stamped its evidence with host time while
+  `prune_quarantine` keeps the newest entries by name. It now reads
+  `epoch_now()` and formats in UTC, which is what the name ordering already
+  assumed. `test_playtest_run_units.py` widened its seam pin from three named
+  `time` attributes to every `time.<attr>(` call, which is the gap that let
+  this through.
+- **One run could name three different epochs.** The report filename, the junit
+  filename and the report's `ran_epoch` field each read the clock separately, so
+  a run straddling a second boundary was written as `report-<A>.json` carrying
+  `ran_epoch=B` beside a `junit-<C>.xml`. `playtest_compare` treats the name
+  and the field as the same value. All four now read one `run_epoch`.
+- **A clock step could cut or stretch `playtest_lock.py wait`.** The wait
+  measured its budget with two wall-clock reads, so an NTP correction mid-wait
+  ended a 30-minute wait early or stretched it by the size of the step. The
+  budget is now a countdown of what the loop actually slept, using the
+  existing `sleeper` seam.
 - **The vision-review intent had no size bound.** Everything in an intent goes
   into the review prompt verbatim, so a pasted log in `purpose` or a thousand
   `questions` was an unbounded provider request. `parse_intent` now refuses an

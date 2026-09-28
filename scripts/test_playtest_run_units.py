@@ -769,10 +769,13 @@ def test_run_time_reads_go_through_the_clock_seam() -> None:
     timeout through a clock that only the runner's own reads can see.
     """
     src = (_SCRIPTS / "playtest_run.py").read_text(encoding="utf-8")
+    # Every `time.<attr>(` call, not a hand-picked few: `time.strftime` in the
+    # quarantine stamp was a real clock read outside the seam, and a pin that
+    # enumerated only monotonic/time/sleep could not see it.
     direct = [
         f"{i}: {line.strip()}"
         for i, line in enumerate(src.splitlines(), 1)
-        if re.search(r"\btime\.(monotonic|time|sleep)\s*\(", line)
+        if re.search(r"\btime\.[A-Za-z_]+\s*\(", line)
     ]
     # The three in SystemClock are the seam's own production implementation;
     # anything else is a call site that escaped it.

@@ -25,6 +25,7 @@ import sys
 import time
 import traceback
 from collections.abc import Callable, Iterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Protocol
 from xml.sax.saxutils import escape as xml_escape
@@ -1957,7 +1958,11 @@ def _quarantine_entry(qroot: Path, label: str) -> Path | None:
     None means the quarantine itself is unusable (disk, permissions): callers
     must then leave the data in place rather than destroy it unrecoverably.
     """
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    # Read through the injected clock like every other time source here, and
+    # stamp in UTC with a fixed-width format: prune_quarantine keeps the newest
+    # entries by name, so the stamp has to sort lexicographically and must not
+    # come from the host's local zone.
+    stamp = datetime.fromtimestamp(epoch_now(), UTC).strftime("%Y%m%dT%H%M%SZ")
     entry = qroot / f"{stamp}-{label}"
     n = 0
     while entry.exists():
@@ -3059,7 +3064,13 @@ def main(argv: list[str] | None = None) -> int:
     # env var or stale shell default is visible in every log without --help.
     log("config: " + config_summary(args))
 
-    report_path = args.logdir / f"report-{int(epoch_now())}.json"
+    # One epoch for the whole run: the report filename, its junit twin and the
+    # ran_epoch field are one identity, and three independent clock reads can
+    # straddle a second boundary and name three different runs. Consumers
+    # (playtest_compare's filename fallback, the lap aggregator's newest-report
+    # pick) read the name and the field as the same value.
+    run_epoch = int(epoch_now())
+    report_path = args.logdir / f"report-{run_epoch}.json"
     server_log = args.logdir / "server-orch.log"
     client_launch_log = args.logdir / "client-launch.log"
     peer_client_launch_log = args.logdir / "peer-client-launch.log"
@@ -3582,7 +3593,7 @@ def main(argv: list[str] | None = None) -> int:
         # Cumulative spawn_vehicle:<class> barrier lines seen in the log.
         vehicle_seen: dict[str, int] = {}
         apm_dump_path = args.logdir / "zdtd_apm_dump.txt"
-        apm_run_id = f"apm-{int(epoch_now())}-{os.getpid()}"
+        apm_run_id = f"apm-{run_epoch}-{os.getpid()}"
         client_extra_env: dict[str, str] = dict(client_instance_env)
         if args.trace_entity:
             client_extra_env["PLAYTEST_TRACE_ENTITY"] = "1"
@@ -3821,7 +3832,7 @@ def main(argv: list[str] | None = None) -> int:
                     "skip": int((setup_parsed.get("summary") or {}).get("skip") or 0),
                 }
                 results = setup_parsed.get("results") or []
-                junit_path = args.logdir / f"junit-{int(epoch_now())}.xml"
+                junit_path = args.logdir / f"junit-{run_epoch}.xml"
                 write_report(
                     report_path,
                     {
@@ -4357,7 +4368,7 @@ def main(argv: list[str] | None = None) -> int:
             "unity_log": str(unity_log) if unity_log else None,
             "timeout_sec": args.timeout,
             "wall_sec": round(wall_s, 1),
-            "ran_epoch": int(epoch_now()),
+            "ran_epoch": run_epoch,
             # Structured echo of note_backend_exit(): a report whose cases
             # failed against an already-dead server must say so, not just the
             # terminal transcript.
@@ -4374,7 +4385,7 @@ def main(argv: list[str] | None = None) -> int:
             "visual_reviews": collect_visual_reviews(args.attach_reviews),
         }
         write_report(report_path, payload)
-        junit_path = args.junit or (args.logdir / f"junit-{int(epoch_now())}.xml")
+        junit_path = args.junit or (args.logdir / f"junit-{run_epoch}.xml")
         write_junit(junit_path, args.suite, combined_results)
         # A user-provided --junit path outside logdir is deliberate evidence
         # placement and is never pruned; only the timestamped logdir defaults

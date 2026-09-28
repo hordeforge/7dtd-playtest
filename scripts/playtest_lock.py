@@ -686,16 +686,21 @@ def wait_until_can_start(
     """
     e = _env(env)
     sleep = time.sleep if sleeper is None else sleeper
-    deadline = e.now() + timeout_sec
+    # The budget is what this function actually slept, not a pair of wall-clock
+    # reads. A clock step (NTP, an operator change) mid-wait would otherwise cut
+    # a 30-minute wait short or stretch it by the size of the step; the
+    # countdown cannot be moved by the clock it is measuring.
+    remaining = float(timeout_sec)
     while True:
         if can_start(
             session, path=path, live_probe=live_probe, env=e
         ):
             return True
-        now_t = e.now()
-        if now_t >= deadline:
+        if remaining <= 0:
             return False
-        sleep(min(interval_sec, max(0.0, deadline - now_t)))
+        nap = min(interval_sec, remaining)
+        sleep(nap)
+        remaining -= nap
 
 
 def acquire(
