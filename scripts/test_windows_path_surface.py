@@ -67,8 +67,8 @@ def test_sanitizer_refuses_device_names_and_empty() -> None:
     )
     assert "ReservedDeviceNames" in body, "AssetName never consults ReservedDeviceNames"
     assert '"_" +' in body, (
-        "AssetName must prefix a device name, otherwise `aux` still names the "
-        "device and CreateDirectory fails"
+        "AssetName must prefix a device name, otherwise `aux` and `aux.png` "
+        "still name the device and CreateDirectory fails"
     )
     assert re.search(r"if \(string\.IsNullOrEmpty\(name\)\)\s*return", body), (
         "AssetName must refuse an empty id before sanitizing: an empty name "

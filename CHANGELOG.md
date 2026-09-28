@@ -306,6 +306,17 @@ Migration, by symbol:
 
 ### Fixed
 
+- **A clip id could name a Windows device.** `Helpers.AssetName` maps a name
+  to ASCII letters, digits, `-` and `_`, so `con`, `prn`, `aux`, `nul`,
+  `com1`-`com9` and `lpt1`-`lpt9` survive it unchanged, and the mod runs on the
+  Windows client: `CreateDirectory` on `playtest-shots/clips/aux` fails and a
+  take that recorded frames had no directory a collector could look in. A
+  surviving device name is now prefixed with `_` (`ReservedDeviceNames`,
+  compared case-insensitively, since the device matches any casing and any
+  extension). `COM0` and `LPT0` stay ordinary names; Windows does not reserve
+  them. The `scene staged` name, the `clip complete` line and the frames
+  directory remain that one string, so the prefix reaches all three.
+
 - **A clip marker named a directory that was never created.** Frames were
   written to `playtest-shots/clips/<id>` under a sanitized name while the
   `clip complete` line, the `scene staged` name and the on-demand recorder's

@@ -298,6 +298,23 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// The Windows device names, lowercase. Windows reserves them in every
+        /// directory, whatever the extension or casing, and COM0 and LPT0 are
+        /// ordinary file names, so the list stops at 9. A path whose final
+        /// segment is one of these is the device, not a file, so
+        /// <c>CreateDirectory</c> on one fails and the case photographs
+        /// nothing. Only the lowercase spelling can reach a path:
+        /// <see cref="AssetName"/> maps every other casing and every extension
+        /// to underscores first, and the comparison itself is
+        /// case-insensitive.
+        /// </summary>
+        static readonly string[] ReservedDeviceNames = {
+            "con", "prn", "aux", "nul",
+            "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+            "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+        };
+
+        /// <summary>
         /// The one name an id becomes on disk and in the lines collectors read.
         /// </summary>
         /// <remarks>
@@ -331,7 +348,9 @@ namespace ZdtdPlaytest
         /// exactly one of them in lowercase still does, so the survivor takes
         /// a <c>_</c> prefix rather than being dropped: a collector reads the
         /// directory back out of the marker line, and the marker and the
-        /// directory derive it here and nowhere else. The comparison is
+        /// directory derive it here and nowhere else. <c>CreateDirectory</c>
+        /// on a device name fails, which would leave the recorded clip with no
+        /// directory to look in. The comparison is
         /// case-insensitive as well, because a device name matches in any
         /// casing. The mapping is idempotent, so prefixing the device name
         /// with <c>_</c> survives a second pass.</para>
@@ -345,28 +364,9 @@ namespace ZdtdPlaytest
                 sb.Append((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
             string safe = sb.ToString();
             if (safe.Length == 0) return "unnamed";
-            foreach (string device in ReservedDeviceNames)
-            {
-                if (string.Equals(safe, device, StringComparison.ToLowerInvariant))
-                    return "_" + safe;
-            }
+            if (Array.IndexOf(ReservedDeviceNames, safe.ToLowerInvariant()) >= 0)
+                return "_" + safe;
             return safe;
         }
-
-        /// <summary>
-        /// The Windows device names, lowercase. A path whose final segment is
-        /// one of these is the device, not a file, so <c>CreateDirectory</c> on
-        /// one fails and the case photographs nothing. Only the lowercase
-        /// spelling can reach a path: <see cref="AssetName"/> maps every other
-        /// casing and every extension to underscores first, and the comparison
-        /// itself is case-insensitive. COM0 and LPT0 are not among them; those
-        /// are ordinary names.
-        /// </summary>
-        static readonly string[] ReservedDeviceNames =
-        {
-            "con", "prn", "aux", "nul",
-            "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-            "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
-        };
     }
 }
