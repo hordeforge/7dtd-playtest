@@ -13,7 +13,8 @@ from __future__ import annotations
 import contextlib
 import json
 import re
-from collections.abc import Iterable
+from collections import Counter
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Protocol, TypedDict
 
@@ -29,6 +30,10 @@ from typing import Protocol, TypedDict
 # remote LAN chat). The payload after the marker is parsed structurally: JSON
 # via json.loads, human lines by whitespace tokens.
 MARKER = "[7dtd-playtest]"
+
+# Human barrier emission, e.g. `barrier spawn_vehicle:zombieBoe`. The trailing
+# space is part of the token: a bare `barrier` line names nothing.
+BARRIER_PREFIX = "barrier "
 
 
 def _contract_tail(line: str) -> str | None:
@@ -89,6 +94,24 @@ def empty_client_log() -> ParsedClientLog:
     }
 
 
+def _barrier_names(blob: str) -> Iterator[str]:
+    """Yield the name of every human `barrier <name>` line in ``blob``.
+
+    One pass shared by every barrier consumer, so the whole-name and
+    parameterised-prefix views cannot drift. Only Report.Barrier emissions
+    reach here, never a game/chat/mod line that merely contains the words:
+    the marker must be the line's first bracketed token (see
+    :func:`_contract_tail`). ``""`` is yielded for a bare `barrier ` line,
+    which names nothing and matches no caller pattern.
+    """
+    for line in blob.splitlines():
+        tail = _contract_tail(line)
+        if tail is None or not tail.startswith(BARRIER_PREFIX):
+            continue
+        tokens = tail.split()
+        yield tokens[1] if len(tokens) >= 2 else ""
+
+
 def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     """Return every full barrier name that starts with ``prefix``.
 
@@ -96,38 +119,18 @@ def barrier_hits_prefix(blob: str, prefix: str) -> list[str]:
     the same class during one composed run. Consumers keep their own fired
     counts or token sets, so collapsing identical names here loses events.
     """
-    hits: list[str] = []
-    for line in blob.splitlines():
-        tail = _contract_tail(line)
-        if tail is None or not tail.startswith("barrier "):
-            continue
-        name = tail[len("barrier "):].split()[0] if tail[len("barrier "):] else ""
-        if name.startswith(prefix):
-            hits.append(name)
-    return hits
+    return [name for name in _barrier_names(blob) if name.startswith(prefix)]
 
 
 def barrier_line_hits(blob: str, name: str) -> int:
     """Count human `barrier <name>` lines in ``blob`` (whole-name match).
-
-    Only Report.Barrier emissions may count toward servicing an admin action,
-    never a game/chat/mod line that merely contains the words: the marker must
-    be the line's first bracketed token (see :func:`_contract_tail`).
 
     Report.Barrier also emits JSON with the same name; summing both
     double-fires handlers (e.g. kills bots). The whole-name match keeps
     "spawn_vehicle" from also counting parameterised "spawn_vehicle:<class>"
     lines, which are collected separately via barrier_hits_prefix.
     """
-    count = 0
-    for line in blob.splitlines():
-        tail = _contract_tail(line)
-        if tail is None or not tail.startswith("barrier "):
-            continue
-        tokens = tail.split()
-        if len(tokens) >= 2 and tokens[1] == name:
-            count += 1
-    return count
+    return sum(1 for hit in _barrier_names(blob) if hit == name)
 
 
 def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
@@ -135,12 +138,13 @@ def add_barrier_hits(totals: dict[str, int], blob: str) -> None:
 
     Poll loops feed only appended chunks through here instead of re-scanning
     the whole log each poll; totals only grow, matching how handlers compare
-    their fired counts against everything seen so far.
+    their fired counts against everything seen so far. One pass tallies every
+    tracked name at once: rescanning the chunk per name made the 2 Hz poll
+    cost grow with the tracked-name count rather than with the new bytes.
     """
-    for name in totals:
-        hits = barrier_line_hits(blob, name)
-        if hits:
-            totals[name] += hits
+    for name, count in Counter(_barrier_names(blob)).items():
+        if name in totals:
+            totals[name] += count
 
 
 class ClientLogScan:

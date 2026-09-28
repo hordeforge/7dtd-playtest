@@ -445,6 +445,51 @@ def test_incremental_scan_matches_whole_parse() -> None:
     print("PASS incremental_scan chunked feed equals whole-log parse and counts")
 
 
+def test_add_barrier_hits_accumulates_across_chunks() -> None:
+    """add_barrier_hits folds one poll's appended chunk into cumulative totals.
+
+    The poll loop calls it once per chunk and never rescans the log, so folding
+    must be additive across calls: counting only what this chunk added has to
+    give the same totals as one whole-log call, and a name the table does not
+    track must neither be counted nor added to it.
+    """
+    names = ("spawn_zombie", "spawn_vehicle", "chat_echo")
+    chunks = [
+        "[7dtd-playtest] barrier spawn_zombie\n"
+        "[chat] <player> just saying barrier spawn_zombie out loud\n",
+        "[7dtd-playtest] barrier spawn_vehicle:gyrocopter\n"
+        "[7dtd-playtest] barrier spawn_vehicle:bicycle\n"
+        "[7dtd-playtest] barrier spawn_zombie\n",
+        "[game] a line that is not a contract line at all\n"
+        "[7dtd-playtest] barrier \n"
+        "[7dtd-playtest] barrier chat_echo:ptchat12345\n",
+    ]
+
+    folded = dict.fromkeys(names, 0)
+    for chunk in chunks:
+        playtest_log.add_barrier_hits(folded, chunk)
+    whole = dict.fromkeys(names, 0)
+    playtest_log.add_barrier_hits(whole, "".join(chunks))
+
+    assert folded == whole, (folded, whole)
+    assert folded["spawn_zombie"] == 2, folded
+    # Parameterised fires do not count toward the bare name.
+    assert folded["spawn_vehicle"] == 0, folded
+    assert folded["chat_echo"] == 0, folded
+    # An untracked name present in the chunk stays out of the table.
+    tracked = {"spawn_zombie": 0}
+    playtest_log.add_barrier_hits(
+        tracked, "[7dtd-playtest] barrier spawn_vehicle\n"
+    )
+    assert set(tracked) == {"spawn_zombie"}, tracked
+    assert tracked["spawn_zombie"] == 0, tracked
+    # Per-name agreement with the independent whole-text counter, which is the
+    # view the barrier totals are defined against.
+    for name, total in folded.items():
+        assert total == playtest_log.barrier_line_hits("".join(chunks), name), name
+    print("PASS add_barrier_hits folds chunks additively without tracking extras")
+
+
 def test_pump_log_tail_survives_truncation_between_phases() -> None:
     """The rejoin flow truncates the client log between setup and verify and
     the orchestrator recreates tail+scan there. A real LogTail must restart
@@ -898,6 +943,7 @@ def main() -> int:
     test_fuzz_write_junit_roundtrips_hostile_strings()
     test_incremental_scan_matches_whole_parse()
     test_feed_line_counts_nre_hits_without_the_batch_helper()
+    test_add_barrier_hits_accumulates_across_chunks()
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
