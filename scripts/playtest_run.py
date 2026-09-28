@@ -2164,6 +2164,13 @@ def new_barrier_tables() -> tuple[dict[str, int], dict[str, int]]:
 # `vehicleMotorcycle`) and chat tokens (`ptchat12345`) all match.
 BARRIER_PARAM_RE = re.compile(r"[A-Za-z0-9_]{1,64}")
 
+# One `bot list` line per bot, and the two floors the bot barriers hold the
+# roster to. Both handlers set or top up a roster rather than adding to it, so
+# a barrier that fires twice leaves the world as one fire left it.
+_BOT_LIST_LINE_RE = re.compile(r"Bot ")
+BOT_LIST_MIN_ENTRIES = 6
+BOT_LIST_MIN_ALIVE = 1
+
 
 def safe_barrier_param(value: str) -> bool:
     """True when a log-derived barrier parameter may reach a telnet command."""
@@ -2193,13 +2200,19 @@ def barrier_spawn_zombie(tn: TelnetAdmin) -> None:
         tn.spawn_near_players("zombieBoe")
 
 
+def listed_bots(out: str) -> int:
+    """How many bots a `bot list` reply names (one line per bot)."""
+    return len(_BOT_LIST_LINE_RE.findall(out))
+
+
 def barrier_ensure_bots(tn: TelnetAdmin) -> None:
     # BotMod auto-spawns TargetBotCount; ensure at least 6 via telnet if
-    # needed (lines with "Bot " in bot list).
+    # needed (lines with "Bot " in bot list). `bot count` is an absolute set,
+    # so a repeated fire leaves the roster where it is.
     out = tn.exec("bot list")
-    if len(re.findall(r"Bot ", out)) < 6:
-        r = tn.exec("bot count 6")
-        log(f"telnet bot count 6 -> {r[:120]!r}")
+    if listed_bots(out) < BOT_LIST_MIN_ENTRIES:
+        r = tn.exec(f"bot count {BOT_LIST_MIN_ENTRIES}")
+        log(f"telnet bot count {BOT_LIST_MIN_ENTRIES} -> {r[:120]!r}")
 
 
 def barrier_bot_near_player(tn: TelnetAdmin) -> None:
@@ -2208,9 +2221,19 @@ def barrier_bot_near_player(tn: TelnetAdmin) -> None:
         ident = str(pids[0])
         r = tn.exec(f"bot player {ident} 1")
         log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
-    else:
-        r = tn.exec("bot spawn 1")
-        log(f"telnet bot spawn 1 -> {r[:120]!r}")
+        return
+    # `bot spawn 1` adds a bot, so a barrier that fires again (a duplicated
+    # log line, a rejoin phase replaying the setup barrier, a poll that
+    # re-reads a marker) grows the roster by one every time, and the case then
+    # measures a world with more bots in it than the first run did. The state
+    # this barrier wants is "a bot is up", which `bot list` can answer, so
+    # spawn only the deficit.
+    out = tn.exec("bot list")
+    if listed_bots(out) >= BOT_LIST_MIN_ALIVE:
+        log(f"telnet bot spawn: {listed_bots(out)} bot(s) already up; nothing to spawn")
+        return
+    r = tn.exec("bot spawn 1")
+    log(f"telnet bot spawn 1 -> {r[:120]!r}")
 
 
 def barrier_kill_fixtures(tn: TelnetAdmin) -> None:

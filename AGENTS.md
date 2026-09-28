@@ -306,7 +306,10 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 - Barrier: `barrier <name>` (host greps for telnet/admin phases).
   `spawn_vehicle:<entityClass>` asks the host for one vehicle of that class
   (the bare `spawn_vehicle` spawns a bicycle); client-created vehicles are
-  unknown to a dedicated server and cannot be driven there.
+  unknown to a dedicated server and cannot be driven there. A handler that
+  wants a *state* rather than one more entity reads it first (`bot list`) and
+  acts only on the deficit, so a barrier emitted twice leaves the world as one
+  emission left it. `bot spawn 1` adds a bot and must stay behind such a read.
 - Staged frame: `scene staged <name> <detail>` (`Report.Staged`). Emitted the
   moment a scene is on screen, for an external screenshot loop to key on. A
   case detail is flushed with its *result*, tens of seconds later, so a loop

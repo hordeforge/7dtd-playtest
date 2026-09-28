@@ -59,6 +59,39 @@ echo "playtest_repeat: suite=$SUITE laps=$LAPS report_dir=$REPORT_DIR"
 declare -i laps_passed=0 laps_total=0
 declare -i sum_pass=0 sum_fail=0 sum_skip=0
 
+# A lap mark is this script's own scratch, and a run killed between mktemp and
+# its own rm -f leaves one behind in the report dir. Nothing else removes them,
+# so repeated runs pile up an empty file per killed lap for good. Sweep only
+# the marks old enough that no live lap can still be reading through one: a
+# concurrent session's fresh mark must survive, or its newest_report finds no
+# anchor and grades its lap as "no report".
+MARK_STALE_SEC="${PLAYTEST_LAP_MARK_STALE_SEC:-86400}"
+sweep_stale_lap_marks() {
+  local older_than=$(( MARK_STALE_SEC / 60 )) mark
+  (( older_than > 0 )) || return 0
+  while IFS= read -r mark; do
+    rm -f "$mark"
+  done < <(find "$REPORT_DIR" -maxdepth 1 -name '.lap-mark.*' -type f \
+             -mmin "+$older_than" 2>/dev/null)
+}
+
+if [[ -d "$REPORT_DIR" ]]; then
+  sweep_stale_lap_marks
+fi
+
+# An interrupted run drops the mark it is holding, so the common exit paths
+# leave nothing behind. A SIGKILLed run still leaves one; the sweep above is
+# what bounds those.
+LAP_MARK=""
+# shellcheck disable=SC2329  # the trap below is its only caller
+release_lap_mark() {
+  if [[ -n "$LAP_MARK" ]]; then
+    rm -f "$LAP_MARK"
+    LAP_MARK=""
+  fi
+}
+trap release_lap_mark EXIT INT TERM
+
 # Newest report a lap produced (report-<epoch>.json). Pure bash: no ls -t
 # parsing, paths with spaces survive. Only reports newer than $1 count: the
 # report dir is the shared default and a previous lap, a concurrent session,
@@ -85,13 +118,16 @@ for lap in $(seq 1 "$LAPS"); do
   # Stamped before the lap runs, so a report this lap did not write is never
   # graded as its verdict.
   lap_mark="$(mktemp "$REPORT_DIR/.lap-mark.XXXXXX")"
+  LAP_MARK="$lap_mark"
   if ! uv run --locked --project "$ROOT" python "$ORCH" --suite "$SUITE" --logdir "$REPORT_DIR" "${ORCH_ARGS[@]}"; then
     rm -f "$lap_mark"
+    LAP_MARK=""
     echo "playtest_repeat: lap $lap failed (orchestrator exit != 0)" >&2
     continue
   fi
   latest="$(latest_report "$lap_mark")"
   rm -f "$lap_mark"
+  LAP_MARK=""
   if [[ -z "$latest" ]]; then
     echo "playtest_repeat: lap $lap produced no report under $REPORT_DIR" >&2
     continue

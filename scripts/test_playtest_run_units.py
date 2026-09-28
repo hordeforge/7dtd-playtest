@@ -1716,6 +1716,127 @@ def test_spawn_near_players_trusts_only_live_sessions() -> None:
     print("PASS spawn_trust_only_live_sessions dead sessions never book spawns")
 
 
+def test_repeat_lap_marks_do_not_accumulate_across_runs() -> None:
+    """playtest_repeat.sh must not leave scratch behind in the report dir.
+
+    The lap mark is a mktemp file in the shared report directory, and a run
+    killed before its own `rm -f` leaves one there. Reruns then pile up an
+    empty file per killed lap forever, so the script releases the mark it
+    holds and sweeps the marks no live lap can still be using."""
+
+    script = _SCRIPTS / "playtest_repeat.sh"
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        report_dir = tmp / "reports"
+        report_dir.mkdir()
+        # A mark from a run that is long gone, and one from a session that
+        # could still be reading through it right now.
+        stale = report_dir / ".lap-mark.STALE01"
+        fresh = report_dir / ".lap-mark.FRESH1"
+        for mark in (stale, fresh):
+            mark.write_text("", encoding="utf-8")
+        one_day_ago = time.time() - 3 * 24 * 3600
+        os.utime(stale, (one_day_ago, one_day_ago))
+
+        stub_bin = tmp / "bin"
+        stub_bin.mkdir()
+        uv = stub_bin / "uv"
+        # The orchestrator is stubbed to a no-op success: the sweep and the
+        # mark release are what is under test, not a playtest run.
+        uv.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        uv.chmod(0o755)
+        env = {**os.environ, "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
+        proc = subprocess.run(
+            [
+                "bash",
+                str(script),
+                "--laps",
+                "1",
+                "--logdir",
+                str(report_dir),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=60,
+            check=False,
+        )
+        assert not stale.exists(), f"a dead run's lap mark was never swept: {proc.stdout}"
+        assert fresh.exists(), (
+            f"a concurrent session's fresh lap mark was swept: {proc.stdout}"
+        )
+        left = sorted(p.name for p in report_dir.glob(".lap-mark.*"))
+        assert left == [fresh.name], f"the run left its own marks behind: {left}"
+    print("PASS repeat_lap_marks dead marks swept, live ones left alone")
+
+
+def test_bot_barriers_converge_instead_of_adding_a_bot() -> None:
+    """Both bot barriers must leave the roster where the first run left it.
+
+    `bot spawn 1` is an increment, so a barrier that fires a second time
+    (a duplicated marker, a rejoin phase replaying the setup barrier) would
+    put another bot in a world the case is about to measure. They set the
+    wanted roster instead: read it, and act only on the deficit."""
+
+    class BotTelnet(playtest_run.TelnetAdmin):
+        """Replays canned `bot list` replies and records what was sent."""
+
+        def __init__(self, players: str, bot_lists: list[str]) -> None:
+            self._players = players
+            self._bot_lists = list(bot_lists)
+            self.sent: list[str] = []
+            self.host = ""
+            self.port = 0
+            self.password = ""
+            self._sock = None
+
+        def list_player_ids(self) -> list[int]:
+            return []
+
+        def exec(self, cmd: str) -> str:
+            self.sent.append(cmd)
+            return self._bot_lists.pop(0) if self._bot_lists else ""
+
+    one_bot = "Bot 1: macibot hp=100\nBot count 1"
+    six_bots = "".join(f"Bot {i}: macibot hp=100\n" for i in range(6))
+
+    # No players listed, and a bot is already up: a second fire must not add
+    # another one.
+    repeat = BotTelnet("", [one_bot, one_bot])
+    playtest_run.barrier_bot_near_player(repeat)
+    playtest_run.barrier_bot_near_player(repeat)
+    assert repeat.sent == ["bot list", "bot list"], (
+        f"a bot that was already up was replaced by another spawn: {repeat.sent}"
+    )
+
+    # Empty roster: the deficit is one bot, spawned once.
+    empty = BotTelnet("", ["", ""])
+    playtest_run.barrier_bot_near_player(empty)
+    playtest_run.barrier_bot_near_player(empty)
+    assert empty.sent == ["bot list", "bot spawn 1", "bot list", "bot spawn 1"], (
+        f"the empty-roster path must still spawn: {empty.sent}"
+    )
+
+    # ensure_bots holds the roster at its floor with the absolute count form,
+    # so a repeat that already sees 6 bots sends nothing.
+    full = BotTelnet("", [six_bots, six_bots])
+    playtest_run.barrier_ensure_bots(full)
+    playtest_run.barrier_ensure_bots(full)
+    assert full.sent == ["bot list", "bot list"], (
+        f"a full roster was topped up again: {full.sent}"
+    )
+
+    short = BotTelnet("", ["Bot 1: macibot hp=100", six_bots, six_bots])
+    playtest_run.barrier_ensure_bots(short)
+    playtest_run.barrier_ensure_bots(short)
+    assert short.sent == ["bot list", "bot count 6", "bot list"], (
+        f"the short roster must be set to the floor once: {short.sent}"
+    )
+    print("PASS bot_barrier_convergence a repeated fire adds no bot")
+
+
 def test_safe_barrier_param_rejects_command_shapes() -> None:
     """Barrier parameters are lifted from client-log lines (attacker-reachable
     via remote chat) and interpolated into telnet console commands. Only
@@ -2508,6 +2629,14 @@ def main() -> int:
         (
             "spawn_trust_only_live_sessions",
             test_spawn_near_players_trusts_only_live_sessions,
+        ),
+        (
+            "bot_barrier_convergence",
+            test_bot_barriers_converge_instead_of_adding_a_bot,
+        ),
+        (
+            "repeat_lap_marks",
+            test_repeat_lap_marks_do_not_accumulate_across_runs,
         ),
         ("barrier_param_validation", test_safe_barrier_param_rejects_command_shapes),
         (
