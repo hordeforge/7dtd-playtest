@@ -127,12 +127,18 @@ Write the CycloneDX inventory of both committed lockfiles:
 make sbom
 ```
 
+The result is committed at `sbom/7dtd-playtest.cdx.json`, so a consumer or a
+vulnerability scanner reads what a tag depends to straight from the checkout.
+The dependency-inventory gate fails the push when that file is not
+byte-identical to a fresh build of it, so a dependency change cannot land
+without its inventory, and a stale inventory cannot describe a tree it no
+longer matches.
+
 Nothing ships a third-party package at runtime: `pyproject.toml` declares an
 empty runtime dependency set, and the mod's one NuGet reference is build-only
 (`PrivateAssets="All"`). `make sbom` reads `uv.lock` and
 `Source/PlayTestMod/packages.lock.json`, both hash-pinned, and marks every
-component dev scope, so a consumer or a vulnerability scanner can tell what a
-tag pulled in without checking it out.
+component dev scope.
 
 Every component names its SPDX license id in `licenses`, read from the license
 file the artifact itself ships. A dependency added without one fails `make sbom`

@@ -1,0 +1,407 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "ast-serialize",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/ast-serialize@0.8.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.8.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "name": "colorama",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/colorama@0.4.6",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.4.6"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "name": "coverage",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "true"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/coverage@7.16.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "7.16.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "iniconfig",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/iniconfig@2.3.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.3.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "librt",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/librt@0.15.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.15.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "mypy",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "true"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/mypy@2.3.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.3.1"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "mypy-extensions",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/mypy-extensions@1.1.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.1.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0 OR BSD-2-Clause"
+          }
+        }
+      ],
+      "name": "packaging",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/packaging@26.3",
+      "scope": "excluded",
+      "type": "library",
+      "version": "26.3"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MPL-2.0"
+          }
+        }
+      ],
+      "name": "pathspec",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/pathspec@1.1.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.1.1"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "pluggy",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/pluggy@1.6.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.6.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "name": "pygments",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/pygments@2.21.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.21.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "pytest",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "true"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/pytest@9.1.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "9.1.1"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "ruff",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "true"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/ruff@0.16.6",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.16.6"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "name": "typing-extensions",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:pypi/typing-extensions@4.16.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "4.16.0"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "Microsoft.NETFramework.ReferenceAssemblies",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "true"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:nuget/Microsoft.NETFramework.ReferenceAssemblies@1.0.3",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.3"
+    },
+    {
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "Microsoft.NETFramework.ReferenceAssemblies.net48",
+      "properties": [
+        {
+          "name": "7dtd-playtest:direct",
+          "value": "false"
+        },
+        {
+          "name": "7dtd-playtest:dev",
+          "value": "true"
+        }
+      ],
+      "purl": "pkg:nuget/Microsoft.NETFramework.ReferenceAssemblies.net48@1.0.3",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.3"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "name": "7dtd-playtest",
+      "type": "application",
+      "version": "0.13.0"
+    },
+    "tools": {
+      "components": [
+        {
+          "name": "7dtd-playtest/dep_sbom",
+          "type": "application"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:77a252ae-2b79-593a-876c-97615539479c",
+  "specVersion": "1.6",
+  "version": 1
+}

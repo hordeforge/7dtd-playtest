@@ -8,10 +8,12 @@ is a read of committed bytes rather than a resolution: it names exactly what
 no network and no scanner in the loop.
 
 Emitted per release so a consumer or a vulnerability scanner can name what
-shipped without checking out the tag. No component is in `required` scope by
-design: pyproject declares no production dependencies and the csproj marks its
-one package reference PrivateAssets="All", so everything inventoried here is
-build-time only and never reaches a player.
+shipped without checking out the tag. `make sbom` writes the committed copy
+(scripts/test_dep_sbom.py fails when it drifts from the lockfiles, so the
+inventory a tag carries is the inventory the tree resolves). No component is
+in `required` scope by design: pyproject declares no production dependencies
+and the csproj marks its one package reference PrivateAssets="All", so
+everything inventoried here is build-time only and never reaches a player.
 """
 
 from __future__ import annotations
@@ -290,6 +292,16 @@ def build_sbom(uv_lock: JsonObject, nuget_lock: JsonObject) -> JsonObject:
     }
 
 
+def render(document: JsonObject) -> str:
+    """The exact bytes the CLI writes for a document.
+
+    One serializer for the shipped file and for the gate that reads it back, so
+    a committed inventory and a freshly built one can be compared as text
+    without either side choosing its own formatting.
+    """
+    return json.dumps(document, indent=2, sort_keys=True) + "\n"
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
@@ -336,7 +348,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError) as ex:
         print(f"dep_sbom: {ex}", file=sys.stderr)
         return 1
-    text = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    text = render(document)
     if args.output:
         try:
             # The documented example writes dist/app.cdx.json into a tree that

@@ -73,7 +73,7 @@ help:
 	@echo "  make dst-soak [DST_SOAK_SEC=300] tail-bug hunt: fresh seeds until stopped"
 	@echo "  make coverage                    line coverage of scripts/ under the offline gates (.coverage)"
 	@echo "  make check                       everything CI runs: test + dst DST_SEEDS=200"
-	@echo "  make sbom                        CycloneDX inventory of uv.lock + packages.lock.json"
+	@echo "  make sbom                        CycloneDX inventory of uv.lock + packages.lock.json (committed)"
 	@echo
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
 	@echo "  make build | install | install-pair | package | uninstall | clean"
@@ -328,8 +328,12 @@ test-one: require-uv
 # CycloneDX inventory of the two committed lockfiles, so a release publishes
 # what it depends on. Reads uv.lock and Source/PlayTestMod/packages.lock.json
 # (both hash-pinned) rather than resolving, so it needs no network and no
-# scanner; the release workflow attaches the output to the tag.
-SBOM ?= $(ROOT)/dist/7dtd-playtest.cdx.json
+# scanner. The output is a committed file, not a build artifact: a consumer
+# scanning the tag reads it straight from the checkout, and
+# scripts/test_dep_sbom.py fails the push when it drifts from the lockfiles,
+# so the published inventory cannot describe a dependency set this tree no
+# longer resolves. Override SBOM to write a copy elsewhere.
+SBOM ?= $(ROOT)/sbom/7dtd-playtest.cdx.json
 sbom: require-uv
 	@mkdir -p "$(dir $(SBOM))"
 	$(UV) "$(ROOT)/scripts/dep_sbom.py" "$(SBOM)"

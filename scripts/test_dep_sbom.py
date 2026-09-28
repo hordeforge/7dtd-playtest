@@ -7,7 +7,8 @@ package in both lockfiles is present, each purl round-trips its locked version,
 the runtime/dev split matches what pyproject declares, every component names an
 SPDX license (an unrecorded one fails the inventory rather than shipping
 blank), the serial number is a content hash
-(same tree, same id; changed tree, different id), and neither lockfile falls
+(same tree, same id; changed tree, different id), the committed inventory is
+byte-identical to a fresh build of it, and neither lockfile falls
 under an ignore rule that would let a regenerated one go uncommitted.
 """
 
@@ -27,6 +28,9 @@ from dep_sbom import JsonObject, JsonValue, as_object, as_objects
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_PYPI_DIRECT = {"coverage", "mypy", "pytest", "ruff"}
+# The committed inventory `make sbom` writes (Makefile SBOM). Read back here
+# so a drift between it and the lockfiles fails the push.
+SBOM_RELPATH = "sbom/7dtd-playtest.cdx.json"
 EXPECTED_NUGET_DIRECT = "Microsoft.NETFramework.ReferenceAssemblies"
 
 # Every id a dependency here may carry. All of them are permissive or weak
@@ -247,7 +251,7 @@ def test_the_committed_lockfiles_are_not_ignored() -> None:
     """
     ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "!uv.lock" in ignore, ".gitignore must re-include uv.lock past the *.lock rule"
-    for name in ("uv.lock", "Source/PlayTestMod/packages.lock.json"):
+    for name in ("uv.lock", "Source/PlayTestMod/packages.lock.json", SBOM_RELPATH):
         # -q answers the question directly: nonzero means no rule ignores the
         # path, which is what a path matched by a `!` negation reports too.
         result = subprocess.run(
@@ -260,8 +264,60 @@ def test_the_committed_lockfiles_are_not_ignored() -> None:
         assert result.returncode != 0, f"{name} is covered by an ignore rule"
 
 
+def test_the_committed_sbom_describes_the_lockfiles() -> None:
+    """The shipped inventory is a read of the committed lockfiles, not a copy.
+
+    `make sbom` writes sbom/7dtd-playtest.cdx.json so a consumer or a scanner
+    can name what a tag depends on without running the project. A file that
+    drifts is worse than no file: it is a document asserting a dependency set
+    the tree no longer resolves, and nothing else in the gates would notice,
+    since every case above builds its inventory fresh from the lockfiles.
+    Comparing the committed bytes against a fresh build is the whole control.
+    """
+    committed = ROOT / SBOM_RELPATH
+    if not committed.is_file():
+        raise AssertionError(f"{SBOM_RELPATH} is missing; run `make sbom` and commit it")
+    expected = dep_sbom.render(dep_sbom.build_sbom(*_locks()))
+    actual = committed.read_text(encoding="utf-8")
+    if actual == expected:
+        return
+    rebuilt = json.loads(expected)
+    shipped = json.loads(actual)
+    drift = _drift(shipped, rebuilt)
+    raise AssertionError(
+        f"{SBOM_RELPATH} does not describe the committed lockfiles ({drift}); "
+        "run `make sbom` and commit the result"
+    )
+
+
+def _drift(shipped: JsonObject, rebuilt: JsonObject) -> str:
+    """What a stale committed inventory says about the tree, in one line.
+
+    Named components and their versions are what a reader acts on, so a
+    mismatch in either is named rather than reported as "the files differ".
+    """
+
+    def index(doc: JsonObject) -> dict[str, str]:
+        return {str(c["name"]): str(c["version"]) for c in as_objects(doc, "components", "sbom")}
+
+    old, new = index(shipped), index(rebuilt)
+    if old == new:
+        return "components match, document body differs (regenerate)"
+    moved = sorted(f"{name} {old[name]} -> {new[name]}" for name in old.keys() & new.keys()
+                   if old[name] != new[name])
+    parts = [f"components {len(old)} -> {len(new)}"]
+    if added := sorted(new.keys() - old.keys()):
+        parts.append(f"added {added}")
+    if removed := sorted(old.keys() - new.keys()):
+        parts.append(f"removed {removed}")
+    if moved:
+        parts.append(f"version changed {moved}")
+    return ", ".join(parts)
+
+
 TESTS = (
     test_the_committed_lockfiles_are_not_ignored,
+    test_the_committed_sbom_describes_the_lockfiles,
     test_bom_shape,
     test_every_uv_lock_package_is_listed,
     test_every_nuget_package_is_listed_at_its_locked_version,

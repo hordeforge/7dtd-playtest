@@ -552,8 +552,13 @@ the run order that both `make test` and `make coverage` expand):
     lists every package both lockfiles resolve, carries the locked version in
     each purl, marks nothing `required` (pyproject declares no runtime
     dependency and the csproj reference is `PrivateAssets="All"`), and derives
-    a content-hash serial number. A dependency added without regenerating the
-    lock, or a lockfile that stopped describing the tree, fails here offline.
+    a content-hash serial number. The inventory is committed at
+    `sbom/7dtd-playtest.cdx.json` (not under the gitignored `dist/`), so a
+    consumer or a scanner reads what a tag depends on without building it, and
+    the gate fails when that file is not byte-identical to a fresh build of it:
+    a dependency added without regenerating the lock, a lockfile that stopped
+    describing the tree, or a committed inventory left describing an older one
+    each fail here offline.
 20. client-side path surface (`scripts/test_windows_path_surface.py`): the
     host is Linux-only, but the mod runs on the client, which is a Windows
     process under Proton. It pins what that filesystem accepts for a staged

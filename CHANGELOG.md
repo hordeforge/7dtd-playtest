@@ -40,6 +40,18 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Security
 
+- **The shipped dependency inventory is committed and gated.** `make sbom`
+  wrote its CycloneDX document under the gitignored `dist/`, so nothing a tag
+  carried described what that tag depended on, and the gate only ever checked
+  an inventory it had just built in memory. The inventory is now committed at
+  `sbom/7dtd-playtest.cdx.json`, and `scripts/test_dep_sbom.py` fails the push
+  when it is not byte-identical to a fresh build from `uv.lock` and
+  `Source/PlayTestMod/packages.lock.json`, naming the added, removed or
+  re-versioned components. A dependency can no longer land, or an inventory
+  age past the lockfile it describes, without the offline gates noticing. The
+  build is deterministic (sorted keys, a content-hash serial number, no
+  timestamp), so the committed file is reproducible rather than a snapshot.
+
 - **A suite can no longer declare the telnet admin plane.** A `server` block
   naming `TelnetEnabled`, `TelnetRemoteAllowedIPs` or `TelnetPassword` in any
   capitalisation now fails closed with a `SuiteLoadError`. The orchestrator
