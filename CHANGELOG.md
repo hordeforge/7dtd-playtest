@@ -82,6 +82,19 @@ Release model (inferred practice, now pinned by `make test`):
   which is all the parsing and the counts read, and only the name and the tail
   past the id are dropped. Committed fixtures used the repository owner's own
   account name; they now use synthetic ones.
+- **Two more paths carried a peer's name or text into the run transcript.**
+  A telnet reply was redacted for the entity ids the caller had acted on, so
+  a second line in the same reply (another player in a kill batch, in a
+  `teleportplayer` or in a `bot player` confirmation) kept its name, and a
+  `cvar get -p <id>` whose value never arrived logged its reply tail
+  unredacted. Redaction is now decided by the reply itself: an entity line
+  keeps its id and loses its name unless the shared AI table says the line is
+  a prefab, which also teaches `player_entity_ids` the zdtd `(entity N)`
+  spelling. The progress crumb matched the harness tag as a substring, so a
+  remote LAN player who typed one containing `[7dtd-playtest]` or
+  `[7dtd-fastconnect]` into chat had their text echoed as a `progress:` line;
+  crumbs now quote a line the way the log parser decides a contract line,
+  through the shared `playtest_log.contract_tail`.
 
 - **Windows device names no longer reach a staged frame or clip path.**
   `Helpers.AssetName` (the client, a Windows process under Proton) filters a

@@ -42,7 +42,7 @@ BARRIER_PREFIX = "barrier "
 # (U+2028) and PARAGRAPH SEPARATOR (U+2029), none of which the game's logger
 # ever emits. A peer who types "hi<U+2028>[7dtd-playtest] DONE exit_hint=0" as
 # one chat message gets that tail promoted to a line of its own by
-# splitlines(), and _contract_tail then accepts it as a genuine emission: the
+# splitlines(), and contract_tail then accepts it as a genuine emission: the
 # chat one-line forgery guarantee above is only true against CR/LF. Split on
 # the two terminators the writers actually use, and nowhere else.
 _LOG_LINE_SPLIT_RE = re.compile(r"\r\n|\r|\n")
@@ -62,16 +62,20 @@ def split_log_lines(text: str) -> list[str]:
     return lines
 
 
-def _contract_tail(line: str) -> str | None:
-    """Text after the marker when it is the line's first bracketed token.
+def contract_tail(line: str, marker: str = MARKER) -> str | None:
+    """Text after ``marker`` when it is the line's first bracketed token.
 
     ``None`` for every other line: game/chat lines with their own tag, and
-    lines with no tag at all, cannot forge a contract line.
+    lines with no tag at all, cannot forge a contract line. Public because a
+    consumer that echoes harness lines (the orchestrator's progress crumbs)
+    has to draw the same line: a substring test would accept a remote LAN
+    player's chat that merely mentions the marker, and echo their text into
+    the run transcript.
     """
     start = line.find("[")
-    if start < 0 or not line.startswith(MARKER, start):
+    if start < 0 or not line.startswith(marker, start):
         return None
-    return line[start + len(MARKER):].strip()
+    return line[start + len(marker):].strip()
 
 
 def _key_values(tokens: list[str]) -> dict[str, str]:
@@ -132,11 +136,11 @@ def _barrier_names(blob: str) -> Iterator[str]:
     parameterised-prefix views cannot drift. Only Report.Barrier emissions
     reach here, never a game/chat/mod line that merely contains the words:
     the marker must be the line's first bracketed token (see
-    :func:`_contract_tail`). ``""`` is yielded for a bare `barrier ` line,
+    :func:`contract_tail`). ``""`` is yielded for a bare `barrier ` line,
     which names nothing and matches no caller pattern.
     """
     for line in split_log_lines(blob):
-        tail = _contract_tail(line)
+        tail = contract_tail(line)
         if tail is None or not tail.startswith(BARRIER_PREFIX):
             continue
         tokens = tail.split()
@@ -209,7 +213,7 @@ class ClientLogScan:
         # to the caller: a consumer that fed lines one at a time would report
         # nre_like_total as 0 over a log that did crash.
         self._count_nre(line)
-        tail = _contract_tail(line)
+        tail = contract_tail(line)
         if tail is None:
             return
         if tail.startswith("{"):

@@ -45,6 +45,7 @@ from playtest_log import (  # noqa: E402
     add_barrier_hits,
     barrier_hits_prefix,
     barrier_line_hits,
+    contract_tail,
     empty_client_log,
     split_log_lines,
 )
@@ -265,6 +266,11 @@ def client_compat_for_game(game: Path, env: Mapping[str, str] | None = None) -> 
 # teleport_players_to, string form for raw spawnentityat commands.
 PERSIST_PAD_XYZ = (520, 62, 950)
 PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
+
+# The join-plumbing mod's log tag, for the progress crumbs that quote it.
+# Located the way the harness tag is (playtest_log.contract_tail): as the
+# line's first bracketed token, never as a substring.
+CONNECT_MARKER = "[7dtd-fastconnect]"
 
 # The peer waits for this in the primary's log before connecting: the engine
 # rejects same-IP connects less than 500 ms apart, and two clients booting from
@@ -588,7 +594,9 @@ def redact_player_names(text: str, player_ids: Collection[str] | None = None) ->
     mixed ``listents`` reply needs (its AI lines carry a server-side prefab
     name, not a person's). Pass None for a reply that lists players and
     nothing else, where every named line is a player: stock ``listplayers`` and
-    the zdtd ``list`` form.
+    the zdtd ``list`` form. A reply of any other shape goes through
+    :func:`redact_non_ai_names`, which picks the ids from the reply itself
+    rather than from the ids the caller happened to act on.
 
     Redact before slicing: cutting the tail off first can leave half a name
     and lose the id that identified the line as a player line at all.
@@ -605,21 +613,41 @@ def redact_player_names(text: str, player_ids: Collection[str] | None = None) ->
 
 
 def player_entity_ids(out: str, ai_keywords: Collection[str]) -> set[str]:
-    """Entity ids on ``listents`` lines the AI keyword table does not claim.
+    """Entity ids on lines the AI keyword table does not claim.
 
     The complement of the AI table, computed from the reply already in hand:
     a listents reply names the human player alongside the horde, and every
-    caller logs a slice of it.
+    caller logs a slice of it. The id pattern is the redactor's own, so the
+    set this names and the lines :func:`redact_player_names` rewrites are the
+    same lines in both the stock ``id=171`` and the zdtd ``(entity 107)``
+    spelling; a narrower pattern here classified a zdtd player line as an AI
+    line and left its name in the transcript.
     """
     ids: set[str] = set()
     for line in split_log_lines(out):
         low = line.lower()
         if any(k in low for k in ai_keywords):
             continue
-        m = re.search(r"id\s*=\s*(\d+)", line, flags=re.IGNORECASE)
+        m = _ENTITY_ID_RE.search(line)
         if m:
             ids.add(m.group(1))
     return ids
+
+
+def redact_non_ai_names(text: str) -> str:
+    """Drop the name from every entity line the AI table does not claim.
+
+    The one rule for a telnet reply that goes into the transcript: an entity
+    line keeps its id and loses its name unless the reply says the entity is
+    AI, so a name is only left where the reply itself said it is a prefab
+    class. Callers that named the ids they acted on redacted only those, which
+    left every other line in the same reply alone: a kill batch, a teleport or
+    a bot target that also echoed a second player put that player's name into
+    a CI artifact.
+    """
+    if not text:
+        return text
+    return redact_player_names(text, player_entity_ids(text, TelnetAdmin.AI_LINE_KEYWORDS))
 
 
 # Bound on each pkill escalation step. These run in the finally teardown
@@ -1702,7 +1730,14 @@ class TelnetAdmin:
                 value = parse_cvar_value(reply, name)
                 if value is not None:
                     return value
-            log(f"telnet cvar reply missing value name={name} tail={reply[-160:]!r}")
+            # The cvar is read off a player entity (`-p <id>`), so a reply
+            # that carries an entity line carries that player's chosen name
+            # into the transcript. Same redaction as every other player
+            # reply slice.
+            log(
+                "telnet cvar reply missing value name="
+                f"{name} tail={redact_non_ai_names(reply)[-160:]!r}"
+            )
             return None
         except OSError as ex:
             warn(f"telnet cvar get fail: {ex}")
@@ -1732,7 +1767,7 @@ class TelnetAdmin:
         for batch in batched(self._ai_entity_ids(out), KILL_BATCH_SIZE):
             self._exec_batch([f"kill {eid}" for eid in batch])
             killed += len(batch)
-        sample = redact_player_names(out, player_entity_ids(out, self.AI_LINE_KEYWORDS))
+        sample = redact_non_ai_names(out)
         log(f"telnet clear_ai killed~={killed} (listents sample {sample[:100]!r})")
 
     def kill_non_player_ai(self) -> int:
@@ -1743,7 +1778,7 @@ class TelnetAdmin:
         targets = [eid for eid in self._ai_entity_ids(out) if eid not in players]
         for batch in batched(targets, KILL_BATCH_SIZE):
             reply = self._exec_batch([f"kill {eid}" for eid in batch])
-            safe = redact_player_names(reply, set(batch))
+            safe = redact_non_ai_names(reply)
             log(f"telnet kill {len(batch)} entities → {safe[:160]!r}")
             killed += len(batch)
         if killed == 0:
@@ -1755,7 +1790,7 @@ class TelnetAdmin:
                 if int(eid) < 100:
                     continue
                 r = self.exec(f"kill {eid}")
-                log(f"telnet kill fallback {eid} → {redact_player_names(r, {eid})[:80]!r}")
+                log(f"telnet kill fallback {eid} → {redact_non_ai_names(r)[:80]!r}")
                 killed += 1
                 if killed >= 16:
                     break
@@ -1794,7 +1829,7 @@ class TelnetAdmin:
         n = 0
         for pid in ids:
             r = self.exec(f"teleportplayer {pid} {x:g} {y:g} {z:g}")
-            safe = redact_player_names(r, {str(pid)})
+            safe = redact_non_ai_names(r)
             log(f"telnet teleportplayer {pid} {x:g} {y:g} {z:g} → {safe[:120]!r}")
             n += 1
         return n
@@ -2479,7 +2514,9 @@ def barrier_bot_near_player(tn: TelnetAdmin) -> None:
     if pids:
         ident = str(pids[0])
         r = tn.exec(f"bot player {ident} 1")
-        log(f"telnet bot player {ident} 1 -> {r[:120]!r}")
+        # The command is about a player entity, so its reply can name one.
+        safe = redact_non_ai_names(r)
+        log(f"telnet bot player {ident} 1 -> {safe[:120]!r}")
         return
     # `bot spawn 1` adds a bot, so a barrier that fires again (a duplicated
     # log line, a rejoin phase replaying the setup barrier, a poll that
@@ -2505,7 +2542,7 @@ def barrier_kill_first_player(tn: TelnetAdmin) -> None:
     pids = tn.list_player_ids()
     for pid in pids[:1]:
         r = tn.exec(f"kill {pid}")
-        log(f"telnet kill_player {pid} → {redact_player_names(r, {str(pid)})[:80]!r}")
+        log(f"telnet kill_player {pid} → {redact_non_ai_names(r)[:80]!r}")
 
 
 def barrier_set_night(tn: TelnetAdmin) -> None:
@@ -2570,9 +2607,10 @@ def result_echo_line(row: dict[str, str], *, peer: bool = False) -> str:
     """Terminal line for one parsed result row, control characters stripped.
 
     status / case / detail are parsed back out of client log bytes, which
-    carry remote chat text verbatim (chat-echo cases put the last received
-    chat line into detail), so the same scrub as every other interactive
-    echo applies before this reaches the operator terminal.
+    carry whatever the game and any remote LAN player wrote there, so the
+    same scrub as every other interactive echo applies before this reaches
+    the operator terminal. The mod's own chat cases report a message length
+    rather than the text; the scrub is what covers a provider that does not.
     """
     indent = "  peer " if peer else "  "
     return indent + scrub(f"{row['status']} {row['case']} {row.get('detail', '')}")
@@ -2583,11 +2621,19 @@ def latest_playtest_crumb(chunk: str) -> str:
 
     Shared by every throttled progress echo so the line filter cannot drift
     between the rejoin-setup loop and the main poll loop.
+
+    A line qualifies the way :func:`playtest_log.contract_tail` decides a
+    contract line: the tag must be the line's first bracketed token. A
+    substring test would accept a remote LAN player's chat that merely
+    mentions the tag (this instance joins without a join password), and the
+    echoed tail would put that peer's text, and any personal data in it, into
+    the run transcript that leaves the machine as a CI artifact.
     """
     crumbs = [
         ln
         for ln in split_log_lines(chunk)
-        if "[7dtd-playtest]" in ln or "[7dtd-fastconnect]" in ln
+        if contract_tail(ln) is not None
+        or contract_tail(ln, CONNECT_MARKER) is not None
     ]
     return scrub(crumbs[-1][-160:]) if crumbs else ""
 

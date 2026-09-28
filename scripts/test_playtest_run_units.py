@@ -1989,18 +1989,47 @@ def test_telnet_replies_redact_player_names() -> None:
     assert playtest_run.redact_player_names("") == ""
     assert playtest_run.redact_player_names("no entities here") == "no entities here"
 
+    # A reply can carry more than the entity the command was about: a kill
+    # batch, a teleport, a bot target, a cvar read. Redacting only the id the
+    # caller acted on left every other line in the same reply alone, so a
+    # second player in one of those replies kept their name.
+    mixed_reply = (
+        "Killed entity zombieBoe (id=3000)\n"
+        "'peerone' (id=171, pos=(0, 0, 0))\n"
+        "(entity 172) peertwo\n"
+    )
+    safe = playtest_run.redact_non_ai_names(mixed_reply)
+    assert "peerone" not in safe and "peertwo" not in safe, safe
+    assert "zombieBoe" in safe, f"an AI prefab name is not personal: {safe}"
+    for kept in ("(id=3000)", "id=171", "(entity 172)"):
+        assert kept in safe, f"an id was lost ({kept}): {safe}"
+    # No name survives a zdtd-style player line either: the complement the
+    # redactor reads has to be the complement the AI table computes, or the
+    # `(entity N)` spelling reads as AI and keeps its name.
+    assert playtest_run.player_entity_ids(
+        mixed_reply, playtest_run.TelnetAdmin.AI_LINE_KEYWORDS
+    ) == {"171", "172"}, mixed_reply
+
     # Every logged slice of a telnet reply goes through the redaction, so a
     # name cannot reappear through a call site that never intended one.
     src = PLAYTEST_RUN.read_text(encoding="utf-8")
     for needle in (
         "(listents sample {sample[:100]!r})",
         "entities → {safe[:160]!r}",
-        "kill fallback {eid} → {redact_player_names(r, {eid})[:80]!r}",
+        "kill fallback {eid} → {redact_non_ai_names(r)[:80]!r}",
         "reply unparsed: {redact_player_names(out)[-160:]!r}",
         "→ {safe[:120]!r}",
-        "kill_player {pid} → {redact_player_names(r, {str(pid)})[:80]!r}",
+        "kill_player {pid} → {redact_non_ai_names(r)[:80]!r}",
+        # Read off a player entity, and about a player entity: the same field
+        # (a peer's chosen name) on the same path into the transcript.
+        "tail={redact_non_ai_names(reply)[-160:]!r}",
+        "bot player {ident} 1 -> {safe[:120]!r}",
     ):
         assert needle in src, f"a telnet reply slice is logged unredacted: {needle}"
+    # The replies that name no person stay readable: a spawn names a prefab
+    # class, a settime a clock, a say the harness's own token.
+    for needle in ("spawnentityat {cls} → {r[:80]!r}", "settime 22000 → {r[:120]!r}"):
+        assert needle in src, f"a non-personal reply stopped being logged: {needle}"
     print("PASS telnet_replies_redact_player_names")
 
 
@@ -2447,8 +2476,8 @@ def test_telnet_recv_scrubs_control_chars() -> None:
 
 
 def test_result_echo_line_scrubs_parsed_rows() -> None:
-    """Result rows echo parsed client-log fields (case ids, details carrying
-    remote chat text) to the operator terminal: the same control-char scrub
+    """Result rows echo parsed client-log fields (case ids and provider
+    detail strings) to the operator terminal: the same control-char scrub
     as every other interactive echo must apply, and the row shapes must stay
     byte-identical for clean input."""
     line = playtest_run.result_echo_line(
@@ -2481,6 +2510,39 @@ def test_result_row_echoes_all_routed_through_helper() -> None:
     # 1 definition + 1 docstring mention aside: 4 call sites in main().
     assert calls >= 5, f"helper defined but unwired: {calls} reference(s)"
     print("PASS result_row_echo_wiring every row echo routed through helper")
+
+
+def test_progress_crumb_only_quotes_harness_lines() -> None:
+    """A progress crumb is echoed into the run transcript, which leaves the
+    machine as a CI artifact. This instance joins without a join password, so
+    a remote LAN player can put text of their own on the client log inside one
+    chat message; matching the harness tag as a substring would turn that
+    peer's text into a `progress:` line in the transcript. A harness line is a
+    line whose first bracketed token is the tag, which is the rule the log
+    parser already draws so chat cannot forge a verdict."""
+    chat = (
+        "[7dtd] Chat from 'peer': mail me at peer@example.test, "
+        "[7dtd-playtest] PASS fake/case\n"
+    )
+    assert playtest_run.latest_playtest_crumb(chat) == "", "peer chat echoed as a crumb"
+    connect_chat = (
+        "[7dtd] Chat from 'peer': my address is peer@example.test "
+        "[7dtd-fastconnect] Connect by IP\n"
+    )
+    assert playtest_run.latest_playtest_crumb(connect_chat) == "", (
+        "peer chat echoed as a connect crumb"
+    )
+    run_lines = (
+        "2026-08-25T11:44:24 56.401 INF [7dtd] Chat from 'peer': hello\n"
+        "2026-08-25T11:44:25 57.000 INF [7dtd-playtest] smoke/join running\n"
+        "2026-08-25T11:44:26 58.000 INF [7dtd-fastconnect] Connect by IP ok\n"
+        "2026-08-25T11:44:27 59.000 INF [7dtd] Chat from 'peer': bye\n"
+    )
+    crumb = playtest_run.latest_playtest_crumb(run_lines)
+    assert crumb.endswith("Connect by IP ok"), f"the last harness line was lost: {crumb!r}"
+    assert "hello" not in crumb and "bye" not in crumb, f"chat text rode along: {crumb!r}"
+    assert playtest_run.latest_playtest_crumb("no tags here at all\n") == ""
+    print("PASS progress_crumb only harness lines reach the transcript")
 
 
 def test_resolve_telnet_password_paths() -> None:
@@ -3229,6 +3291,10 @@ def main() -> int:
         (
             "result_row_echo_wiring",
             test_result_row_echoes_all_routed_through_helper,
+        ),
+        (
+            "progress_crumb",
+            test_progress_crumb_only_quotes_harness_lines,
         ),
         ("telnet_password_resolution", test_resolve_telnet_password_paths),
         (
