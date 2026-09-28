@@ -170,7 +170,9 @@ When free: `running=no` (omit session / timestamps).
 
 - **Fresh:** `running=yes` and `heartbeat` age ≤ `PLAYTEST_LOCK_STALE_SEC`
   (default **120**). Holder is still alive → **wait**, do not start.
-- **Stale:** heartbeat missing or older than the stale window. Often a crashed
+- **Stale:** heartbeat missing, older than the stale window, or dated
+  further ahead of the reader's clock than the window (a clock step or a
+  restored backup is not a fresh heartbeat). Often a crashed
   agent that never released. Orchestrator may **take over** only if there is
   also **no** live client process. If a client is still up, do not clear the
   lock; stop and record the mismatch (`stale_but_live`).

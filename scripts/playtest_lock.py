@@ -494,7 +494,15 @@ def is_stale(
     if ep is None:
         # Legacy / corrupt: no heartbeat while claimed → treat as stale.
         return True
-    return (now_t - ep) > limit
+    age = now_t - ep
+    # A heartbeat dated in the future is not a fresh one: a clock step, a
+    # restored backup, or a stamp written by a host whose clock was wrong.
+    # Unclamped it is never older than the limit, so a crashed holder's
+    # claim can never be reclaimed. Same reasoning as the out-of-range
+    # epoch refused in parse_utc_timestamp; a live holder behind such a
+    # stamp still cannot lose the machine, because the reclaim below is
+    # gated on no live process (stale_but_live).
+    return age > limit or age < -limit
 
 
 def _runtime_pids(proc_root: Path = PROC_ROOT) -> list[Path]:

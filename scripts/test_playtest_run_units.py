@@ -964,14 +964,42 @@ def test_tcp_port_type_range() -> None:
     print("PASS tcp_port_range ports outside 1..65535 rejected at startup")
 
 
+def test_slowest_cases_drops_unusable_ms() -> None:
+    """The slowest-case rows come from client-log JSON events, where `ms` is
+    unbounded. A value past the float range must drop its own row instead of
+    raising out of the report."""
+    rows = playtest_run.slowest_cases([
+        {"t": "result", "suite": "core", "case": "slow", "status": "pass", "ms": 1200},
+        {"t": "result", "suite": "core", "case": "fast", "status": "fail", "ms": 40},
+        # JSON integers are arbitrary precision: float() raises OverflowError.
+        {"t": "result", "suite": "core", "case": "huge", "status": "pass",
+         "ms": 10 ** 400},
+        {"t": "result", "suite": "core", "case": "inf", "status": "pass",
+         "ms": float("inf")},
+        {"t": "result", "suite": "core", "case": "nan", "status": "pass",
+         "ms": float("nan")},
+        {"t": "result", "suite": "core", "case": "text", "status": "pass",
+         "ms": "not a number"},
+        {"t": "result", "suite": "core", "case": "skipped", "status": "skip",
+         "ms": 99},
+        {"t": "staged", "name": "x", "ms": 99},
+    ])
+    assert rows == [("core/slow", 1200.0), ("core/fast", 40.0)], rows
+    print("PASS slowest_cases unusable ms values drop their row, not the report")
+
+
 def test_litenet_port_room_guard() -> None:
     """--port feeds the derived loadgen join port ServerPort+2, so a value
-    above 65533 must be rejected at startup (tcp_port alone accepts it)."""
+    above 65533 must be rejected at startup (tcp_port alone accepts it).
+    The managed path reads the port from instance.env, never through
+    argparse, so this guard is also the only range check there."""
     source = PLAYTEST_RUN.read_text(encoding="utf-8")
     assert "require_litenet_room(args.port)" in source
     for ok in (26900, 27025, 65533):
         playtest_run.require_litenet_room(ok)
-    for bad in (65534, 65535):
+    # 0 is the pre-`sb up` placeholder and a negative value is what a
+    # corrupt instance.env reads as: neither is bindable.
+    for bad in (0, -1, 65534, 65535):
         try:
             playtest_run.require_litenet_room(bad)
         except ValueError:
@@ -979,6 +1007,23 @@ def test_litenet_port_room_guard() -> None:
         else:
             raise AssertionError(f"require_litenet_room accepted {bad}")
     print("PASS litenet_port_room ports without room for port+2 rejected")
+
+
+def test_telnet_port_range_guard() -> None:
+    """The telnet port is a TCP port like the game one, and on the managed
+    path it is read from instance.env rather than parsed by argparse."""
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    assert "require_telnet_port(args.admin_port)" in source
+    for ok in (8081, 1, 65535):
+        playtest_run.require_telnet_port(ok)
+    for bad in (0, -1, 65536, 70000):
+        try:
+            playtest_run.require_telnet_port(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"require_telnet_port accepted {bad}")
+    print("PASS telnet_port_range out-of-range admin ports rejected")
 
 
 def test_main_default_port_reaches_preflight_refusal() -> None:
@@ -2202,7 +2247,9 @@ def main() -> int:
         ("client_compat_follows_library", test_client_compat_follows_the_install_library),
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),
+        ("slowest_cases_ms", test_slowest_cases_drops_unusable_ms),
         ("litenet_port_room", test_litenet_port_room_guard),
+        ("telnet_port_range", test_telnet_port_range_guard),
         ("default_port_preflight", test_main_default_port_reaches_preflight_refusal),
         ("peer_client_game", test_peer_client_game_follows_its_instance),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),

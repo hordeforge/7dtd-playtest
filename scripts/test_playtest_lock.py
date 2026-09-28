@@ -451,6 +451,39 @@ def test_wait_until_can_start(tmp: Path) -> None:
         "wait returns immediately on stale missing-heartbeat",
     )
 
+    # A heartbeat dated in the future is not a fresh one: unclamped, the
+    # age is negative and never exceeds the window, so a crashed holder's
+    # claim could never be reclaimed. Same reclaim path as a stale one, and
+    # a live runtime still blocks it.
+    future = tmp / "playtest_running_future"
+    future.write_text(
+        f"running=yes\nsession={owner}\nacquired=2099-01-01T00:00:00Z\n"
+        "heartbeat=2099-01-01T00:00:00Z\n",
+        encoding="utf-8",
+    )
+    fst = pl.read_lock(future)
+    _assert(pl.is_stale(fst, max_age_sec=60), "future heartbeat is stale")
+    _assert(
+        pl.can_start(waiter, path=future, live_probe=lambda: False, max_age_sec=60),
+        "future-dated stale claim is reclaimable with no runtime",
+    )
+    _assert(
+        not pl.can_start(
+            waiter, path=future, live_probe=lambda: True, max_age_sec=60
+        ),
+        "future-dated stale claim still blocked by a live runtime",
+    )
+    # A heartbeat written a second ago by the same clock is fresh.
+    lock.write_text(
+        f"running=yes\nsession={owner}\n"
+        f"heartbeat={pl.format_utc(time.time() - 1)}\n",
+        encoding="utf-8",
+    )
+    _assert(
+        not pl.is_stale(pl.read_lock(lock), max_age_sec=60),
+        "one-second-old heartbeat is still fresh",
+    )
+
     sleeps.clear()
     clock = [0.0]
 

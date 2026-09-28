@@ -217,6 +217,19 @@ def test_future_epoch_refuses_freshness_guard(tmp_path: Path) -> None:
     assert not (out / "playtest-compare.json").exists()
 
 
+def test_oversized_freshness_window_is_a_usage_error(tmp_path: Path) -> None:
+    """--require-fresh-minutes is scaled into float seconds, and a Python int
+    is unbounded: a value past the float range used to raise OverflowError
+    instead of the usage error every other bad value gets."""
+    s, z = _report_pair(tmp_path, int(time.time()))
+    r = _run_cli("--stock", str(s), "--zdtd", str(z),
+                 "--out", str(tmp_path / "out"),
+                 "--require-fresh-minutes", "9" * 400)
+    assert r.returncode == 2, r.stderr
+    assert "at most" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
 def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
     """An unwritable --out must fail with its own exit code (4) naming the
     destination, never a traceback with Python's default exit 1 (documented

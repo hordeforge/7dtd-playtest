@@ -125,6 +125,32 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- **An unbounded JSON integer in one client-log line cost the whole report.**
+  The slowest-case table read `ms` out of every parsed result event and only
+  caught `ValueError`; a JSON integer is arbitrary precision, so a `ms` past
+  the float range raised `OverflowError` out of the report writer instead of
+  dropping its own row. The table is now `slowest_cases`, which drops an
+  unusable `ms` and keeps the rest.
+- **A port read from `instance.env` was never range-checked.** The `tcp_port`
+  argparse type bounds 1..65535, but a managed run's game and telnet ports
+  come from `sb env` as plain ints and only the upper LiteNet bound was
+  applied. A `0` (the pre-`sb up` placeholder, and what an empty
+  `SERVER_PORT` leaves behind) or a negative value reached the bind and
+  connect calls. `require_litenet_room` now checks the whole range and
+  `require_telnet_port` guards the admin port beside it.
+- **A future-dated heartbeat could never be reclaimed.** `is_stale` compared
+  `now - heartbeat` against the window, so a stamp ahead of the reader's
+  clock (a clock step, a restored backup, a host whose clock was wrong) was
+  never old enough, and a crashed holder's claim blocked the machine until
+  someone deleted the file by hand. Such a stamp is now stale, on the same
+  reclaim path as an old one and still gated on no live process.
+- **Tag versions sorted as strings.** `discover_tag_versions` promises its
+  versions oldest first but used `sorted()` on the text, which puts `1.10.0`
+  before `1.9.0`. It now orders by component.
+- **`--require-fresh-minutes` could raise instead of reporting usage.** The
+  value is scaled into float seconds and a Python int is unbounded, so one
+  past the float range crashed the diff with an `OverflowError` traceback.
+  It is now a usage error like every other bad value.
 - **The backend a run targeted was not the one that was asked for.**
   `playtest_run.py` decided whether the operator had passed `--server` by
   searching the argument list for that exact token, so `--server=zdtd` read as

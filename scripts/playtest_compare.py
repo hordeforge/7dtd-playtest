@@ -39,6 +39,10 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from playtest_log import parse_client_log  # noqa: E402
 
+# Roughly 1900 years. No run report is ever that old, and the value is
+# scaled into float seconds, so a larger one is a typo rather than a window.
+MAX_FRESHNESS_MINUTES = 10**9
+
 
 def load_results(path: Path) -> dict:
     """Return {"results": [...], "summary": {...}, "wall": s|None, "server": str|None,
@@ -142,6 +146,21 @@ def non_negative_int(text: str) -> int:
     return value
 
 
+def freshness_minutes(text: str) -> int:
+    """argparse type for ``--require-fresh-minutes``.
+
+    The value is scaled into seconds with ``* 60.0``, and a Python int is
+    unbounded, so a value past the float range raised OverflowError out of
+    the comparison instead of the usage error every other bad value gets.
+    """
+    value = non_negative_int(text)
+    if value > MAX_FRESHNESS_MINUTES:
+        raise argparse.ArgumentTypeError(
+            f"must be at most {MAX_FRESHNESS_MINUTES} minutes, got {text!r}"
+        )
+    return value
+
+
 def newest_report(d: Path) -> Path | None:
     if d.is_file():
         return d
@@ -173,7 +192,7 @@ def main() -> int:
                     help="diff the newest report-*.json under this zdtd dir")
     ap.add_argument("--out", type=Path, default=Path("."),
                     help="directory for playtest-compare.{md,json} (default .)")
-    ap.add_argument("--require-fresh-minutes", type=non_negative_int, default=0,
+    ap.add_argument("--require-fresh-minutes", type=freshness_minutes, default=0,
                     help="refuse to diff a side whose run is older than this "
                          "many minutes (0 disables the check)")
     args = ap.parse_args()

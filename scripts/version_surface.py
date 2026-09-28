@@ -50,7 +50,10 @@ def discover_tag_versions(root: Path) -> list[str]:
             if len(fields) == 2 and fields[1].startswith("refs/tags/"):
                 names.add(fields[1].removeprefix("refs/tags/").strip())
     versions = [match.group(1) for name in names if (match := TAG_RE.fullmatch(name))]
-    return sorted(versions)
+    # Oldest first, by component: sorted() on the strings puts "1.10.0"
+    # before "1.9.0", so the tenth minor of a release sorts as older than
+    # the ninth. TAG_RE admits only digits and dots, so the key is total.
+    return sorted(versions, key=lambda v: tuple(int(part) for part in v.split(".")))
 
 
 def uncovered_tag_versions(tag_versions: list[str], headings: list[str]) -> list[str]:

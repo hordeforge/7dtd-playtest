@@ -195,6 +195,11 @@ PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 PEER_STAGGER_MARKER = "Respawning: EnterMultiplayer"
 PEER_STAGGER_TIMEOUT_SEC = 180.0
 
+TCP_PORT_MIN = 1
+TCP_PORT_MAX = 65535
+# start_loadgen joins the bots on ServerPort+2.
+LITENET_PORT_OFFSET = 2
+
 GAME_PROC_PATTERNS = [
     r"[/]7DaysToDie\.exe",
     r"wine64-preloader.*7DaysToDie",
@@ -296,20 +301,69 @@ def tcp_port(text: str) -> int:
         val = int(text)
     except ValueError:
         raise argparse.ArgumentTypeError(f"not a port number: {text!r}") from None
-    if not 1 <= val <= 65535:
-        raise argparse.ArgumentTypeError(f"port out of range 1..65535: {val}")
+    if not TCP_PORT_MIN <= val <= TCP_PORT_MAX:
+        raise argparse.ArgumentTypeError(
+            f"port out of range {TCP_PORT_MIN}..{TCP_PORT_MAX}: {val}"
+        )
     return val
 
 
 def require_litenet_room(server_port: int) -> None:
-    """LiteNet bots join on ServerPort+2 (start_loadgen): a --port above
+    """A game port that is a real TCP port and leaves room for ServerPort+2.
+
+    LiteNet bots join on ServerPort+2 (start_loadgen): a --port above
     65533 pushes the derived port out of TCP range and would fail late as an
-    opaque loadgen join error instead of this startup config error."""
-    if server_port > 65535 - 2:
+    opaque loadgen join error instead of this startup config error.
+
+    The range is re-checked here rather than left to the ``tcp_port``
+    argparse type because the managed path never goes through argparse: the
+    port arrives from ``sb env`` / instance.env as a plain int, and 0 (the
+    pre-``sb up`` placeholder) or a negative value would otherwise reach the
+    connect and bind calls.
+    """
+    if not TCP_PORT_MIN <= server_port <= TCP_PORT_MAX - LITENET_PORT_OFFSET:
         raise ValueError(
-            f"ServerPort {server_port} leaves no room for the derived LiteNet "
-            f"bot port (port+2 must be <= 65535)"
+            f"ServerPort {server_port} must be in "
+            f"{TCP_PORT_MIN}..{TCP_PORT_MAX - LITENET_PORT_OFFSET} so the derived "
+            f"LiteNet bot port (port+{LITENET_PORT_OFFSET}) is bindable"
         )
+
+
+def require_telnet_port(telnet_port: int) -> None:
+    """A telnet/admin port in TCP range, checked with the game port."""
+    if not TCP_PORT_MIN <= telnet_port <= TCP_PORT_MAX:
+        raise ValueError(
+            f"admin port {telnet_port} must be in {TCP_PORT_MIN}..{TCP_PORT_MAX}"
+        )
+
+
+def slowest_cases(json_events: list[dict]) -> list[tuple[str, float]]:
+    """``(case, ms)`` for every finished case, slowest first.
+
+    Event lines come from the client log, so ``ms`` can be garbage, a
+    non-finite token, or a JSON integer past the float range: each drops
+    that one row. None of them may raise, or a single hostile line costs
+    the whole report.
+    """
+    rows: list[tuple[str, float]] = []
+    for ev in json_events:
+        if ev.get("t") != "result" or ev.get("status") not in ("pass", "fail"):
+            continue
+        # json.loads values only: numbers and numeric strings convert,
+        # anything else skips. An unbounded JSON integer raises
+        # OverflowError out of float(), which is why it is named here.
+        ms_raw = ev.get("ms") or 0
+        if not isinstance(ms_raw, (int, float, str)):
+            continue
+        try:
+            ms = float(ms_raw)
+        except (ValueError, OverflowError):
+            continue
+        if not math.isfinite(ms):
+            continue
+        rows.append((f"{ev.get('suite')}/{ev.get('case')}", ms))
+    rows.sort(key=lambda row: -row[1])
+    return rows
 
 
 def config_summary(args: argparse.Namespace) -> str:
@@ -2595,6 +2649,7 @@ def main(argv: list[str] | None = None) -> int:
         # checked again once `sb up` reports it.
         try:
             require_litenet_room(args.port)
+            require_telnet_port(args.admin_port)
         except ValueError as ex:
             ap.error(f"--port invalid: {ex}")
     loadgen_observer_requested = bool(
@@ -3083,6 +3138,7 @@ def main(argv: list[str] | None = None) -> int:
                 playtest_targets.overlay_instance_env(args, env_map)
                 try:
                     require_litenet_room(args.port)
+                    require_telnet_port(args.admin_port)
                 except ValueError as ex:
                     err(f"instance {plan.sandbox_server} allocated an unusable port: {ex}")
                     return False
@@ -3891,30 +3947,7 @@ def main(argv: list[str] | None = None) -> int:
         combined_results = results + peer_results
         wall_s = time.monotonic() - t0
 
-        # Slowest cases from results if ms present in JSON events. Event lines
-        # come from the client log, so ms can be garbage or non-finite; either
-        # would raise here (losing the whole report) or poison sort/JSON.
-        slowest = []
-        for ev in parsed.get("json_events") or []:
-            if ev.get("t") == "result" and ev.get("status") in ("pass", "fail"):
-                # json.loads values only: numbers and numeric strings convert,
-                # anything else skips (the old try/except TypeError path).
-                ms_raw = ev.get("ms") or 0
-                if not isinstance(ms_raw, (int, float, str)):
-                    continue
-                try:
-                    ms = float(ms_raw)
-                except ValueError:
-                    continue
-                if not math.isfinite(ms):
-                    continue
-                slowest.append(
-                    (
-                        f"{ev.get('suite')}/{ev.get('case')}",
-                        ms,
-                    )
-                )
-        slowest.sort(key=lambda x: -x[1])
+        slowest = slowest_cases(parsed.get("json_events") or [])
 
         plan = getattr(args, "_target_plan", None)
         suite_doc = getattr(args, "_suite_doc", None)

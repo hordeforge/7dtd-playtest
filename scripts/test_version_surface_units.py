@@ -174,6 +174,19 @@ def main() -> int:
         assert discover_tag_versions(mixed) == ["0.8.0", "1.2.3"], discover_tag_versions(mixed)
         print("OK packed refs merge with loose refs, sorted oldest first")
 
+        # "1.10.0" sorts before "1.9.0" as a string, so a plain sorted()
+        # reports the tenth minor as older than the ninth.
+        double = base / "double-digit"
+        make_git_dir(
+            double / ".git",
+            {"v1.9.0": "a" * 40, "v1.10.0": "b" * 40, "v1.10.1": "c" * 40},
+            [],
+        )
+        assert discover_tag_versions(double) == ["1.9.0", "1.10.0", "1.10.1"], (
+            discover_tag_versions(double)
+        )
+        print("OK tag versions order by component, not as strings")
+
         pointer = base / "pointer"
         target = base / "elsewhere" / ".git"
         make_git_dir(target, {"v2.0.0": "f" * 40}, [])
