@@ -121,16 +121,7 @@ trap capture_stop_run EXIT INT TERM
 # The suite in the background; the loop reads only the part of the client log
 # that appeared after the baseline above, so a marker left by a previous run
 # cannot trigger this one.
-# RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
-# shellcheck disable=SC2086
-if command -v setsid >/dev/null 2>&1; then
-	setsid $RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
-	RUN_PID=$!
-	RUN_PGID="$RUN_PID"
-else
-	$RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
-	RUN_PID=$!
-fi
+capture_start_run
 
 echo "waiting for the first staged scene..."
 while :; do

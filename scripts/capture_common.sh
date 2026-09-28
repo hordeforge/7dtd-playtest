@@ -7,7 +7,8 @@
 # on top of a live run and, in the two that background the suite, have to stop
 # it on the way out.
 #
-# The caller owns: PY, CLIENT_LOG, RUN_PID, RUN_PGID, RUN_STOP_TIMEOUT_SEC.
+# The caller owns: PY, CLIENT_LOG, RUNNER, SUITE, RUN_LOG, RUN_PID, RUN_PGID,
+# RUN_STOP_TIMEOUT_SEC.
 
 # The variables above are set by the sourcing script, not here. NEW_LOG is read
 # by that script's wait loop.
@@ -44,6 +45,23 @@ refuse_live_capture() {
 			exit 2
 			;;
 	esac
+}
+
+# Start the suite in the background, into the run's own process group when
+# setsid is available so capture_stop_run can signal the whole tree. The caller
+# owns RUNNER, SUITE and RUN_LOG; RUN_PID and RUN_PGID come back set.
+#
+# RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
+# shellcheck disable=SC2086
+capture_start_run() {
+	if command -v setsid >/dev/null 2>&1; then
+		setsid $RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
+		RUN_PID=$!
+		RUN_PGID="$RUN_PID"
+	else
+		$RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
+		RUN_PID=$!
+	fi
 }
 
 # Where this run's log begins, as a byte offset into the client log as it is

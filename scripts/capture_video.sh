@@ -92,7 +92,7 @@ command -v ffmpeg >/dev/null || {
 # against a log no run was writing.
 CLIENT_LOG="$("${PY[@]}" "$HERE/playtest_run.py" --print-client-log)"
 
-refuse_live_capture "photograph the wrong one"
+refuse_live_capture "mux the wrong one"
 
 mkdir -p "$OUT"
 RUN_LOG="$OUT/run.log"
@@ -114,16 +114,7 @@ trap capture_stop_run EXIT INT TERM
 # The suite in the background; the loop reads only the part of the client log
 # that appeared after the baseline above, so a marker left by a previous run
 # cannot trigger this one.
-# RUNNER deliberately undergoes word splitting so its configured command and arguments execute.
-# shellcheck disable=SC2086
-if command -v setsid >/dev/null 2>&1; then
-	setsid $RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
-	RUN_PID=$!
-	RUN_PGID="$RUN_PID"
-else
-	$RUNNER "$SUITE" >"$RUN_LOG" 2>&1 &
-	RUN_PID=$!
-fi
+capture_start_run
 
 # Wait for the completion line of the wanted clip. Without --clip-id the first
 # `clip complete` line wins, so a suite that captures one clip needs no flag.

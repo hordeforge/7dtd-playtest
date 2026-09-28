@@ -71,22 +71,23 @@ def record(entry: Path, src: Path, dest: Path) -> None:
         os.fsync(fh.fileno())
 
 
-def read_manifest(entry: Path) -> list[tuple[Path, Path]]:
-    """Recorded (original, quarantined) pairs, oldest first.
+def _read_manifest(entry: Path) -> tuple[list[tuple[Path, Path]], int]:
+    """Recorded (original, quarantined) pairs oldest first, plus lines dropped.
 
     A line that is not a JSON object with two string paths is skipped rather
     than guessed at: restoring to a path this file did not record is a
     write the operator did not ask for. The caller reports the skip count.
     """
     path = manifest_path(entry)
-    if not path.is_file():
-        return []
     pairs: list[tuple[Path, Path]] = []
+    if not path.is_file():
+        return pairs, 0
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as ex:
         print(f"WARNING: cannot read {path}: {ex}", file=sys.stderr)
-        return pairs
+        return pairs, 0
+    dropped = 0
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -94,40 +95,24 @@ def read_manifest(entry: Path) -> list[tuple[Path, Path]]:
         try:
             row = json.loads(line)
         except ValueError:
+            dropped += 1
             continue
-        if not isinstance(row, dict):
-            continue
-        src, dest = row.get(_SRC), row.get(_DEST)
+        src, dest = (row.get(_SRC), row.get(_DEST)) if isinstance(row, dict) else (None, None)
         if isinstance(src, str) and isinstance(dest, str) and src and dest:
             pairs.append((Path(src), Path(dest)))
-    return pairs
+        else:
+            dropped += 1
+    return pairs, dropped
+
+
+def read_manifest(entry: Path) -> list[tuple[Path, Path]]:
+    """Recorded (original, quarantined) pairs, oldest first."""
+    return _read_manifest(entry)[0]
 
 
 def skipped_manifest_lines(entry: Path) -> int:
     """Recorded lines the reader had to drop, so `show` can say so."""
-    path = manifest_path(entry)
-    if not path.is_file():
-        return 0
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return 0
-    dropped = 0
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        try:
-            row = json.loads(line)
-        except ValueError:
-            dropped += 1
-            continue
-        if not isinstance(row, dict):
-            dropped += 1
-            continue
-        src, dest = row.get(_SRC), row.get(_DEST)
-        if not (isinstance(src, str) and isinstance(dest, str) and src and dest):
-            dropped += 1
-    return dropped
+    return _read_manifest(entry)[1]
 
 
 def resolve_entry(qroot: Path, name: str) -> Path | None:
@@ -172,8 +157,7 @@ def _describe(pairs: list[tuple[Path, Path]], entry: Path, dropped: int) -> list
 
 
 def restore(entry: Path, apply: bool, force: bool, move: bool) -> int:
-    pairs = read_manifest(entry)
-    dropped = skipped_manifest_lines(entry)
+    pairs, dropped = _read_manifest(entry)
     print("\n".join(_describe(pairs, entry, dropped)))
     if not pairs:
         return 2
@@ -274,8 +258,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.action == "show":
-        pairs = read_manifest(entry)
-        print("\n".join(_describe(pairs, entry, skipped_manifest_lines(entry))))
+        pairs, dropped = _read_manifest(entry)
+        print("\n".join(_describe(pairs, entry, dropped)))
         return 0 if pairs else 1
     return restore(entry, args.apply, args.force, args.move)
 

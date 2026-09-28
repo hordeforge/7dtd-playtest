@@ -362,7 +362,6 @@ _FUZZ_AXES = [
     [],
     {},
 ]
-_FUZZ_KINDS = ["live", "staged", "defer", "LIVE", "setup", "", 7, None, [], {}]
 _FUZZ_CASES = [
     {"id": "c", "kind": "live", "ref": "catalog.x.c"},
     {"id": "c", "kind": "defer", "ref": "catalog.x.c", "tags": ["a"], "barriers": []},
@@ -504,9 +503,7 @@ def _assert_doc_invariants(doc: sl.SuiteDoc, seed: int) -> None:
         f"seed {seed}: unstripped case id/ref"
     )
     assert doc.case_refs == tuple(c.ref for c in doc.cases), f"seed {seed}: case_refs"
-    assert list(doc.mods) == list(doc.mods) and all(m.strip() == m for m in doc.mods), (
-        f"seed {seed}: mods {doc.mods}"
-    )
+    assert all(m.strip() == m for m in doc.mods), f"seed {seed}: mods {doc.mods}"
     # The report is what a downstream consumer reads; reloading it must give
     # the same document, or a run's own record is not the suite it ran.
     reloaded = sl.parse_suite_dict(
