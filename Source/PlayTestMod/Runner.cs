@@ -520,6 +520,23 @@ namespace ZdtdPlaytest
         }
 
         /// <summary>
+        /// Chunk-game-object count a non-fixed-size world is expected to show.
+        /// </summary>
+        /// <remarks>
+        /// The view distance arrives from serverconfig and is unvalidated: a
+        /// negative value squares to a large positive and gates the suite
+        /// behind a chunk count that never arrives, and squaring in int wraps
+        /// past <see cref="MaxViewDistance"/>. Clamp first, then square.
+        /// </remarks>
+        internal const int MaxViewDistance = 46340; // floor(sqrt(int.MaxValue))
+
+        internal static int ChunksNeeded(int viewDist)
+        {
+            int vd = Math.Max(0, Math.Min(MaxViewDistance, viewDist));
+            return Math.Max(0, vd * vd - 10);
+        }
+
+        /// <summary>
         /// Resolve local player. Prefer World.GetPrimaryPlayer, then GameManager
         /// myEntityPlayerLocal, LocalPlayerUI, then player/entity lists.
         /// </summary>
@@ -732,7 +749,7 @@ namespace ZdtdPlaytest
                 ? world.m_ChunkManager.GetDisplayedChunkGameObjectsCount() : -1;
             int viewDist = GameUtils.GetViewDistance();
             bool fixedSize = world.ChunkCache != null && world.ChunkCache.IsFixedSize;
-            int needed = fixedSize ? 0 : Math.Max(0, viewDist * viewDist - 10);
+            int needed = fixedSize ? 0 : ChunksNeeded(viewDist);
             if (!xuiReady)
             {
                 why = "xui-not-ready";

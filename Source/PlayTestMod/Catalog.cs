@@ -230,7 +230,7 @@ namespace ZdtdPlaytest
                     ? ctx.World.m_ChunkManager.GetDisplayedChunkGameObjectsCount() : -1;
                 bool fixedSize = ctx.World.ChunkCache != null && ctx.World.ChunkCache.IsFixedSize;
                 int viewDist = GameUtils.GetViewDistance();
-                int need = fixedSize ? 0 : Math.Max(0, viewDist * viewDist - 10);
+                int need = fixedSize ? 0 : Runner.ChunksNeeded(viewDist);
                 ctx.IntA = cgo;
                 ctx.IntB = need;
                 ctx.Detail = "cgo=" + cgo + " need=" + need + " fixedSize=" + fixedSize;
@@ -572,6 +572,7 @@ namespace ZdtdPlaytest
                 ctx.StartPos = ctx.Player.GetPosition();
                 ctx.IntA = 0;
                 ctx.FloatA = 0f;
+                ctx.IntB = 0; // hop sample primed
                 LocomotionDrive.Start(1f, 0f, running: true, yawDeg: 0f);
                 ctx.Detail = "sprint start";
             }, wait: ctx =>
@@ -581,9 +582,12 @@ namespace ZdtdPlaytest
                 float d = LocomotionDrive.HorizDist(ctx.Player.GetPosition(), ctx.StartPos);
                 int prev = ctx.PlaceBlockType;
                 int now = (int)(d * 1000f);
-                float hop = prev > 0 ? Mathf.Abs(now - prev) / 1000f : 0f;
+                // PlaceBlockType holds mm; 0 is a real distance, so IntB is the
+                // primed flag (walk_motor's pattern) rather than a value test.
+                float hop = ctx.IntB > 0 ? Mathf.Abs(now - prev) / 1000f : 0f;
                 if (hop > ctx.FloatA) ctx.FloatA = hop;
                 if (hop > 0.02f && hop < 2f) ctx.IntA++;
+                ctx.IntB = 1;
                 ctx.PlaceBlockType = now;
                 ctx.Detail = "horiz=" + d.ToString("0.00") + " hopMax=" + ctx.FloatA.ToString("0.00")
                     + " t=" + elapsed.ToString("0.0");
@@ -636,6 +640,7 @@ namespace ZdtdPlaytest
                 ctx.StartPos = ctx.Player.GetPosition();
                 ctx.IntA = 0;
                 ctx.FloatA = 0f;
+                ctx.IntB = 0; // hop sample primed
                 LocomotionDrive.Start(1f, 0f, running: false, yawDeg: 90f, sneak: true);
                 ctx.Detail = "sneak start";
             }, wait: ctx =>
@@ -645,9 +650,10 @@ namespace ZdtdPlaytest
                 float d = LocomotionDrive.HorizDist(ctx.Player.GetPosition(), ctx.StartPos);
                 int prev = ctx.PlaceBlockType;
                 int now = (int)(d * 1000f);
-                float hop = prev > 0 ? Mathf.Abs(now - prev) / 1000f : 0f;
+                float hop = ctx.IntB > 0 ? Mathf.Abs(now - prev) / 1000f : 0f;
                 if (hop > ctx.FloatA) ctx.FloatA = hop;
                 if (hop > 0.01f && hop < 1.5f) ctx.IntA++;
+                ctx.IntB = 1;
                 ctx.PlaceBlockType = now;
                 ctx.Detail = "horiz=" + d.ToString("0.00") + " hopMax=" + ctx.FloatA.ToString("0.00")
                     + " t=" + elapsed.ToString("0.0");
@@ -669,6 +675,7 @@ namespace ZdtdPlaytest
                 ctx.StartPos = ctx.Player.GetPosition();
                 ctx.IntA = 0;
                 ctx.FloatA = 0f;
+                ctx.IntB = 0; // hop sample primed
                 LocomotionDrive.Start(forward: 1f, strafe: 0f, running: false, yawDeg: 90f);
                 ctx.Detail = "motor walk yaw=90";
             }, wait: ctx =>
@@ -677,9 +684,10 @@ namespace ZdtdPlaytest
                 float d = LocomotionDrive.HorizDist(ctx.Player.GetPosition(), ctx.StartPos);
                 int prev = ctx.PlaceBlockType;
                 int now = (int)(d * 1000f);
-                float hop = prev > 0 ? Mathf.Abs(now - prev) / 1000f : 0f;
+                float hop = ctx.IntB > 0 ? Mathf.Abs(now - prev) / 1000f : 0f;
                 if (hop > ctx.FloatA) ctx.FloatA = hop;
                 if (hop > 0.01f && hop < 2f) ctx.IntA++;
+                ctx.IntB = 1;
                 ctx.PlaceBlockType = now;
                 var p = ctx.Player.GetPosition();
                 ctx.Detail = "horiz=" + d.ToString("0.00")
@@ -2942,8 +2950,16 @@ namespace ZdtdPlaytest
                     try { phase0 = qst.CurrentPhase; } catch { /* */ }
                     ctx.IntA = phase0;
                     ctx.StartPos = ctx.Player.GetPosition();
-                    // Real phase bump (not +0 no-op).
-                    try { qst.CurrentPhase = (byte)(phase0 + 1); } catch { /* */ }
+                    // Real phase bump (not +0 no-op). Saturate at byte.MaxValue:
+                    // a wrapping cast would reset the phase to 0 and the
+                    // phaseChanged check would still read it as a change.
+                    try
+                    {
+                        qst.CurrentPhase = phase0 == byte.MaxValue
+                            ? byte.MaxValue
+                            : (byte)(phase0 + 1);
+                    }
+                    catch { /* */ }
                     try
                     {
                         qst.SetObjectivePosition(
@@ -2996,7 +3012,14 @@ namespace ZdtdPlaytest
                     try { qst.AddSharedKill("zombie"); } catch { /* */ }
                     try { qst.AddSharedKill("zombieBoe"); } catch { /* */ }
                     // Force observable progress if shared kill is no-op for this quest type.
-                    try { qst.CurrentPhase = (byte)(phase0 + 1); } catch { /* */ }
+                    // Saturate at byte.MaxValue rather than wrapping to 0.
+                    try
+                    {
+                        qst.CurrentPhase = phase0 == byte.MaxValue
+                            ? byte.MaxValue
+                            : (byte)(phase0 + 1);
+                    }
+                    catch { /* */ }
                     int obj1 = obj0;
                     try { obj1 = qst.ActiveObjectives; } catch { /* */ }
                     byte phase1 = phase0;
