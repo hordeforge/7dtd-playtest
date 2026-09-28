@@ -94,6 +94,21 @@ Release model (inferred practice, now pinned by `make test`):
   the probe the capture scripts gate on. `capture_frames.sh`,
   `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
   already used.
+- **The capture teardown grace is resolved and validated once, before the run
+  starts.** `RUN_STOP_TIMEOUT_SEC` reached `$(( SECONDS + RUN_STOP_TIMEOUT_SEC ))`
+  inside the `capture_stop_run` EXIT trap with no check, and each of the three
+  capture scripts carried its own `:-30` default. A non-numeric value (`30s`, a
+  stale shell default) aborts bash on the arithmetic error, so the trap never
+  signalled the run it exists to stop and the suite kept the exclusivity lock
+  and the live client with it. `capture_common.sh` now owns the default and a
+  `capture_init_run_timeout` that refuses a non-positive or non-integer value by
+  name, exit 2, before anything is started.
+- **`PLAYTEST_LAP_MARK_STALE_SEC` is checked like `--laps`.** The value is
+  arithmetic, not text: a non-numeric one aborted the abandoned-lap-mark sweep
+  on a bash arithmetic error with nothing said (the script runs without
+  `set -e`), and a value under a minute read as "sweep off" rather than the
+  near-instant sweep it asked for. Both now exit 2 naming the variable, and the
+  variable is listed in the script's own help along with the other env knobs.
 
 ### Added
 

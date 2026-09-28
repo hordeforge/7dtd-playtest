@@ -36,6 +36,7 @@ longer asked.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import sys
@@ -256,7 +257,71 @@ def check_shared_capture_common(*scripts: Path) -> None:
         assert "read_log_since_start" in text, f"{script.name} never reads the log"
         assert "capture_log_gate_init" in text, f"{script.name} never takes the baseline"
         assert "stat -c" not in text, f"{script.name} carries a private log gate"
+    for script in (SCRIPT, FRAMES_SCRIPT, AUDIO_SCRIPT):
+        text = script.read_text(encoding="utf-8")
+        assert "capture_init_run_timeout" in text, (
+            f"{script.name} does not resolve RUN_STOP_TIMEOUT_SEC through the shared check"
+        )
+        assert not re.search(r"^RUN_STOP_TIMEOUT_SEC=", text, re.M), (
+            f"{script.name} carries a private RUN_STOP_TIMEOUT_SEC default"
+        )
     print("OK the capture scripts share one live guard, log gate and teardown")
+
+    check_run_stop_timeout()
+
+
+def check_run_stop_timeout() -> None:
+    """RUN_STOP_TIMEOUT_SEC is validated before a run starts, not inside the trap.
+
+    The teardown waits `$(( SECONDS + RUN_STOP_TIMEOUT_SEC ))`. An unvalidated
+    value (a `30s` shell default, an empty string) is not a number: bash
+    aborts on the arithmetic error inside the EXIT trap, so the run the trap
+    exists to stop is never signalled and the machine's one shared client
+    stays held by the suite.
+    """
+    fragment = common_fragment("DEFAULT_RUN_STOP_TIMEOUT_SEC=", "capture_stop_run() {")
+    for bad in ("30s", "0", "-1", "1.5", ""):
+        proc = subprocess.run(
+            ["bash", "-c", f"set -euo pipefail\n{fragment}\ncapture_init_run_timeout"],
+            env={"RUN_STOP_TIMEOUT_SEC": bad, "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+        )
+        if bad:
+            assert proc.returncode == 2, (
+                f"RUN_STOP_TIMEOUT_SEC={bad!r} must be rejected by name: {proc.stderr!r}"
+            )
+            assert "RUN_STOP_TIMEOUT_SEC" in proc.stderr, proc.stderr
+        else:
+            assert proc.returncode == 0, (
+                f"an unset grace must take the default: {proc.stderr!r}"
+            )
+
+    for good, expected in (("unset", "30"), ("7", "7")):
+        env = {"PATH": "/usr/bin:/bin"}
+        if good != "unset":
+            env["RUN_STOP_TIMEOUT_SEC"] = good
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                "set -euo pipefail\n"
+                f"{fragment}\ncapture_init_run_timeout\necho $RUN_STOP_TIMEOUT_SEC",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0 and proc.stdout.strip() == expected, (
+            f"grace {good!r} resolved to {proc.stdout!r} ({proc.stderr!r})"
+        )
+    print("OK the teardown grace is validated before the run starts")
+
+
+def common_fragment(start: str, end: str) -> str:
+    text = COMMON.read_text(encoding="utf-8")
+    begin = text.index(start)
+    return text[begin : text.index(end, begin)]
 
 
 def check_client_log_resolution(*scripts: Path) -> None:

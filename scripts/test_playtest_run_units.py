@@ -2082,6 +2082,83 @@ def test_repeat_lap_marks_do_not_accumulate_across_runs() -> None:
     print("PASS repeat_lap_marks dead marks swept, live ones left alone")
 
 
+def test_repeat_rejects_unusable_lap_mark_window() -> None:
+    """PLAYTEST_LAP_MARK_STALE_SEC is arithmetic, so it is checked like --laps.
+
+    The value reaches `$(( MARK_STALE_SEC / 60 ))`. This script runs without
+    `set -e`, so a non-numeric value aborts the sweep on a bash arithmetic
+    error and the abandoned marks are never reclaimed, with nothing said; a
+    value under a minute reads as "sweep off" rather than the near-instant
+    sweep that was asked for. Both must fail before any lap runs.
+    """
+
+    script = _SCRIPTS / "playtest_repeat.sh"
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        report_dir = tmp / "reports"
+        report_dir.mkdir()
+        mark = report_dir / ".lap-mark.STAY01"
+        mark.write_text("", encoding="utf-8")
+
+        stub_bin = tmp / "bin"
+        stub_bin.mkdir()
+        uv = stub_bin / "uv"
+        # The orchestrator is stubbed to succeed: nothing but the validation
+        # is under test, so a run that reaches the stub has already failed.
+        uv.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        uv.chmod(0o755)
+        env = {
+            **os.environ,
+            "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
+        }
+        for value, why in (("24h", "a duration"), ("0", "zero"), ("-5", "negative")):
+            proc = subprocess.run(
+                [
+                    "bash",
+                    str(script),
+                    "--laps",
+                    "1",
+                    "--logdir",
+                    str(report_dir),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**env, "PLAYTEST_LAP_MARK_STALE_SEC": value},
+                timeout=60,
+                check=False,
+            )
+            assert proc.returncode == 2, f"{why} window accepted: {proc.stdout!r}"
+            assert "PLAYTEST_LAP_MARK_STALE_SEC" in proc.stderr, proc.stderr
+            assert mark.exists(), f"{why} window swept marks before it was rejected"
+
+    help_proc = subprocess.run(
+        ["bash", str(script), "-h"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        check=False,
+    )
+    assert help_proc.returncode == 0, help_proc.stderr
+    for token in (
+        "PLAYTEST_LAPS",
+        "PLAYTEST_SUITE",
+        "LOGDIR",
+        "PLAYTEST_LAP_MARK_STALE_SEC",
+        "Exit codes:",
+    ):
+        assert token in help_proc.stdout, (
+            f"the header the operator reads names no {token}: {help_proc.stdout!r}"
+        )
+    assert "set -uo pipefail" not in help_proc.stdout, (
+        "the help range ran past the header into the script body"
+    )
+    print("PASS repeat_lap_window a junk sweep window is rejected before any lap")
+
+
 def test_bot_barriers_converge_instead_of_adding_a_bot() -> None:
     """Both bot barriers must leave the roster where the first run left it.
 
@@ -3023,6 +3100,10 @@ def main() -> int:
         (
             "repeat_lap_marks",
             test_repeat_lap_marks_do_not_accumulate_across_runs,
+        ),
+        (
+            "repeat_lap_window",
+            test_repeat_rejects_unusable_lap_mark_window,
         ),
         ("barrier_param_validation", test_safe_barrier_param_rejects_command_shapes),
         (

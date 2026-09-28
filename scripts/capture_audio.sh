@@ -86,7 +86,7 @@ EMPTY_WAV=0
 RUN_PID=""
 RUN_PGID=""
 REC_PID=""
-RUN_STOP_TIMEOUT_SEC="${RUN_STOP_TIMEOUT_SEC:-30}"
+capture_init_run_timeout
 
 # The recorder writes a WAV's RIFF length header when it closes the stream,
 # so a file named by the recorder is only a recording once the recorder has

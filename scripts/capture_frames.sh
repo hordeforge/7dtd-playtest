@@ -115,7 +115,7 @@ echo
 
 RUN_PID=""
 RUN_PGID=""
-RUN_STOP_TIMEOUT_SEC="${RUN_STOP_TIMEOUT_SEC:-30}"
+capture_init_run_timeout
 trap capture_stop_run EXIT INT TERM
 
 # The suite in the background; the loop reads only the part of the client log

@@ -15,6 +15,13 @@
 #                 also passed to the orchestrator as --logdir
 #   -h, --help    print this text
 #
+# Env:
+#   PLAYTEST_LAPS               same as --laps
+#   PLAYTEST_SUITE              same as --suite
+#   LOGDIR                      same as --logdir
+#   PLAYTEST_LAP_MARK_STALE_SEC age at which an abandoned lap mark is swept
+#                               (positive integer seconds; default 86400)
+#
 # Anything else is passed through to playtest_run.py unchanged.
 #
 # Exit codes: 0 every lap clean, 1 a lap failed or the aggregate was not all
@@ -40,7 +47,7 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2
       ;;
-    -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) ORCH_ARGS+=("$1"); shift ;;
   esac
 done
@@ -70,6 +77,16 @@ declare -i sum_pass=0 sum_fail=0 sum_skip=0
 # concurrent session publishes into this same directory and a time bound alone
 # cannot tell the two apart.
 MARK_STALE_SEC="${PLAYTEST_LAP_MARK_STALE_SEC:-86400}"
+# Same check as LAPS above, and for the same reason: the value is arithmetic,
+# not text. `PLAYTEST_LAP_MARK_STALE_SEC=24h` aborts the sweep on a bash
+# arithmetic error (this script runs without `set -e`, so the failure is a
+# silent no-op, not a message), and a value under a minute reads as
+# "sweep disabled" rather than the near-instant sweep it asks for.
+if [[ ! "$MARK_STALE_SEC" =~ ^[1-9][0-9]*$ ]]; then
+  echo "playtest_repeat: lap mark stale window must be a positive integer number" \
+       "of seconds, got '$MARK_STALE_SEC' (PLAYTEST_LAP_MARK_STALE_SEC)" >&2
+  exit 2
+fi
 sweep_stale_lap_marks() {
   local older_than=$(( MARK_STALE_SEC / 60 )) mark
   (( older_than > 0 )) || return 0

@@ -7,8 +7,9 @@
 # on top of a live run and, in the two that background the suite, have to stop
 # it on the way out.
 #
-# The caller owns: PY, CLIENT_LOG, RUNNER, SUITE, RUN_LOG, RUN_PID, RUN_PGID,
-# RUN_STOP_TIMEOUT_SEC.
+# The caller owns: PY, CLIENT_LOG, RUNNER, SUITE, RUN_LOG, RUN_PID, RUN_PGID.
+# RUN_STOP_TIMEOUT_SEC is the caller's optional override; call
+# capture_init_run_timeout to resolve and validate it.
 
 # The variables above are set by the sourcing script, not here. NEW_LOG is read
 # by that script's wait loop.
@@ -143,8 +144,33 @@ uptime_centis() {
 # machine's one shared client busy until the run's own timeout. setsid puts
 # the run in its own process group, so the teardown signals the orchestrator
 # and everything it spawned, not just the pid the shell happened to record.
+# The grace capture_stop_run gives a run to tear itself down before it
+# escalates to SIGKILL, in whole seconds. One definition: each capture script
+# carried its own `RUN_STOP_TIMEOUT_SEC="${RUN_STOP_TIMEOUT_SEC:-30}"` and the
+# three copies were free to drift.
+DEFAULT_RUN_STOP_TIMEOUT_SEC=30
+
+# Resolve and validate the grace before anything is started. A junk value
+# (RUN_STOP_TIMEOUT_SEC=30s, a stale shell default, an empty string that
+# survives the `:-` expansion) reaches `$(( SECONDS + RUN_STOP_TIMEOUT_SEC ))`
+# inside the EXIT trap, where bash aborts on the arithmetic error and the trap
+# never signals the run it exists to stop: the suite keeps the playtest
+# exclusivity lock and the live client with it. Fail here instead, naming the
+# variable.
+capture_init_run_timeout() {
+	if [[ -z "${RUN_STOP_TIMEOUT_SEC:-}" ]]; then
+		RUN_STOP_TIMEOUT_SEC="$DEFAULT_RUN_STOP_TIMEOUT_SEC"
+	fi
+	if [[ ! "$RUN_STOP_TIMEOUT_SEC" =~ ^[1-9][0-9]*$ ]]; then
+		echo "ERROR: RUN_STOP_TIMEOUT_SEC must be a positive integer number of" \
+			"seconds, got '${RUN_STOP_TIMEOUT_SEC}'" >&2
+		exit 2
+	fi
+}
+
 capture_stop_run() {
 	local now
+	local grace="${RUN_STOP_TIMEOUT_SEC:-$DEFAULT_RUN_STOP_TIMEOUT_SEC}"
 	if [[ -z "$RUN_PID" ]] || ! kill -0 "$RUN_PID" 2>/dev/null; then
 		return 0
 	fi
@@ -174,13 +200,13 @@ capture_stop_run() {
 	# Bounded: a run that has already wedged (or one that ignores TERM) must
 	# not hold this script's exit open, which is the very path that exists to
 	# let the machine go.
-	local deadline=$(( now + RUN_STOP_TIMEOUT_SEC * 100 ))
+	local deadline=$(( now + grace * 100 ))
 	while now=$(uptime_centis) && (( now < deadline )); do
 		kill -0 "$RUN_PID" 2>/dev/null || break
 		sleep 0.2
 	done
 	if kill -0 "$RUN_PID" 2>/dev/null; then
-		echo "ERROR: the suite ignored SIGTERM for ${RUN_STOP_TIMEOUT_SEC}s; killing it" >&2
+		echo "ERROR: the suite ignored SIGTERM for ${grace}s; killing it" >&2
 		if [[ -n "$RUN_PGID" ]]; then
 			kill -KILL -- "-$RUN_PGID" 2>/dev/null || true
 		else
