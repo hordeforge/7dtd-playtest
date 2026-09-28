@@ -133,12 +133,15 @@ while :; do
 		exit 1
 	fi
 	read_log_since_start
-	if [[ -n "$NEW_LOG" ]] && grep -q "$MARKER" <<<"$NEW_LOG"; then
-		break
+	if [[ -n "$NEW_LOG" ]]; then
+		LAST_MARK="$(grep -- "$MARKER" <<<"$NEW_LOG" | tail -1 || true)"
+		if [[ -n "$LAST_MARK" ]]; then
+			break
+		fi
 	fi
 	sleep 1
 done
-grep "$MARKER" <<<"$NEW_LOG" | tail -1
+printf '%s\n' "$LAST_MARK"
 
 for i in $(seq -w 1 "$FRAMES"); do
 	spectacle -b -n -f -o "$OUT/raw-$i.png" >/dev/null 2>&1 || true

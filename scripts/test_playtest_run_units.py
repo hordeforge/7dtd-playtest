@@ -1433,6 +1433,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
         def __init__(self, replies: list[str]) -> None:
             self._replies = list(replies)
             self.sent: list[str] = []
+            self.batches: list[list[str]] = []
             self.host = ""
             self.port = 0
             self.password = ""
@@ -1440,6 +1441,11 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
 
         def exec(self, cmd: str) -> str:
             self.sent.append(cmd)
+            return self._replies.pop(0)
+
+        def _exec_batch(self, cmds: list[str]) -> str:
+            self.batches.append(list(cmds))
+            self.sent.extend(cmds)
             return self._replies.pop(0)
 
         def _recv(self, settle: float) -> str:
@@ -1452,8 +1458,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
         [
             "2. zombieSteve (id=3877)\n3. animalStag (id=3890)",
             "Total of 1 in the game\n'maci' (id=171, pos=(520.0, 62.0, 950.0))",
-            "killed 3877",
-            "killed 3890",
+            "killed 3877\nkilled 3890",
         ]
     )
     assert killer.kill_non_player_ai() == 2, (
@@ -1465,6 +1470,7 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
         "kill 3877",
         "kill 3890",
     ], f"unexpected commands sent: {killer.sent}"
+    assert killer.batches == [["kill 3877", "kill 3890"]], killer.batches
 
     # zdtd style: listplayers is unknown, `list` answers with (entity N);
     # id=0 entries must be dropped, duplicates collapsed.
@@ -1503,6 +1509,90 @@ def test_telnet_admin_ai_and_player_parsing() -> None:
         assert empty.teleport_players_to(520, 62, 950) == 0
     assert empty.sent == ["listplayers", "list"], empty.sent
     assert "no players from listplayers" in errbuf.getvalue(), errbuf.getvalue()
+
+
+def test_telnet_mass_kill_collapses_round_trips() -> None:
+    """A mass cleanup must not cost one telnet round trip per entity.
+
+    Each exec costs a fixed settle, so one kill per exec put a horde-sized
+    `kill_non_player_ai` (or clear_ai) inside a single barrier handler for
+    minutes, blocking the poll loop and burning the run's own timeout while
+    the client kept playing. The commands are unchanged and in the same
+    order; only the round trips collapse into bounded batches, so a horde
+    cannot outrun one settle's read budget either.
+    """
+    ids = [str(3000 + n) for n in range(150)]
+    listents = "\n".join(f"2. zombieSteve (id={i})" for i in ids)
+
+    class RecordingSock:
+        """Socket stub that records writes instead of reaching a server."""
+
+        def __init__(self, broken: bool = False) -> None:
+            self.writes: list[bytes] = []
+            self.broken = broken
+
+        def settimeout(self, _v: float) -> None:
+            return None
+
+        def sendall(self, data: bytes) -> None:
+            if self.broken:
+                raise OSError("broken pipe")
+            self.writes.append(data)
+
+        def recv(self, _n: int) -> bytes:
+            raise TimeoutError
+
+        def close(self) -> None:
+            return None
+
+    class BatchTelnet(playtest_run.TelnetAdmin):
+        def __init__(self, broken: bool = False) -> None:
+            self.host = ""
+            self.port = 0
+            self.password = ""
+            self.sock = RecordingSock(broken)
+            self._sock = self.sock  # type: ignore[assignment]
+            self.settles = 0
+
+        def exec(self, cmd: str) -> str:
+            if cmd == "listents":
+                return listents
+            if cmd == "listplayers":
+                return "'maci' (id=171)"
+            return ""
+
+        def _recv(self, settle: float) -> str:
+            self.settles += 1
+            return "killed"
+
+    tn = BatchTelnet()
+    assert tn.kill_non_player_ai() == 150, "every listed AI id must be killed"
+    writes = tn.sock.writes
+    expected_writes = -(-150 // playtest_run.KILL_BATCH_SIZE)
+    assert len(writes) == expected_writes, (
+        f"{len(writes)} writes for 150 kills (batch size "
+        f"{playtest_run.KILL_BATCH_SIZE})"
+    )
+    assert tn.settles == expected_writes, (
+        f"{tn.settles} settles: a settle per command is the cost being removed"
+    )
+    sent = [line for write in writes for line in write.decode("utf-8").splitlines()]
+    assert sent == [f"kill {i}" for i in ids], (
+        f"batch changed the commands or their order: {sent[:4]}..."
+    )
+    assert max(len(w.decode("utf-8").splitlines()) for w in writes) == (
+        playtest_run.KILL_BATCH_SIZE
+    ), "a batch must stay inside the batch cap"
+
+    # A session that dies mid-batch degrades like every other telnet failure:
+    # the socket is closed, and the remaining batches fail fast as "no socket".
+    dead = BatchTelnet(broken=True)
+    errbuf = io.StringIO()
+    with contextlib.redirect_stderr(errbuf):
+        assert dead.kill_non_player_ai() == 150
+    assert dead._sock is None, "a broken batch must close the session"
+    assert "telnet batch exec fail" in errbuf.getvalue(), errbuf.getvalue()
+    print("PASS telnet_mass_kill one write and one settle per batch of kills")
 
 
 def test_telnet_broken_session_degrades_to_empty_reply() -> None:
@@ -2403,6 +2493,10 @@ def main() -> int:
         ("peer_client_game", test_peer_client_game_follows_its_instance),
         ("config_summary_redaction", test_config_summary_redacts_telnet_password),
         ("telnet_admin_parsing", test_telnet_admin_ai_and_player_parsing),
+        (
+            "telnet_mass_kill",
+            test_telnet_mass_kill_collapses_round_trips,
+        ),
         (
             "telnet_broken_session",
             test_telnet_broken_session_degrades_to_empty_reply,

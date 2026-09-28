@@ -1441,6 +1441,21 @@ def write_junit(path: Path, suite: str, results: list[dict]) -> None:
     log(f"junit → {path}")
 
 
+def batched(items: list[str], size: int) -> Iterator[list[str]]:
+    """Consecutive slices of ``items`` of at most ``size`` entries."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+# Console commands a mass cleanup sends in one write. The admin console answers
+# line by line, so a batch costs one settle instead of one per command: a
+# `killall`-shaped cleanup of 200 entities used to sit in one barrier handler
+# for over four minutes, blocking the poll loop and burning the run's own
+# timeout. The cap keeps one settle's replies inside the read budget in _recv,
+# so a horde cannot outrun the reader and stall the server's console.
+KILL_BATCH_SIZE = 64
+
+
 class TelnetAdmin:
     """Minimal stock dedicated telnet (password prompt)."""
 
@@ -1495,6 +1510,25 @@ class TelnetAdmin:
             self.close()
             return ""
 
+    def _exec_batch(self, cmds: list[str]) -> str:
+        """Send several console commands in one write; return everything they said.
+
+        The console is line oriented (every other command here is a line), so
+        a batch is just the same lines back to back, and one settle collects
+        the replies instead of one settle per command.
+        """
+        if not self._sock or not cmds:
+            return ""
+        try:
+            self._sock.sendall(
+                "".join(cmd + "\n" for cmd in cmds).encode("utf-8", errors="replace")
+            )
+            return self._recv(1.2)
+        except OSError as ex:
+            warn(f"telnet batch exec fail: {ex}")
+            self.close()
+            return ""
+
     def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
         """Run stock ``cvar get`` and wait past its command echo for a value."""
         if not self._sock:
@@ -1535,9 +1569,9 @@ class TelnetAdmin:
         """
         out = self.exec("listents")
         killed = 0
-        for eid in self._ai_entity_ids(out):
-            self.exec(f"kill {eid}")
-            killed += 1
+        for batch in batched(self._ai_entity_ids(out), KILL_BATCH_SIZE):
+            self._exec_batch([f"kill {eid}" for eid in batch])
+            killed += len(batch)
         log(f"telnet clear_ai killed~={killed} (listents sample {out[:100]!r})")
 
     def kill_non_player_ai(self) -> int:
@@ -1545,12 +1579,11 @@ class TelnetAdmin:
         out = self.exec("listents")
         killed = 0
         players = {str(i) for i in self.list_player_ids()}
-        for eid in self._ai_entity_ids(out):
-            if eid in players:
-                continue
-            r = self.exec(f"kill {eid}")
-            log(f"telnet kill {eid} → {r[:80]!r}")
-            killed += 1
+        targets = [eid for eid in self._ai_entity_ids(out) if eid not in players]
+        for batch in batched(targets, KILL_BATCH_SIZE):
+            reply = self._exec_batch([f"kill {eid}" for eid in batch])
+            log(f"telnet kill {len(batch)} entities → {reply[:160]!r}")
+            killed += len(batch)
         if killed == 0:
             # Broader: kill all entity ids in listents that are not players
             for m in re.finditer(r"(?:id|ID)\s*=\s*(\d+)", out):

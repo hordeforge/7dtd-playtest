@@ -229,6 +229,35 @@ def read_log_since(fragment: str, log: Path, while_running: str = "") -> str:
     return proc.stdout
 
 
+def read_log_in_polls(fragment: str, log: Path, rounds: list[str]) -> list[str]:
+    """Read the log once per entry in `rounds` (the real wait loop's poll).
+
+    The wait loop polls once a second for as long as the run takes to stage a
+    scene, so what one poll hands back is what that poll costs: re-reading the
+    whole log from the run's baseline every time is quadratic in run length, on
+    the machine that is also running the game.
+    """
+    script = "\n".join(
+        ["set -euo pipefail", fragment]
+        + [
+            f"{round_}\nread_log_since_start\nprintf '@@@\\n%s' \"$NEW_LOG\""
+            for round_ in rounds
+        ]
+    )
+    proc = subprocess.run(
+        ["bash", "-c", script],
+        env={"CLIENT_LOG": str(log), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        timeout=60,
+    )
+    # Bytes, not text: the client log is CRLF and universal-newline decoding
+    # here would quietly hide the very boundaries under test.
+    out = proc.stdout.decode("utf-8")
+    errout = proc.stderr.decode("utf-8")
+    assert proc.returncode == 0, f"poll loop exited {proc.returncode}: {errout}"
+    return out.split("@@@\n")[1:]
+
+
 def check_log_gate() -> None:
     """A previous run's marker must not reach this run, whatever the clock says.
 
@@ -289,6 +318,33 @@ def check_log_gate() -> None:
             "playtest-shots/clips/motion_thing" in whole
         ), f"a completed marker was not read whole: {whole!r}"
     print("OK the shared log gate reads only the log this run produced")
+    check_log_gate_is_incremental(fragment)
+
+
+def check_log_gate_is_incremental(fragment: str) -> None:
+    """Each poll hands back only what was appended since the previous one.
+
+    Two things break if the reader goes back to the baseline every poll: the
+    cost of a wait grows with the whole run instead of with the new bytes, and
+    a line the client was still writing at a poll boundary is scanned twice
+    (or, cut in half, missed entirely).
+    """
+    q = shlex.quote
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "output_log_client.txt"
+        log.write_text("noise from a previous run\r\n", encoding="utf-8", newline="")
+        rounds = [
+            f"printf 'first poll\\r\\nscene st' >> {q(str(log))}",
+            f"printf 'aged one\\r\\nsecond poll\\r\\n' >> {q(str(log))}",
+            f"printf 'scene staged this_run prop=1\\r\\n' >> {q(str(log))}",
+        ]
+        polls = read_log_in_polls(fragment, log, rounds)
+    assert polls[0] == "first poll\r\n", polls[0]
+    # The marker line was half written when poll 1 ran, so it is carried
+    # whole into poll 2 rather than scanned in halves or missed.
+    assert polls[1] == "scene staged one\r\nsecond poll\r\n", polls[1]
+    assert polls[2] == "scene staged this_run prop=1\r\n", polls[2]
+    print("OK the shared log gate hands back one poll's new bytes, split lines intact")
 
 
 def check_stop_run() -> None:
@@ -314,9 +370,22 @@ def check_stop_run() -> None:
                 "capture_stop_run",
                 'if kill -0 "$RUN_PID" 2>/dev/null; then echo "run=alive"; '
                 'else echo "run=reaped"; fi',
-                'CHILD="$(cat ' + str(pid_file) + ' 2>/dev/null || true)"',
-                'if [[ -n "$CHILD" ]] && kill -0 "$CHILD" 2>/dev/null; '
-                'then echo "group=alive"; else echo "group=gone"; fi',
+                'CHILD=""',
+                # The stand-in writes the child's pid from inside its own
+                # start-up, so read it once it exists: an empty read would
+                # make every check below vacuously pass.
+                'for _ in $(seq 1 50); do CHILD="$(cat ' + str(pid_file)
+                + ' 2>/dev/null || true)"; [[ -n "$CHILD" ]] && break; sleep 0.1; done',
+                'if [[ -z "$CHILD" ]]; then echo "group=nopid"; else',
+                # A killed process still answers kill -0 for a few ms while
+                # the kernel tears it down (and a not-yet-reaped zombie
+                # answers it for as long as its dying parent lives), so a
+                # single instant check is a coin flip. Poll briefly: a
+                # survivor still reads alive, a corpse only reads alive
+                # until it is gone.
+                'gone=0; for _ in $(seq 1 50); do '
+                'if ! kill -0 "$CHILD" 2>/dev/null; then gone=1; break; fi; sleep 0.1; done',
+                'if (( gone )); then echo "group=gone"; else echo "group=alive"; fi; fi',
             )
         )
         proc = subprocess.run(
@@ -330,6 +399,9 @@ def check_stop_run() -> None:
     assert "run=reaped" in proc.stdout, f"the run survived stop_run: {proc.stdout}"
     assert "group=gone" in proc.stdout, (
         f"the run's process group survived stop_run: {proc.stdout}"
+    )
+    assert "group=nopid" not in proc.stdout, (
+        f"the stand-in never reported a child pid: {proc.stdout}"
     )
     print("OK stop_run terminates the run and its process group")
 

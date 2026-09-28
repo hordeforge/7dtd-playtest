@@ -55,22 +55,45 @@ refuse_live_capture() {
 capture_log_gate_init() {
 	LOG_INODE="$(stat -c %i "$CLIENT_LOG" 2>/dev/null || echo 0)"
 	LOG_BASE="$(stat -c %s "$CLIENT_LOG" 2>/dev/null || echo 0)"
+	# Tail of a line the client had not finished writing at the last read, so a
+	# marker landing on a poll boundary is never scanned in half.
+	LOG_CARRY=""
 }
 
-# NEW_LOG: the part of the client log this run has produced. A log the client
-# recreated or truncated carries no baseline to skip, so the anchor resets to
-# its new zero rather than skipping past everything this run wrote.
+# NEW_LOG: the complete lines the client has written since the previous call,
+# starting at this run's own baseline. A log the client recreated or truncated
+# carries no baseline to skip, so the anchor resets to its new zero rather than
+# skipping past everything this run wrote.
+#
+# Only the bytes appended since the last call are read, not the whole log from
+# the baseline: a capture script polls once a second for as long as the suite
+# takes to stage its scene or complete its clip, and re-reading and re-grepping
+# everything written so far on every poll is quadratic in run length, on the
+# machine that is also running the game client.
 read_log_since_start() {
-	local inode size
-	inode="$(stat -c %i "$CLIENT_LOG" 2>/dev/null || echo 0)"
-	size="$(stat -c %s "$CLIENT_LOG" 2>/dev/null || echo 0)"
+	local stamp inode size raw chunk text
+	stamp="$(stat -c '%i %s' "$CLIENT_LOG" 2>/dev/null || echo "0 0")"
+	IFS=' ' read -r inode size <<<"$stamp"
 	if [[ "$inode" != "$LOG_INODE" ]] || (( size < LOG_BASE )); then
 		LOG_INODE="$inode"
 		LOG_BASE=0
+		LOG_CARRY=""
 	fi
 	NEW_LOG=""
 	if (( size > LOG_BASE )); then
-		NEW_LOG="$(tail -c "+$((LOG_BASE + 1))" -- "$CLIENT_LOG")"
+		# The trailing X survives the command substitution that would
+		# otherwise eat the newline the read really ended on, so a read
+		# that stopped mid-line is still recognisable as incomplete.
+		raw="$(tail -c "+$((LOG_BASE + 1))" -- "$CLIENT_LOG"; printf X)"
+		chunk="${raw%X}"
+		LOG_BASE="$size"
+		text="$LOG_CARRY$chunk"
+		if [[ "$text" == *$'\n'* ]]; then
+			NEW_LOG="${text%$'\n'*}"$'\n'
+			LOG_CARRY="${text##*$'\n'}"
+		else
+			LOG_CARRY="$text"
+		fi
 	fi
 	return 0
 }

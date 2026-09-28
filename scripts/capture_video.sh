@@ -121,7 +121,6 @@ fi
 # Wait for the completion line of the wanted clip. Without --clip-id the first
 # `clip complete` line wins, so a suite that captures one clip needs no flag.
 CLIP_LINE=""
-NEW_LOG=""
 echo "waiting for a completed clip..."
 while :; do
 	if ! kill -0 "$RUN_PID" 2>/dev/null; then
@@ -132,13 +131,19 @@ while :; do
 	read_log_since_start
 	if [[ -n "$NEW_LOG" ]]; then
 		if [[ -n "$CLIP_ID" ]]; then
-			CLIP_LINE="$(grep -E "clip complete $CLIP_ID " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
+			hit="$(grep -E "clip complete $CLIP_ID " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
 		else
-			CLIP_LINE="$(grep "clip complete " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
+			hit="$(grep "clip complete " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
 		fi
-		if [[ -n "$CLIP_LINE" ]]; then
-			break
+		# Only a poll that actually matched replaces the line: the reader
+		# hands back one poll's new bytes, so a match seen earlier stays
+		# the answer until a later poll beats it.
+		if [[ -n "$hit" ]]; then
+			CLIP_LINE="$hit"
 		fi
+	fi
+	if [[ -n "$CLIP_LINE" ]]; then
+		break
 	fi
 	sleep 1
 done
