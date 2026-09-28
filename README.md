@@ -107,6 +107,11 @@ empty runtime dependency set, and the mod's one NuGet reference is build-only
 component dev scope, so a consumer or a vulnerability scanner can tell what a
 tag pulled in without checking it out.
 
+Every component names its SPDX license id in `licenses`, read from the license
+file the artifact itself ships. A dependency added without one fails `make sbom`
+and the gate rather than shipping an unlabeled component, and an id outside the
+permissive set the gate allows is a license question to answer before it lands.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR expectations these gates
 enforce (changelog entry, catalog/doc sync).
 

@@ -45,6 +45,34 @@ TYPE_APPLICATION = "application"
 PROP_DIRECT = "7dtd-playtest:direct"
 PROP_DEV = "7dtd-playtest:dev"
 
+# SPDX id per package, read from the license file the artifact itself ships
+# (the wheel's dist-info/licenses/ for PyPI, the nuspec's licenseUrl for NuGet)
+# because none of these lockfiles carry a license field and no PEP 639
+# `License-Expression` is present in the installed metadata. A dependency added
+# without an entry here fails the build rather than shipping an unlabeled
+# component, which is the state that makes a consumer's license scan guess.
+PIP_LICENSES: dict[str, str] = {
+    "ast-serialize": "MIT",
+    "colorama": "BSD-3-Clause",
+    "coverage": "Apache-2.0",
+    "iniconfig": "MIT",
+    "librt": "MIT",
+    "mypy": "MIT",
+    "mypy-extensions": "MIT",
+    "packaging": "Apache-2.0 OR BSD-2-Clause",
+    "pathspec": "MPL-2.0",
+    "pluggy": "MIT",
+    "pygments": "BSD-2-Clause",
+    "pytest": "MIT",
+    "ruff": "MIT",
+    "typing-extensions": "PSF-2.0",
+}
+
+NUGET_LICENSES: dict[str, str] = {
+    "Microsoft.NETFramework.ReferenceAssemblies": "MIT",
+    "Microsoft.NETFramework.ReferenceAssemblies.net48": "MIT",
+}
+
 JsonValue: TypeAlias = "str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None"
 JsonObject: TypeAlias = dict[str, JsonValue]
 
@@ -59,6 +87,12 @@ def _text(obj: JsonObject, key: str, where: str) -> str:
     value = obj.get(key)
     if not isinstance(value, str):
         raise ValueError(f"{where}.{key}: expected a string, got {type(value).__name__}")
+    return value
+
+
+def as_list(value: JsonValue, where: str) -> list[JsonValue]:
+    if not isinstance(value, list):
+        raise ValueError(f"{where}: expected a list, got {type(value).__name__}")
     return value
 
 
@@ -100,6 +134,21 @@ def _purl(name: str, version: str, ecosystem: str) -> str:
     raise ValueError(f"no package-url scheme for ecosystem {ecosystem!r}")
 
 
+def _license(name: str, ecosystem: str) -> str:
+    """The SPDX id recorded for a package.
+
+    Unrecorded is a build failure, not a missing field: a component with no
+    license is the one a downstream scan cannot act on.
+    """
+    recorded = (PIP_LICENSES if ecosystem == PUPI else NUGET_LICENSES).get(name)
+    if recorded is None:
+        raise ValueError(
+            f"{name}: no license recorded in dep_sbom. Add the SPDX id read from "
+            f"the license file the artifact ships"
+        )
+    return recorded
+
+
 def _component(
     name: str,
     version: str,
@@ -114,6 +163,7 @@ def _component(
         "version": version,
         "purl": _purl(name, version, ecosystem),
         "scope": "excluded" if dev else "required",
+        "licenses": [{"license": {"id": _license(name, ecosystem)}}],
         "properties": [
             {"name": PROP_DIRECT, "value": "true" if direct else "false"},
             {"name": PROP_DEV, "value": "true" if dev else "false"},
@@ -218,23 +268,24 @@ def build_sbom(uv_lock: JsonObject, nuget_lock: JsonObject) -> JsonObject:
     components = uv_components(uv_lock) + nuget_components(nuget_lock)
     if not components:
         raise ValueError("no components resolved from the lockfiles")
+    metadata: JsonObject = {
+        "component": {
+            "type": TYPE_APPLICATION,
+            "name": PROJECT_NAME,
+            "version": project_version(),
+        },
+        "tools": {
+            "components": [
+                {"type": TYPE_APPLICATION, "name": f"{PROJECT_NAME}/dep_sbom"}
+            ]
+        },
+    }
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
         "serialNumber": "urn:uuid:" + _serial_number(uv_lock, nuget_lock),
         "version": 1,
-        "metadata": {
-            "component": {
-                "type": TYPE_APPLICATION,
-                "name": PROJECT_NAME,
-                "version": project_version(),
-            },
-            "tools": {
-                "components": [
-                    {"type": TYPE_APPLICATION, "name": f"{PROJECT_NAME}/dep_sbom"}
-                ]
-            },
-        },
+        "metadata": metadata,
         "components": components,
     }
 

@@ -4,8 +4,9 @@
 The inventory is only worth trusting if it is a read of committed bytes, so
 these cases pin what a vulnerability scanner and a consumer depend on: every
 package in both lockfiles is present, each purl round-trips its locked version,
-the runtime/dev split matches what pyproject declares, and the serial number is
-a content hash (same tree, same id; changed tree, different id).
+the runtime/dev split matches what pyproject declares, every component names a
+license (or the reason it has none), and the serial number is a content hash
+(same tree, same id; changed tree, different id).
 """
 
 from __future__ import annotations
@@ -18,11 +19,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dep_sbom
-from dep_sbom import JsonObject, as_object, as_objects
+from dep_sbom import JsonObject, JsonValue, as_object, as_objects
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_PYPI_DIRECT = {"coverage", "mypy", "pytest", "ruff"}
 EXPECTED_NUGET_DIRECT = "Microsoft.NETFramework.ReferenceAssemblies"
+
+# Every id a dependency here may carry. All of them are permissive or weak
+# copyleft over their own files and none reaches a shipped artifact, which is
+# what keeps this MIT project redistributable; an id outside the set is a
+# license question to answer before it lands, not a typo to absorb.
+ALLOWED_SPDX = {
+    "Apache-2.0",
+    "Apache-2.0 OR BSD-2-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT",
+    "MPL-2.0",
+    "PSF-2.0",
+}
 
 
 def _locks() -> tuple[JsonObject, JsonObject]:
@@ -148,6 +163,51 @@ def test_empty_inventory_fails_loud() -> None:
     raise AssertionError("build_sbom accepted a lockfile pair that resolves to nothing")
 
 
+def _array(obj: JsonObject, key: str, where: str) -> list[JsonValue]:
+    return dep_sbom.as_list(obj.get(key, []), f"{where}.{key}")
+
+
+def _license(component: JsonObject) -> str:
+    """The SPDX id on a component, read from its `licenses` entry."""
+    entries = _array(component, "licenses", "component")
+    assert len(entries) == 1, f"{_name(component)} has {len(entries)} license entries"
+    return str(as_object(as_object(entries[0], "licenses[]")["license"], "license")["id"])
+
+
+def test_every_component_carries_a_license() -> None:
+    for component in _components():
+        spdx = _license(component)
+        assert spdx.strip(), f"{_name(component)} has an empty license id"
+        assert spdx in ALLOWED_SPDX, f"{_name(component)}: unlisted SPDX id {spdx!r}"
+
+
+def test_license_tables_match_the_lockfiles() -> None:
+    uv_lock, nuget_lock = _locks()
+    framework = as_object(
+        as_object(nuget_lock["dependencies"], "dependencies")[dep_sbom.NUGET_FRAMEWORK],
+        dep_sbom.NUGET_FRAMEWORK,
+    )
+    assert set(dep_sbom.PIP_LICENSES) == {
+        str(p["name"])
+        for p in as_objects(uv_lock, "package", "uv.lock")
+        if "registry" in as_object(p["source"], "package.source")
+    }
+    assert set(dep_sbom.NUGET_LICENSES) == set(framework)
+
+
+def test_an_unrecorded_license_fails_loud() -> None:
+    uv_lock, nuget_lock = _locks()
+    bumped = as_object(json.loads(json.dumps(uv_lock)), "uv.lock")
+    name = "unrecorded-package-xyz"
+    as_objects(bumped, "package", "uv.lock")[0]["name"] = name
+    try:
+        dep_sbom.build_sbom(bumped, nuget_lock)
+    except ValueError as ex:
+        assert name in str(ex), ex
+        return
+    raise AssertionError(f"build_sbom emitted {name} with no license recorded")
+
+
 TESTS = (
     test_bom_shape,
     test_every_uv_lock_package_is_listed,
@@ -155,6 +215,9 @@ TESTS = (
     test_purl_carries_version,
     test_nothing_is_required_scope,
     test_direct_flags_match_the_declaration,
+    test_every_component_carries_a_license,
+    test_license_tables_match_the_lockfiles,
+    test_an_unrecorded_license_fails_loud,
     test_serial_number_tracks_content,
     test_empty_inventory_fails_loud,
 )

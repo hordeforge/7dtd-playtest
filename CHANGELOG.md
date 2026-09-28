@@ -81,6 +81,11 @@ Release model (inferred practice, now pinned by `make test`):
   `pyproject.toml` or when a step pins a second literal beside it. The tag's
   SBOM also records its serial number and component count in the run summary,
   which the runner temp dir alone did not leave behind.
+- **SPDX license on every SBOM component.** `scripts/dep_sbom.py` records
+  the license of each package in the CycloneDX inventory, read from the
+  license file the artifact itself ships. A dependency added with no recorded
+  license, or with one outside the permissive set `scripts/test_dep_sbom.py`
+  allows, fails the gate instead of shipping an unlabeled component.
 - **Gate-list surface** (`scripts/test_gate_list.py`, wired into the Makefile
   `GATES` list): fails when a `scripts/test_*.py` file is missing from `GATES`
   (it would run under neither `make test` nor CI) or when a `GATES` entry has
