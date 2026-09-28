@@ -16,9 +16,11 @@ from pathlib import Path
 from version_surface import (
     BREAKING_MARKER,
     discover_tag_versions,
+    duplicate_impact_headings,
     required_uv_floor,
     uncovered_tag_versions,
     undeclared_breaking_sections,
+    unnamed_replacement_rows,
     uv_pin_problems,
 )
 
@@ -81,6 +83,25 @@ def main() -> int:
         "and name the replacement (see the release model at the top of the file)"
     )
     print("OK every ### Removed section declares itself breaking")
+
+    unnamed = unnamed_replacement_rows(changelog)
+    assert not unnamed, (
+        "CHANGELOG.md has a ### Removed section that declares itself breaking "
+        "with no table naming a replacement in: "
+        + ", ".join(unnamed)
+        + "; a consumer reading the notes needs the symbol it must migrate to, "
+        "not only the fact that the symbol is gone"
+    )
+    print("OK every declared removal names a replacement")
+
+    repeated = duplicate_impact_headings(changelog)
+    assert not repeated, (
+        "CHANGELOG.md repeats an impact heading within one release: "
+        + ", ".join(repeated)
+        + "; one section per impact class keeps the breaking note where a "
+        "consumer looks for it"
+    )
+    print("OK every release has one section per impact class")
 
     tag_versions = discover_tag_versions(ROOT)
     if tag_versions:

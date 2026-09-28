@@ -25,9 +25,11 @@ if str(_SCRIPTS) not in sys.path:
 from version_surface import (  # noqa: E402
     BREAKING_MARKER,
     discover_tag_versions,
+    duplicate_impact_headings,
     required_uv_floor,
     uncovered_tag_versions,
     undeclared_breaking_sections,
+    unnamed_replacement_rows,
     uv_pin_problems,
 )
 
@@ -133,6 +135,7 @@ def make_root(
     git: bool = True,
     removed_section: bool = False,
     breaking: bool = True,
+    replacement_table: bool = True,
 ) -> None:
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(GATE, root / "scripts" / "test_version_surface.py")
@@ -148,8 +151,15 @@ def make_root(
     )
     if removed_section:
         marker = "**Breaking.** use the replacement instead\n\n" if breaking else ""
+        table = (
+            "\n| Removed | Use instead |\n|---|---|\n"
+            "| `Old.Symbol` | `New.Symbol` |\n"
+            if replacement_table
+            else ""
+        )
         entries = "\n".join(
-            f"## [{h}]\n\n### Removed\n\n{marker}- `Old.Symbol` removed\n" for h in headings
+            f"## [{h}]\n\n### Removed\n\n{marker}{table}\n- `Old.Symbol` removed\n"
+            for h in headings
         )
     else:
         entries = "\n".join(f"## [{h}]\n\n- note\n" for h in headings)
@@ -219,6 +229,22 @@ def main() -> int:
         assert discover_tag_versions(bare) == []
         print("OK no git metadata means the tag check is vacuous")
 
+        # A linked worktree keeps refs/tags in the main checkout, one
+        # directory up from the worktree's own git dir: reading refs there
+        # found no tags, so the coverage check read as a pass in every
+        # worktree (this repository ships its releases from one).
+        linked = base / "linked"
+        common = base / "main-checkout"
+        make_git_dir(common, {"v3.1.0": "1" * 40}, [])
+        worktree_git = common / "worktrees" / "lane-8"
+        worktree_git.mkdir(parents=True)
+        (worktree_git / "commondir").write_text("../..\n", encoding="utf-8")
+        (worktree_git / "HEAD").write_text("ref: refs/heads/lane-8\n", encoding="utf-8")
+        linked.mkdir()
+        linked.joinpath(".git").write_text(f"gitdir: {worktree_git}\n", encoding="utf-8")
+        assert discover_tag_versions(linked) == ["3.1.0"], discover_tag_versions(linked)
+        print("OK a linked worktree reads the main checkout's tags")
+
         assert uncovered_tag_versions(["0.7.1", "0.7.2"], ["Unreleased", "0.7.1"]) == ["0.7.2"]
         assert uncovered_tag_versions([], ["Unreleased"]) == []
         assert uncovered_tag_versions(["0.8.0"], ["Unreleased", "0.8.0"]) == []
@@ -258,10 +284,40 @@ def main() -> int:
         assert "every ### Removed section declares itself breaking" in proc.stdout, proc.stdout
         print("OK the gate passes a removal that declares its replacement")
 
+        unnamed = base / "unnamed-replacement"
+        make_root(
+            unnamed,
+            version="0.8.0",
+            headings=["0.8.0", "9.9.9"],
+            removed_section=True,
+            replacement_table=False,
+        )
+        proc = run_gate(unnamed)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "no table naming a replacement" in proc.stderr, proc.stderr
+        print("OK the gate fails a declared removal that names no replacement")
+
+        repeated = base / "repeated-heading"
+        make_root(repeated, version="0.8.0", headings=["0.8.0", "9.9.9"])
+        changelog = (repeated / "CHANGELOG.md").read_text(encoding="utf-8")
+        (repeated / "CHANGELOG.md").write_text(
+            changelog.replace(
+                "## [0.8.0]\n\n- note\n",
+                "## [0.8.0]\n\n- note\n\n### Fixed\n\n- note\n\n### Fixed\n\n- note\n",
+            ),
+            encoding="utf-8",
+        )
+        proc = run_gate(repeated)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "one section per impact class" in proc.stderr, proc.stderr
+        print("OK the gate fails a release that repeats an impact heading")
+
     real = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert undeclared_breaking_sections(real) == [], undeclared_breaking_sections(real)
+    assert unnamed_replacement_rows(real) == [], unnamed_replacement_rows(real)
+    assert duplicate_impact_headings(real) == [], duplicate_impact_headings(real)
     assert "### Removed" in real, "CHANGELOG.md must keep the removal this gate polices"
-    print("OK the shipped changelog has no undeclared removal section")
+    print("OK the shipped changelog declares every removal and repeats no heading")
 
     with tempfile.TemporaryDirectory(prefix="version-surface-uv-") as td:
         base = Path(td)

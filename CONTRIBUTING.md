@@ -46,7 +46,10 @@ easy to miss and will fail CI otherwise:
   suite/env surface, the lock payload), but the entry must say so: a
   `### Removed` section needs a `**Breaking.**` first line and a
   removed-to-replacement table, or `test_version_surface.py` fails the gate.
-  The pre-1.0 policy is written out at the top of CHANGELOG.md.
+  One section per impact class per release (Added, Changed, Deprecated,
+  Removed, Fixed, Security, in that order): a second `### Fixed` reads as a
+  second group of notes and hides the removal, and the gate fails it. The
+  pre-1.0 policy is written out at the top of CHANGELOG.md.
 - **New offline gate:** a new `scripts/test_*.py` must be added to the
   `GATES` list in the Makefile. `test_gate_list.py` fails otherwise: an
   unlisted gate file runs under neither `make test` nor CI, so it would sit

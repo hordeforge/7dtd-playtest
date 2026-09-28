@@ -7,6 +7,9 @@ from pathlib import Path
 TAG_RE = re.compile(r"v(\d+\.\d+\.\d+)")
 SECTION_RE = re.compile(r"^##\s+\[([^\]]+)\]", re.MULTILINE)
 REMOVED_HEADING_RE = re.compile(r"^###\s+Removed\b", re.MULTILINE)
+IMPACT_HEADING_RE = re.compile(r"^###\s+([A-Z][A-Za-z ]*?)\s*$", re.MULTILINE)
+# A markdown table's delimiter row: pipes, dashes, colons.
+TABLE_ROW_RE = re.compile(r"^\|[\s:|-]+\|\s*$", re.MULTILINE)
 BREAKING_MARKER = "**Breaking.**"
 
 # The uv that wrote uv.lock is named in two places: the floor in
@@ -96,6 +99,19 @@ def uncovered_tag_versions(tag_versions: list[str], headings: list[str]) -> list
     return [version for version in tag_versions if version not in known]
 
 
+def _release_spans(changelog: str) -> list[tuple[int, int, str]]:
+    """(body start, body end, release name) for each ``## [name]`` entry."""
+    starts = [
+        (match.start(), match.end(), match.group(1))
+        for match in SECTION_RE.finditer(changelog)
+    ]
+    spans: list[tuple[int, int, str]] = []
+    for index, (_start, end, name) in enumerate(starts):
+        stop = starts[index + 1][0] if index + 1 < len(starts) else len(changelog)
+        spans.append((end, stop, name))
+    return spans
+
+
 def undeclared_breaking_sections(changelog: str) -> list[str]:
     """Version entries whose ``### Removed`` section omits the breaking marker.
 
@@ -104,17 +120,61 @@ def undeclared_breaking_sections(changelog: str) -> list[str]:
     ``Helpers`` methods without the marker, so a consumer reading the notes had
     no way to tell the removal from a dead-code tidy-up.
     """
-    starts = [
-        (match.start(), match.end(), match.group(1))
-        for match in SECTION_RE.finditer(changelog)
+    return [
+        name
+        for start, stop, name in _release_spans(changelog)
+        if REMOVED_HEADING_RE.search(changelog[start:stop])
+        and BREAKING_MARKER not in changelog[start:stop]
     ]
-    undeclared: list[str] = []
-    for index, (_start, end, heading) in enumerate(starts):
-        stop = starts[index + 1][0] if index + 1 < len(starts) else len(changelog)
-        body = changelog[end:stop]
-        if REMOVED_HEADING_RE.search(body) and BREAKING_MARKER not in body:
-            undeclared.append(heading)
-    return undeclared
+
+
+def _removed_sections(changelog: str) -> list[tuple[str, str]]:
+    """(release name, ``### Removed`` body) for every release that has one."""
+    found: list[tuple[str, str]] = []
+    for start, stop, name in _release_spans(changelog):
+        body = changelog[start:stop]
+        for match in REMOVED_HEADING_RE.finditer(body):
+            following = re.search(r"^###\s", body[match.end() :], flags=re.MULTILINE)
+            section_end = match.end() + following.start() if following else len(body)
+            found.append((name, body[match.end() : section_end]))
+    return found
+
+
+def unnamed_replacement_rows(changelog: str) -> list[str]:
+    """Releases whose ``### Removed`` section names no replacement.
+
+    The release model promises a table naming the replacement for each
+    removed symbol. A declared break without that table leaves a provider
+    author reading "this symbol is gone" and nothing else, which is the same
+    gap 0.13.0 had: the prose said the symbols were dead code and named
+    nothing.
+    """
+    return [
+        name
+        for name, section in _removed_sections(changelog)
+        if BREAKING_MARKER in section and not TABLE_ROW_RE.search(section)
+    ]
+
+
+def duplicate_impact_headings(changelog: str) -> list[str]:
+    """Impact headings a release repeats, as ``<release> (Added)``.
+
+    Keep a Changelog gives a release one section per impact class. A second
+    ``### Changed`` reads as a second group of consumer-facing notes and
+    renders as a repeated heading, and a ``### Removed`` filed under the
+    second one is easy to skim past, which is how the ``ChatProbe.Last``
+    removal shipped under ``### Fixed`` with no ``**Breaking.**`` marker.
+    """
+    duplicates: list[str] = []
+    for start, stop, name in _release_spans(changelog):
+        body = changelog[start:stop]
+        seen: set[str] = set()
+        for match in IMPACT_HEADING_RE.finditer(body):
+            heading = match.group(1)
+            if heading in seen:
+                duplicates.append(f"{name} ({heading})")
+            seen.add(heading)
+    return duplicates
 
 
 def required_uv_floor(pyproject: str) -> str:

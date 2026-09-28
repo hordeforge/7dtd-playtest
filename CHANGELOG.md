@@ -26,9 +26,12 @@ Release model (inferred practice, now pinned by `make test`):
   What a consumer is promised instead is the announcement: a release that
   removes a public symbol carries a `### Removed` section whose first line is
   `**Breaking.**`, and a table naming the replacement for each removed
-  symbol. `scripts/test_version_surface.py` fails a release whose `### Removed`
-  section does not carry that marker, so "removed dead code" can no longer ship
-  undeclared, as `0.13.0` did before the marker existed.
+  symbol. Each release has one section per impact class (Keep a Changelog
+  order: Added, Changed, Deprecated, Removed, Fixed, Security), so the
+  removal note is not filed under a second `### Fixed`.
+  `scripts/test_version_surface.py` fails a release that breaks any of those,
+  so "removed dead code" can no longer ship undeclared, as `0.13.0` did before
+  the marker existed and `ChatProbe.Last` did under a plain `### Fixed`.
 - Once `1.0.0` ships, the contracts named above become SemVer: a removal needs
   a major bump, and a deprecation needs a release that announces the
   replacement and a later release that removes it.
@@ -55,22 +58,6 @@ Release model (inferred practice, now pinned by `make test`):
   the server's internal dump), and a file or symlink planted at the temp name
   would be written through and then renamed into place as this run's report.
   The temp file is now opened `O_EXCL` at 0600.
-
-### Changed
-
-- **Host CLI help and exit codes, aligned across the scripts.**
-  Every other CLI in `scripts/` already printed its exit codes from
-  `--help`; these did not, and one of them used the usage code for something
-  that is not a usage error. `dep_sbom.py` now documents its exit codes and
-  its stdout/stderr split (CycloneDX JSON on stdout, the component count on
-  stderr) and exits 1 rather than 2 when a committed lockfile or
-  `ModInfo.xml` is missing, since nothing about the invocation was wrong;
-  `dst_run.py` and `coverage_badge.py` document theirs, and
-  `playtest_lock.py --help` now says what `live` reports and what its
-  nonzero exit means, which the one-line usage previously left unsaid for
-  the probe the capture scripts gate on. `capture_frames.sh`,
-  `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
-  already used.
 
 ### Added
 
@@ -129,13 +116,128 @@ Release model (inferred practice, now pinned by `make test`):
   the pre-1.0 policy in full (a minor may remove a public symbol; the entry
   has to say so and name the replacement), and
   `scripts/test_version_surface.py` fails a release whose `### Removed`
-  section lacks the `**Breaking.**` marker. `0.13.0` removed three `Helpers`
-  methods and two host helpers under a plain `### Removed` heading, so its
-  entry now declares the break and carries a symbol-to-replacement table.
+  section lacks the `**Breaking.**` marker, or declares the break without a
+  table naming the replacement, or repeats an impact heading inside one
+  release (a second `### Changed` is where a `### Removed` gets skimmed past,
+  which is how the `ChatProbe.Last` break below arrived under `### Fixed`).
+  `0.13.0` removed three `Helpers` methods and two host helpers under a plain
+  `### Removed` heading, so its entry now declares the break and carries a
+  symbol-to-replacement table. The tag-coverage half of the gate read its
+  refs from the working tree's own git dir, so in a linked worktree it found
+  no tags and reported "not applicable" while the releases sat in the main
+  checkout; it follows `commondir` now.
+- **Two new public members for providers.** `ChatProbe.LastLength` is the
+  length of the last captured remote-player message (the text it counts stays
+  private, see `### Removed` below), and `CaseDef.DefaultSpawnOffset` is the
+  placement `CaseDef.WalkEntity` now uses when its `spawnOffset` is
+  `Vector3.zero`, in front of and above the player and clear of the first-person
+  camera. A provider that wants the old fixed offset passes it explicitly.
 - **`require-uv` preflight.** `make test-one`, `dst`, `dst-soak`, `coverage`,
   `playtest` and `playtest-repeat` now check for `uv` up front and name it,
   instead of printing a bare "not found" from the interpreter call. A mistyped
   `make test-one GATE=` lists the known gates.
+
+### Changed
+
+- **One copy of the capture scripts' shared plumbing.**
+  `scripts/capture_common.sh` holds the live-run guard (three identical
+  copies), the byte-offset log gate and the `stop_run` teardown (two copies
+  each), and `capture_audio.sh`, `capture_frames.sh` and `capture_video.sh`
+  source it. A fix to one copy used to leave the others answering a question
+  they no longer asked. `scripts/test_capture_video_surface.py` runs the
+  shared text and fails if a script goes back to a private copy.
+- **`CaseDef.WalkEntity` places and validates its spawn.** Same signature, two
+  behaviour changes a provider can see: `spawnOffset: Vector3.zero` now
+  resolves to `CaseDef.DefaultSpawnOffset` rather than spawning inside the
+  player, and a `clipFps` of zero or less raises `ArgumentOutOfRangeException`
+  (naming `suite/id`) where it previously produced a case that recorded
+  nothing. The drive also orbits the spawn point on the terrain rather than
+  walking the creature out of the camera, which is what makes the clip
+  judgeable; README describes the current behaviour.
+- **Host CLI help and exit codes, aligned across the scripts.**
+  Every other CLI in `scripts/` already printed its exit codes from
+  `--help`; these did not, and one of them used the usage code for something
+  that is not a usage error. `dep_sbom.py` now documents its exit codes and
+  its stdout/stderr split (CycloneDX JSON on stdout, the component count on
+  stderr) and exits 1 rather than 2 when a committed lockfile or
+  `ModInfo.xml` is missing, since nothing about the invocation was wrong;
+  `dst_run.py` and `coverage_badge.py` document theirs, and
+  `playtest_lock.py --help` now says what `live` reports and what its
+  nonzero exit means, which the one-line usage previously left unsaid for
+  the probe the capture scripts gate on. `capture_frames.sh`,
+  `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
+  already used.
+
+- **One boolean spelling table for every env knob.** `PLAYTEST_READONLY`,
+  `PLAYTEST_TRACE_ENTITY` and `CLIENT_MUTE` accepted different token sets, so
+  `PLAYTEST_READONLY=false` armed readonly while `PLAYTEST_TRACE_ENTITY=yes`
+  armed nothing. All three now read `1/true/yes/on` and `0/false/no/off`, and
+  anything else is a harness error naming the variable rather than a silent
+  default. Empty still means unset.
+- **`PLAYTEST_PROVISION` / `PLAYTEST_BACKEND` are validated before argparse
+  runs.** argparse checks `choices` on a flag but not on a string default, so
+  a typo in either env var reached the run as a live value.
+- The startup `config:` line also reports the sandbox client instance, the
+  resolved lock file, and whether the client mute is on.
+- `CLIENT_MUTE_TIMEOUT` is validated as finite seconds > 0; a junk value warns
+  and keeps the default instead of handing the helper a wait argument that
+  does nothing.
+- **The vision-review consent text names the whole payload.** `--allow-network`
+  covers the entire clip directory, not "the clip": `capture_video.sh` leaves
+  the run log and a copy of the client log beside the mp4, and the client log
+  carries whatever the game and any remote LAN player wrote into it. The CLI
+  description, the `--allow-network` help, the refusal and the pre-upload
+  notice now say so, and README plus `docs/VIDEO_MODEL_FEEDBACK.md` match.
+- **Shared Catalog.cs readers moved out of a gate.** The two offline gates
+  that read `Catalog.cs` now import the readers from `scripts/catalog_surface.py`
+  instead of one of them importing the other (`test_suite_refs` pulled
+  `append_suite_map` out of `test_catalog_surface`, and both pinned the
+  `catalog.` ref prefix separately). The ref prefix that `Runner.CaseRef`
+  builds lives beside the parsers now. No gate assertion changed.
+- **Help text that named a flag that no longer exists.** `playtest_run.py
+  --help` told the reader to "prefer --target" and to use `--sandbox-name`
+  "for --target sandbox"; the two-axis replacement has no `--target` flag,
+  so both strings now name `--provision`.
+- **`make playtest*` no longer overrides the backend with its own default.**
+  Every target passed `--server "$(SERVER)"` with `SERVER ?= stock`, so a
+  documented `PLAYTEST_BACKEND=zdtd` was inert under make. `SERVER` now
+  defaults to `PLAYTEST_BACKEND`, and the flag is only passed when set.
+  `READONLY=` takes the same on/off spellings as `PLAYTEST_READONLY`, so
+  `READONLY=false` no longer arms `--readonly`.
+- `review_video.py` documents `--keep-raw-response` and `--force` (both are
+  gateway passthroughs) and closes with examples and exit codes; `make help`
+  lists `playtest-review-video`; the `playtest-repeat` comment no longer
+  claims a `LAPS=3` default the Makefile does not have.
+- Offline gate strictness: ruff now also enforces `ERA` (commented-out code)
+  and `ISC001`; mypy adds the `mutable-override` and `type-abstract` error
+  codes and drops `playtest_log` and `test_suite_loader` from the
+  type-argument opt-out list, since both modules pass it.
+- `playtest_targets.apply_plan_to_args` / `overlay_instance_env` take a typed
+  `argparse.Namespace` instead of `object` plus twelve `attr-defined` ignores.
+- The detached child the orchestrator launches carries its log handle as a
+  declared `DetachedPopen.log_fh` attribute rather than one attached to a
+  plain `Popen` at runtime.
+
+### Removed
+
+**Breaking.** The removal below is allowed without a major bump under the
+pre-1.0 policy above, but it does break an external `IScenarioProvider` that
+read `ChatProbe.Last`, and the entry says so rather than filing it as an
+ordinary security fix.
+
+Migration, by symbol:
+
+| Removed | Use instead |
+|---|---|
+| `ChatProbe.Last` (`public static string`) | `ChatProbe.LastLength` (`public static int`), the length of the last captured message, never its text |
+
+- **The captured chat text is private.** `ChatProbe.Last` was a public field
+  holding whatever a remote LAN player typed, and a provider putting it in
+  `ctx.Detail` published it to the run log, the JSON result event, the JUnit
+  report and `report-*.json`, all of which leave the machine. The field is
+  private now, the stock chat cases report `chat_len=`, and a provider that
+  needs a predicate reads `ChatProbe.Contains` / `ChatProbe.LastLength` rather
+  than the raw string. Gated by `scripts/test_chat_probe_surface.py`.
 
 ### Fixed
 
@@ -195,67 +297,6 @@ Release model (inferred practice, now pinned by `make test`):
   ran, and `capture_audio.sh` exited 0 on an empty recording, so a recorder
   that died on a busy monitor shipped as a passing run. The audio capture now
   exits 1 on an empty recording.
-
-### Changed
-
-- **One copy of the capture scripts' shared plumbing.**
-  `scripts/capture_common.sh` holds the live-run guard (three identical
-  copies), the byte-offset log gate and the `stop_run` teardown (two copies
-  each), and `capture_audio.sh`, `capture_frames.sh` and `capture_video.sh`
-  source it. A fix to one copy used to leave the others answering a question
-  they no longer asked. `scripts/test_capture_video_surface.py` runs the
-  shared text and fails if a script goes back to a private copy.
-- **One boolean spelling table for every env knob.** `PLAYTEST_READONLY`,
-  `PLAYTEST_TRACE_ENTITY` and `CLIENT_MUTE` accepted different token sets, so
-  `PLAYTEST_READONLY=false` armed readonly while `PLAYTEST_TRACE_ENTITY=yes`
-  armed nothing. All three now read `1/true/yes/on` and `0/false/no/off`, and
-  anything else is a harness error naming the variable rather than a silent
-  default. Empty still means unset.
-- **`PLAYTEST_PROVISION` / `PLAYTEST_BACKEND` are validated before argparse
-  runs.** argparse checks `choices` on a flag but not on a string default, so
-  a typo in either env var reached the run as a live value.
-- The startup `config:` line also reports the sandbox client instance, the
-  resolved lock file, and whether the client mute is on.
-- `CLIENT_MUTE_TIMEOUT` is validated as finite seconds > 0; a junk value warns
-  and keeps the default instead of handing the helper a wait argument that
-  does nothing.
-- **The vision-review consent text names the whole payload.** `--allow-network`
-  covers the entire clip directory, not "the clip": `capture_video.sh` leaves
-  the run log and a copy of the client log beside the mp4, and the client log
-  carries whatever the game and any remote LAN player wrote into it. The CLI
-  description, the `--allow-network` help, the refusal and the pre-upload
-  notice now say so, and README plus `docs/VIDEO_MODEL_FEEDBACK.md` match.
-- **Shared Catalog.cs readers moved out of a gate.** The two offline gates
-  that read `Catalog.cs` now import the readers from `scripts/catalog_surface.py`
-  instead of one of them importing the other (`test_suite_refs` pulled
-  `append_suite_map` out of `test_catalog_surface`, and both pinned the
-  `catalog.` ref prefix separately). The ref prefix that `Runner.CaseRef`
-  builds lives beside the parsers now. No gate assertion changed.
-- **Help text that named a flag that no longer exists.** `playtest_run.py
-  --help` told the reader to "prefer --target" and to use `--sandbox-name`
-  "for --target sandbox"; the two-axis replacement has no `--target` flag,
-  so both strings now name `--provision`.
-- **`make playtest*` no longer overrides the backend with its own default.**
-  Every target passed `--server "$(SERVER)"` with `SERVER ?= stock`, so a
-  documented `PLAYTEST_BACKEND=zdtd` was inert under make. `SERVER` now
-  defaults to `PLAYTEST_BACKEND`, and the flag is only passed when set.
-  `READONLY=` takes the same on/off spellings as `PLAYTEST_READONLY`, so
-  `READONLY=false` no longer arms `--readonly`.
-- `review_video.py` documents `--keep-raw-response` and `--force` (both are
-  gateway passthroughs) and closes with examples and exit codes; `make help`
-  lists `playtest-review-video`; the `playtest-repeat` comment no longer
-  claims a `LAPS=3` default the Makefile does not have.
-- Offline gate strictness: ruff now also enforces `ERA` (commented-out code)
-  and `ISC001`; mypy adds the `mutable-override` and `type-abstract` error
-  codes and drops `playtest_log` and `test_suite_loader` from the
-  type-argument opt-out list, since both modules pass it.
-- `playtest_targets.apply_plan_to_args` / `overlay_instance_env` take a typed
-  `argparse.Namespace` instead of `object` plus twelve `attr-defined` ignores.
-- The detached child the orchestrator launches carries its log handle as a
-  declared `DetachedPopen.log_fh` attribute rather than one attached to a
-  plain `Popen` at runtime.
-
-### Fixed
 
 - **`--no-server` attach still fell back to the published `retest` telnet
   password.** The 0.8.0 entry that removed the static default only changed the
@@ -414,8 +455,9 @@ Release model (inferred practice, now pinned by `make test`):
   `make coverage` also wrote `.coverage` to the caller's directory rather than
   the repo root. `dotnet build` now runs with telemetry and the first-run
   banner off, so a build does not write first-run sentinels to `$HOME`.
-
 ## [0.13.0] - 2026-09-21
+
+
 
 ### Removed
 
@@ -446,8 +488,18 @@ Migration, by symbol:
   it), and the two-pass streaming form of
   `playtest_run.read_loadgen_latest_state` collapsed back to
   `loadgen_latest_state(read_loadgen_events(path))`.
-
 ## [0.12.0] - 2026-09-20
+
+
+
+### Added
+
+- Public **PlayerSurvivability** helper (`AddSurvivabilityGuard`,
+  `TryPressSpawn`, `Ensure`). The runner recovers a `PlayerGate.LivePlayer`
+  case through `TryPressSpawn` (`XUiC_SpawnSelectionWindow.SpawnButtonPressed`
+  only while that window is open) instead of `Respawn`/`SetAlive` alone.
+  God Mode writes fly/noclip from the requested `fly` flag (default off).
+  `AllowDead` / `WorldOnly` / `NoAutoHeal` are unchanged.
 
 ### Fixed
 
@@ -463,17 +515,9 @@ Migration, by symbol:
   and `NoAutoHeal` survival claims would then be invulnerable. Spawn
   recovery restores vitals only; God Mode stays on
   `PlayerSurvivability.Ensure` / `AddSurvivabilityGuard`.
-
-### Added
-
-- Public **PlayerSurvivability** helper (`AddSurvivabilityGuard`,
-  `TryPressSpawn`, `Ensure`). The runner recovers a `PlayerGate.LivePlayer`
-  case through `TryPressSpawn` (`XUiC_SpawnSelectionWindow.SpawnButtonPressed`
-  only while that window is open) instead of `Respawn`/`SetAlive` alone.
-  God Mode writes fly/noclip from the requested `fly` flag (default off).
-  `AllowDead` / `WorldOnly` / `NoAutoHeal` are unchanged.
-
 ## [0.11.0] - 2026-09-11
+
+
 
 ### Added
 
@@ -494,43 +538,12 @@ Migration, by symbol:
   returned immediately, the dedicated stayed down, and the verify client
   got `Connection Failed`. Sandbox has no Popen either way;
   `note_backend_exit` already no-ops on a null handle.
-
 ## [0.10.0] - 2026-09-02
 
 Sandbox pairs: a managed run now drives both halves from Safehouse instances,
 several runs share a machine, and the stock-peer path was repaired.
 
 **Requires** `7dtd-sandbox` >= 0.2.0.
-
-### Fixed
-
-- **A stock peer ran the wrong game tree.** `launch_client.sh` defaults `GAME`
-  to the operator's Steam install, and the peer was given only `COMPAT`, so it
-  ran that install against a sandbox Proton prefix. On a host whose Steam copy
-  is the Linux build there is no `7DaysToDie.exe` for Proton at all: the peer
-  silently never started, while the suite still passed on the primary client
-  alone. `peer_client_game` derives the tree beside the peer's prefix, and the
-  peer gets the same windowed-720p arguments as the primary.
-- **The peer raced the engine's connect rate limit.** Same-IP connects less
-  than 500 ms apart are rejected, and staggering the *launches* by a second did
-  not stagger the *connects*: two clients booting from identical instances
-  reach the menu together, so the peer was rejected with `ConnectionRejected`.
-  It now waits for the primary to be in the world
-  (`Respawning: EnterMultiplayer`, a client-side marker; the server's
-  `PlayerSpawnedInWorld` never appears in a client log and waiting on it timed
-  out every run), with the one-second sleep kept as a floor.
-
-### Known limitation
-
-- One server with several clients is **not yet proven**. With both fixes the
-  peer starts correctly and is spaced past the rate limit, but a suite that
-  does not wait for it (`smoke` finishes its five cases immediately) tears the
-  run down before the peer finishes booting.
-- The `mp` suite, which exists for exactly this, was run against a sandbox pair
-  and failed differently: `timeout after 1292s waiting for DONE`, with the
-  *primary* client never reaching `Respawning: EnterMultiplayer` at all while
-  the peer did auto-join. That is a suite-semantics problem rather than the
-  peer plumbing this release fixed, and it is unexplored.
 
 ### Added
 
@@ -565,6 +578,35 @@ several runs share a machine, and the stock-peer path was repaired.
   the orchestrator still starts a zdtd on a caller-chosen port) and
   `dedicated_running` (diagnostics only, never a lock input).
 
+### Fixed
+
+- **A stock peer ran the wrong game tree.** `launch_client.sh` defaults `GAME`
+  to the operator's Steam install, and the peer was given only `COMPAT`, so it
+  ran that install against a sandbox Proton prefix. On a host whose Steam copy
+  is the Linux build there is no `7DaysToDie.exe` for Proton at all: the peer
+  silently never started, while the suite still passed on the primary client
+  alone. `peer_client_game` derives the tree beside the peer's prefix, and the
+  peer gets the same windowed-720p arguments as the primary.
+- **The peer raced the engine's connect rate limit.** Same-IP connects less
+  than 500 ms apart are rejected, and staggering the *launches* by a second did
+  not stagger the *connects*: two clients booting from identical instances
+  reach the menu together, so the peer was rejected with `ConnectionRejected`.
+  It now waits for the primary to be in the world
+  (`Respawning: EnterMultiplayer`, a client-side marker; the server's
+  `PlayerSpawnedInWorld` never appears in a client log and waiting on it timed
+  out every run), with the one-second sleep kept as a floor.
+
+### Known limitation
+
+- One server with several clients is **not yet proven**. With both fixes the
+  peer starts correctly and is spaced past the rate limit, but a suite that
+  does not wait for it (`smoke` finishes its five cases immediately) tears the
+  run down before the peer finishes booting.
+- The `mp` suite, which exists for exactly this, was run against a sandbox pair
+  and failed differently: `timeout after 1292s waiting for DONE`, with the
+  *primary* client never reaching `Respawning: EnterMultiplayer` at all while
+  the peer did auto-join. That is a suite-semantics problem rather than the
+  peer plumbing this release fixed, and it is unexplored.
 ## [0.9.0] - 2026-09-01
 
 The orchestrator stops being a second sandbox. Provisioning splits into the two
@@ -650,6 +692,27 @@ server you started yourself.
   `1_HordeForge_WasmHost` bridge + parachute wasm module on the server.
   See SCENARIOS.md.
 
+- README / AGENTS how-to: one suite id, `smoke,core` as the only
+  undeclared combo, `--concern-suites` / `PLAYTEST_CONCERN_SUITES` in
+  the env table, matrix as separate invocations, and a
+  `CaseDef.RegisterStaged` sample on the public surface. `--suite` help
+  names the 2+ list rule.
+- One concern per playtest run is a gate, not a paragraph:
+  `mixed_unrelated_suites` refuses an undeclared comma-list of suite ids.
+  `--concern-suites` / `PLAYTEST_CONCERN_SUITES` is how consecutive steps of
+  one feature declare themselves as one list. A child that is part of a built
+  prefab is not a second suite. look-versus-block stays a hard incompatibility
+  even when declared. Unrelated features run as separate invocations.
+- `CaseDef.RegisterStaged` / `ClearStaged`: camera-staged instances are
+  destroyed at the start of the next hold and when this hold ends, so a
+  particle system, a mesh and a cube cannot occupy the same world point.
+- `Microsoft.NETFramework.ReferenceAssemblies` is exact-pinned at `[1.0.3]`
+  (a bare `1.0.3` is NuGet's minimum range `[1.0.3, )`). Restore uses a
+  repo `nuget.config` that clears extra package sources so it cannot fall
+  through to a user-level feed.
+- Release tag verification runs on `ubuntu-24.04`, matching CI, instead of
+  floating `ubuntu-latest`.
+
 ### Fixed
 
 - `CaseDef.WalkEntity` emits one live `render-probe` with the detached camera
@@ -696,37 +759,13 @@ server you started yourself.
   different pictures; hanging a prefab in front of the camera and placing a
   block on a voxel must be separate invocations.
 
-### Changed
-
-- README / AGENTS how-to: one suite id, `smoke,core` as the only
-  undeclared combo, `--concern-suites` / `PLAYTEST_CONCERN_SUITES` in
-  the env table, matrix as separate invocations, and a
-  `CaseDef.RegisterStaged` sample on the public surface. `--suite` help
-  names the 2+ list rule.
-- One concern per playtest run is a gate, not a paragraph:
-  `mixed_unrelated_suites` refuses an undeclared comma-list of suite ids.
-  `--concern-suites` / `PLAYTEST_CONCERN_SUITES` is how consecutive steps of
-  one feature declare themselves as one list. A child that is part of a built
-  prefab is not a second suite. look-versus-block stays a hard incompatibility
-  even when declared. Unrelated features run as separate invocations.
-- `CaseDef.RegisterStaged` / `ClearStaged`: camera-staged instances are
-  destroyed at the start of the next hold and when this hold ends, so a
-  particle system, a mesh and a cube cannot occupy the same world point.
-- `Microsoft.NETFramework.ReferenceAssemblies` is exact-pinned at `[1.0.3]`
-  (a bare `1.0.3` is NuGet's minimum range `[1.0.3, )`). Restore uses a
-  repo `nuget.config` that clears extra package sources so it cannot fall
-  through to a user-level feed.
-- Release tag verification runs on `ubuntu-24.04`, matching CI, instead of
-  floating `ubuntu-latest`.
-
-### Fixed
-
 - Catalog melee aim (`block_damage_melee`, `explosion_client`) uses
   `Helpers.LookAt` so a block below the camera gets negative X pitch. The
   previous local `-Asin` looked at the sky; cases still passed because of
   the later SetBlockRpc damage fallback.
-
 ## [0.8.0] - 2026-08-26
+
+
 
 ### Added
 
@@ -1119,7 +1158,6 @@ payload keys (`running`/`session`/`acquired`/`heartbeat`), and suite env
 names are unchanged. One operator-facing default changed on purpose: every
 run now wipes its save/world first (see Changed, #66), and `--reuse-save`
 is gone.
-
 ## [0.7.2] - 2026-08-23
 
 A tag without a version bump. The annotated-version convention and the

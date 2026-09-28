@@ -429,8 +429,11 @@ the run order that both `make test` and `make coverage` expand):
    ModIdentity.Version == dist manifest, every visible `vX.Y.Z` tag has a
    CHANGELOG entry (units in `scripts/test_version_surface_units.py`), every
    `### Removed` section carries the `**Breaking.**` marker the pre-1.0 policy
-   in CHANGELOG.md requires, and CHANGELOG.md must carry an [Unreleased]
-   section plus the current release entry. It also pins the uv the workflows
+   in CHANGELOG.md requires and a table naming the replacement, no release
+   repeats an impact heading, and CHANGELOG.md must carry an [Unreleased]
+   section plus the current release entry. Tags are read from the git common
+   dir, so a linked worktree checks coverage instead of reporting it
+   inapplicable. It also pins the uv the workflows
    install (`UV_VERSION`) to the `[tool.uv] required-version` floor in
    `pyproject.toml`, so a bump that moves one and not the other fails here.
 3. scenario-provider env surface (`scripts/test_scenario_provider_surface.py`)

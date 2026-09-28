@@ -454,8 +454,14 @@ Public surface for providers: `CaseDef.Live` / `CaseDef.Defer` / `Staged` /
 `IScenarioProvider`, `Helpers` (including `FrameStagedObject`), `Report`
 (including `Report.Barrier`),
 `MiningSpec` / `MiningProbe` / `MiningResult`,
-`PlayerSurvivability` / `AddSurvivabilityGuard` / `TryPressSpawn`. The stock `mining_harvest`
+`PlayerSurvivability` / `AddSurvivabilityGuard` / `TryPressSpawn`,
+`ChatProbe.Contains` / `ChatProbe.LastLength`. The stock `mining_harvest`
 case is the regression for that probe (iron ore / iron pickaxe / scrap iron).
+
+A provider asserting on remote-player chat reads `ChatProbe.Contains` and
+reports `ChatProbe.LastLength`; the captured text is private, so a case
+detail (which reaches the run log, the JUnit report and `report-*.json`)
+carries the length, never what the player typed.
 
 Never running a LivePlayer case against a corpse or a spawn-selection
 window is the runner's job. It presses
@@ -471,7 +477,10 @@ The runner does not call `Ensure`; a stock combat case must still take damage.
 
 `CaseDef.WalkEntity(suite, id, className, spawnOffset, holdSeconds, clipFps,
 speed, ...)` spawns a non-remote `EntityAlive` of `className` beside the
-player and walks it for `holdSeconds` while recording a clip. To be
+player and walks it for `holdSeconds` while recording a clip.
+`spawnOffset: Vector3.zero` means "beside the player" and resolves to
+`CaseDef.DefaultSpawnOffset` (in front of and above the camera), and
+`clipFps` must be greater than zero. To be
 **judgeable** rather than merely "passing", the creature follows a slow orbit
 on the terrain and the detached capture camera follows its rendered bounds.
 The camera tries several nearby third-person angles and accepts one only when
