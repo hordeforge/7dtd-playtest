@@ -16,8 +16,12 @@ in a Linux-side review:
   frame lands in the shots root under a name the collector never looks for.
 
 Both rules are judged against the real C# the client runs, not a copy of it, so
-the sanitizer and the contract cannot drift. The mod cannot be compiled offline
-(it references game assemblies), which is why this gate reads the source.
+the sanitizer and the contract cannot drift. They are judged on
+`Helpers.AssetName`, the single name a clip marker, a staged scene and the
+frames directory all share: a second sanitizer beside it would be free to
+disagree with the marker a collector reads, which is the drift this one
+already replaced once. The mod cannot be compiled offline (it references game
+assemblies), which is why this gate reads the source.
 """
 
 from __future__ import annotations
@@ -60,7 +64,7 @@ def test_reserved_device_names_are_listed() -> None:
 
 def test_sanitizer_refuses_device_names_and_empty() -> None:
     src = UI.read_text(encoding="utf-8")
-    body = method_body(src, r"static string AssetName\(string name\)")
+    body = method_body(src, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)")
     assert "ToLowerInvariant" in body, (
         "AssetName must compare case-insensitively: Windows device names "
         "match any casing"
@@ -84,7 +88,7 @@ def test_sanitizer_refuses_device_names_and_empty() -> None:
 
 def test_asset_name_is_lowercase_only() -> None:
     src = UI.read_text(encoding="utf-8")
-    body = method_body(src, r"static string AssetName\(string name\)")
+    body = method_body(src, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)")
     assert re.search(r"c >= 'a' && c <= 'z'", body), (
         "AssetName must not let an uppercase letter survive: the reserved "
         "device names match any casing, and the exact lowercase set below is "

@@ -65,7 +65,10 @@ Release model (inferred practice, now pinned by `make test`):
   nothing collapsed onto its parent directory, and a reserved device name
   (`AUX`, `nul`, `COM1` ... `LPT9`, with any casing) is the device rather than
   a file, so `CreateDirectory` failed and the case photographed nothing. Both
-  now get a name the client filesystem accepts, and
+  now get a name the client filesystem accepts, and the rules now live in
+  the one name the clip marker, the staged scene and the frames directory
+  already share, so a collector reading a directory out of `clip complete`
+  reads the directory the frames were written to.
   `scripts/test_windows_path_surface.py` pins the rules offline (the mod
   cannot be compiled without the game assemblies).
 
@@ -84,6 +87,21 @@ Release model (inferred practice, now pinned by `make test`):
   already used.
 
 ### Added
+
+- **`make package`: the release archive, built the same way twice.**
+  The release workflow documented a `make package` target that did not exist,
+  so the maintainer path to a shipped zip stopped at "attach something". The
+  target wraps the dist tree `make install` copies through
+  `scripts/mod_package.py`: the entry set is named rather than globbed (a
+  `.deps.json` or a stale file left in `dist/` cannot ride along), entries are
+  written in sorted order, and every entry carries the same timestamp, the
+  same 0644 mode and the same create_system byte, so two builds of one source
+  produce the same archive. The recorded timestamp comes from
+  `SOURCE_DATE_EPOCH` and falls back to the zip epoch (1980-01-01) rather than
+  the clock, so a build that does not set it still agrees with itself. The
+  archive is published by rename, and an incomplete dist fails by name
+  instead of shipping a partial one. Gated offline by
+  `scripts/test_mod_package.py`.
 
 - **`scripts/quarantine_restore.py`: put a swept-aside world back.**
   `--fresh-save` moves the zdtd world state, its chunk overlays and the
@@ -204,6 +222,16 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- **The mod build answers the pinned SDK again.** `global.json` said
+  `rollForward: latestMajor`, so a host that happened to have a .NET 9 or 10
+  SDK installed compiled this source with that Roslyn, and the "byte-
+  reproducible across checkouts" claim only held between hosts that agreed on
+  a major version. It rolls forward inside the pinned 8.0 feature band again,
+  as the release that introduced the pin recorded, and
+  `scripts/test_version_surface_units.py` fails if it drifts back. A host
+  with only a newer major installed now gets dotnet's own "SDK not found"
+  rather than a silently different compiler.
+
 - **One copy of the capture scripts' shared plumbing.**
   `scripts/capture_common.sh` holds the live-run guard (three identical
   copies), the byte-offset log gate and the `stop_run` teardown (two copies
@@ -316,6 +344,14 @@ Migration, by symbol:
   extension). `COM0` and `LPT0` stay ordinary names; Windows does not reserve
   them. The `scene staged` name, the `clip complete` line and the frames
   directory remain that one string, so the prefix reaches all three.
+
+- **`uv.lock` was covered by the `*.lock` ignore rule.** The rule exists for
+  the runtime lock file, and it also matched the committed dependency lock
+  every `uv run --locked` gate reads. The file is tracked, so nothing changed
+  while it existed, but a regenerated one could not be re-added without `-f`,
+  and a tree missing it looks like a tree that still has one. `.gitignore`
+  re-includes it, and `scripts/test_dep_sbom.py` fails if either committed
+  lockfile falls under an ignore rule again.
 
 - **A clip marker named a directory that was never created.** Frames were
   written to `playtest-shots/clips/<id>` under a sanitized name while the

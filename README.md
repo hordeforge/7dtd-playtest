@@ -69,10 +69,11 @@ suite JSON; **server-container** ships production, which playtest reaches
 - `shellcheck` for the lint gate (`make lint`; preinstalled on GitHub
   runners, install locally with your package manager)
 - dotnet SDK 8.0.400 or newer for the mod build (`global.json` sets that
-  floor and rolls forward, so any installed newer major works; found on
-  `PATH` or under `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`). The C#
-  language version and the analyzer set are pinned in the csproj, so the
-  dll bytes do not follow the host's SDK.
+  floor and rolls forward inside the 8.0 feature band, so a 9 or 10 SDK
+  is not silently used to compile this source; found on `PATH` or under
+  `$DOTNET_ROOT`, e.g. `~/.cache/dotnet-sdk`). The C# language version and
+  the analyzer set are pinned in the csproj as well, so the dll bytes do not
+  follow the host's SDK.
 
 ## Offline dev loop (no game install)
 
@@ -808,12 +809,13 @@ once the hold (or an on-demand `EndClip`) ends with the real frame count
 (never a padded one); `clip abandoned` marks a clip a failed case left
 active, which is never the completion marker. Every `clip` id above is the
 asset name `Helpers.AssetName` derives: NFC-normalized, ASCII letters, digits,
-`-` and `_` kept, anything else `_`, and a name that survives as a Windows
-device name (`con`, `aux`, `nul`, `com1` to `com9`, `lpt1` to `lpt9`, extension
-or not, any casing) prefixed with `_`, because the client is a Windows process
-where that name is the device and not a file, so `CreateDirectory` on it fails
-and leaves the recorded clip with no directory to look in. The marker, the
-`scene staged` name and
+`-` and `_` kept, anything else `_`, and a name that maps to nothing is
+`unnamed`, never empty, because an empty name collapses onto the parent
+directory. A name that survives as a Windows device name (`con`, `aux`, `nul`,
+`com1` to `com9`, `lpt1` to `lpt9`, extension or not, any casing) is prefixed
+with `_`, because the client is a Windows process where that name is the device
+and not a file, so `CreateDirectory` on it fails and leaves the recorded clip
+with no directory to look in. The marker, the `scene staged` name and
 the frames directory are that one string, so a host reading a directory out of
 `clip complete` always reads the directory the frames were written to.
 Optional host

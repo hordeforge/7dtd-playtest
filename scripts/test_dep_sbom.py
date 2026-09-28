@@ -6,13 +6,15 @@ these cases pin what a vulnerability scanner and a consumer depend on: every
 package in both lockfiles is present, each purl round-trips its locked version,
 the runtime/dev split matches what pyproject declares, every component names an
 SPDX license (an unrecorded one fails the inventory rather than shipping
-blank), and the serial number is a content hash
-(same tree, same id; changed tree, different id).
+blank), the serial number is a content hash
+(same tree, same id; changed tree, different id), and neither lockfile falls
+under an ignore rule that would let a regenerated one go uncommitted.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -209,7 +211,31 @@ def test_an_unrecorded_license_fails_loud() -> None:
     raise AssertionError(f"build_sbom emitted {name} with no license recorded")
 
 
+def test_the_committed_lockfiles_are_not_ignored() -> None:
+    """A lockfile the ignore rules cover cannot be re-added after a regen.
+
+    `uv.lock` matches the `*.lock` rule the runtime lock file needed, so
+    `git add uv.lock` on a regenerated file is refused and the tree looks
+    like it still has one when it has none. Every `--locked` gate then reads
+    whatever uv resolves instead of the committed resolution.
+    """
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "!uv.lock" in ignore, ".gitignore must re-include uv.lock past the *.lock rule"
+    for name in ("uv.lock", "Source/PlayTestMod/packages.lock.json"):
+        # -q answers the question directly: nonzero means no rule ignores the
+        # path, which is what a path matched by a `!` negation reports too.
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", name],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0, f"{name} is covered by an ignore rule"
+
+
 TESTS = (
+    test_the_committed_lockfiles_are_not_ignored,
     test_bom_shape,
     test_every_uv_lock_package_is_listed,
     test_every_nuget_package_is_listed_at_its_locked_version,

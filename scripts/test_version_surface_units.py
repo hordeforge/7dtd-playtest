@@ -86,12 +86,13 @@ def assert_nuget_pins() -> None:
 def assert_toolchain_pins() -> None:
     """The mod dll's bytes are a function of the tree, not of the host's SDK.
 
-    global.json rolls forward to any installed major SDK on purpose (a
-    distribution may ship a lower band), so every knob that decides what the
-    compiler emits has to be pinned in the csproj instead. `latest` for the
-    language version or the analyzer set silently re-points both at whatever
-    SDK answered the build, and a different Roslyn means different dll bytes
-    for the same source.
+    `rollForward: latestMajor` let a host that happened to have a 9 or 10
+    SDK answer the build, and a different Roslyn means different dll bytes
+    for the same source. The pin is the 8.0 feature band, and every knob
+    below it that decides what the compiler emits is pinned in the csproj as
+    well: `latest` for the language version or the analyzer set re-points
+    both at whatever SDK answered, and a new SDK can fail the
+    `TreatWarningsAsErrors` gate on a diagnostic nobody opted into.
     """
     csproj = (_ROOT / "Source" / "PlayTestMod" / "PlayTestMod.csproj").read_text(
         encoding="utf-8"
@@ -111,6 +112,11 @@ def assert_toolchain_pins() -> None:
     global_json = json.loads((_ROOT / "global.json").read_text(encoding="utf-8"))
     assert global_json["sdk"]["allowPrerelease"] is False, (
         "global.json must not resolve a prerelease SDK"
+    )
+    assert global_json["sdk"]["rollForward"] == "latestFeature", (
+        "global.json must roll forward inside the pinned 8.0 feature band; "
+        f"it rolls to {global_json['sdk']['rollForward']!r}, so the compiler "
+        "follows whatever SDK the host has"
     )
 
 

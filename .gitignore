@@ -11,6 +11,10 @@ workspace/comparison-playtest/*/zdtd/
 .local/
 *.flock
 *.lock
+# uv.lock matches the rule above, and it is the file every `uv run --locked`
+# gate depends on: regenerating it and re-adding would need -f, which is how a
+# committed lockfile quietly goes missing.
+!uv.lock
 .coverage
 .coverage.*
 htmlcov/

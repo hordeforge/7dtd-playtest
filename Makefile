@@ -50,7 +50,7 @@ endif
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
 	playtest-residual install-pair playtest-compare playtest-repeat \
-	playtest-review-video
+	playtest-review-video package
 
 help:
 	@echo "Offline dev loop (no game install needed):"
@@ -66,7 +66,7 @@ help:
 	@echo
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
 	@echo "  make build | install | install-pair | package | uninstall | clean"
-	@echo "  make package                   the release zip: dist/7dtd-playtest-<version>.zip"
+	@echo "  make package                    the release zip: dist/7dtd-playtest-<version>.zip [PACKAGE=path]"
 	@echo
 	@echo "Live suites (needs game client; see README):"
 	@echo "  make playtest SUITE=demo [SERVER=stock|zdtd] [PROVISION=attach READONLY=1]"
@@ -108,36 +108,19 @@ install-pair:
 	$(MAKE) install
 	$(MAKE) -C "$(CONNECT_DIR)" install GAME="$(GAME)"
 
-# The release archive: the same built mod the install target stages, zipped
-# under the Mods/<modname>/ prefix the game expects, named for the version
-# ModInfo.xml ships (the version the release workflow gates the tag on).
-# `python -m zipfile` is stdlib, so packaging needs no host `zip` on top of
-# the uv every other host Python command already requires. The pdb the build
-# drops beside the dll is deleted first: a symbol file for a stack trace no
-# player reads, at twice the dll's size.
-MOD_VERSION = $(shell sed -n 's/.*<Version[^>]*value="\([^"]*\)".*/\1/p' \
-  "$(ROOT)/ModInfo.xml" | head -1)
-ARCHIVE ?= $(ROOT)/dist/$(MOD_NAME)-$(MOD_VERSION).zip
-
-package: build require-uv
-	@test -n "$(MOD_VERSION)" || { \
-		echo "no <Version value=\"...\"> in $(ROOT)/ModInfo.xml; nothing to name the archive"; \
-		exit 2; }
-	@test -f "$(DIST)/$(MOD_NAME).dll" || { \
-		echo "make package: $(DIST)/$(MOD_NAME).dll is missing; 'make build' did not produce it"; \
-		exit 2; }
-	@rm -f "$(ARCHIVE)"
-	@rm -f "$(DIST)/$(MOD_NAME).pdb"
-	cd "$(DIST)/.." && $(UV) -m zipfile -c "$(ARCHIVE)" "$(MOD_NAME)"
-	@test -f "$(ARCHIVE)" || { \
-		echo "make package: no archive at $(ARCHIVE)"; \
-		exit 2; }
-	@echo "OK -> $(ARCHIVE)"
-	@echo "attach this file to the GitHub release for v$(MOD_VERSION)"
-
 uninstall:
 	rm -rf "$(INSTALL_DIR)"
 	@echo "Removed $(INSTALL_DIR)"
+
+# The release archive, from the same dist tree `make install` copies. The
+# entry list, order, timestamps, modes and host byte are pinned by
+# scripts/mod_package.py, so two builds of one source produce the same file.
+# PACKAGE names the output file; an unset value is a directory, and the
+# archive is named from the version in the manifest that ships inside it.
+PACKAGE ?=
+package: build
+	$(UV) "$(ROOT)/scripts/mod_package.py" --dist "$(DIST)" \
+		$(if $(PACKAGE),--out "$(PACKAGE)",)
 
 clean:
 	rm -rf "$(ROOT)/dist" "$(ROOT)/Source/PlayTestMod/bin" "$(ROOT)/Source/PlayTestMod/obj"
@@ -200,6 +183,7 @@ GATES := \
 	test_playtest_compare.py \
 	test_capture_video_surface.py \
 	test_video_review.py \
+	test_mod_package.py \
 	test_windows_path_surface.py \
 	test_gate_list.py \
 	test_dep_sbom.py

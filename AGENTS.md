@@ -245,6 +245,7 @@ make test-one GATE=test_dst.py   # run one gate while iterating
 make check                # exactly what CI runs: test + dst DST_SEEDS=200
 make install              # build + install playtest mod
 make install-pair         # playtest + connect
+make package              # reproducible release zip from dist/ ([PACKAGE=path])
 make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
 make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
@@ -404,7 +405,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the twenty-three offline gate files on
+`make test` runs lint + typecheck plus the twenty-four offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -530,6 +531,15 @@ the run order that both `make test` and `make coverage` expand):
     casing, extension or not), and no path assembled from a hardcoded
     separator. Read from the shipped C# because the mod cannot be compiled
     offline.
+21. release-archive surface (`scripts/test_mod_package.py`): the zip
+    `make package` attaches to a tag is a function of the built mod, not of
+    the machine that built it. The gate runs the real CLI over a stand-in
+    dist and reads the bytes back: the entry set is the two files
+    `make install` copies (a `.deps.json` left in `dist/` does not ship),
+    order is sorted, and every entry carries one timestamp, mode 0644 and
+    create_system 3, with `SOURCE_DATE_EPOCH` honored and the zip epoch as
+    the fallback. Two runs with different source mtimes and timezones hash
+    the same.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).

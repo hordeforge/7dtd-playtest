@@ -338,7 +338,10 @@ namespace ZdtdPlaytest
         /// every host that stores it. The mapping is idempotent, so applying
         /// it to an already-safe name is a no-op. It also rewrites the
         /// extension separator, so a name that would reach a device still
-        /// carrying one cannot.</para>
+        /// carrying one cannot. A name that maps to nothing is
+        /// <c>unnamed</c>, never empty: an empty name collapses onto the
+        /// parent directory, and the collector would look there for a file
+        /// that was never written.</para>
         ///
         /// <para>The client is a Windows process, and a name Windows itself
         /// refuses is not a file, so the mapping is only the first half. The

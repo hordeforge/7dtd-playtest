@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <!-- Pinned, not `latest`. global.json rolls forward to whatever major SDK
-         is installed, so `latest` would compile this source under a different
-         C# version (and a different analyzer set) per host, and the dll bytes
-         would differ between them. These are the values of the recorded floor
+    <!-- Pinned, not `latest`. global.json rolls forward inside the pinned 8.0
+         feature band, and a host on a different band still answers the build,
+         so `latest` would compile this source under a different C# version
+         (and a different analyzer set) per host, and the dll bytes would
+         differ between them. These are the values of the recorded floor
          SDK, 8.0.400: C# 12 and the 8.0 analysis rules. -->
     <LangVersion>12.0</LangVersion>
     <!-- Nullable analysis is on for annotation checks; full `enable` is the

@@ -5,11 +5,15 @@ name: release
 # mistyped or forgotten bump is rejected instead of becoming a release nobody
 # can reproduce.
 #
-# The mod archive is deliberately NOT built here. `make package` compiles
-# against the dedicated server's own assemblies, which a hosted runner does
-# not have; a maintainer with a game install runs `make package` and attaches
-# the zip. Gating the tag is the half that can be proven automatically, and
-# asserting the other half here would be a claim, not evidence.
+# The mod archive is deliberately NOT built here. `make package` wraps the
+# output of `make build`, which compiles against the game's own assemblies and
+# needs a game install a hosted runner does not have; a maintainer with one
+# runs `make package` and attaches dist/7dtd-playtest/7dtd-playtest-<version>.zip.
+# The archive is a function of that build (fixed entry set, order, timestamps,
+# modes and host byte, pinned by scripts/test_mod_package.py), so a rebuild
+# elsewhere can be compared against the attached file. Gating the tag is the
+# half that can be proven automatically, and asserting the other half here
+# would be a claim, not evidence.
 
 on:
   push:
