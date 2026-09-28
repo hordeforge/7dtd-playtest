@@ -2355,11 +2355,7 @@ def suite_wants_host_fixtures(suite: str) -> bool:
     "smoke" or "gate" run stays telnet-free, while every catalog suite whose
     live cases emit barrier lines opens the fixture path.
     """
-    return any(
-        token in FIXTURE_SUITE_IDS
-        for token in re.split(r"[,;\s]+", suite.lower())
-        if token
-    )
+    return any(token in FIXTURE_SUITE_IDS for token in suite_tokens(suite.lower()))
 
 
 def host_fixtures_enabled(suite: str, *, disabled: bool, requested: bool) -> bool:
@@ -2699,14 +2695,12 @@ def resolve_backend(
     return "stock"
 
 
-def main(argv: list[str] | None = None) -> int:
-    # Environment-supplied values are validated before the parser runs:
-    # argparse checks `choices` on a flag, not on a string default, so a typo
-    # in an env var would otherwise reach the run as a live value nobody saw
-    # rejected. PLAYTEST_BACKEND and a second, undocumented name for the same
-    # knob both existed; only the undocumented one was ever read.
-    env_choice("PLAYTEST_BACKEND", playtest_targets.BACKENDS, "stock")
-    provision_default = env_choice("PLAYTEST_PROVISION", playtest_targets.PROVISIONS, "")
+def build_parser(provision_default: str) -> argparse.ArgumentParser:
+    """The run's flag surface, built once and parsed by main().
+
+    `provision_default` is the validated PLAYTEST_PROVISION value, so it is a
+    parameter rather than a second read of the environment here.
+    """
     ap = argparse.ArgumentParser(
         description="stock-client playtest orchestrator",
         epilog=(
@@ -3074,6 +3068,18 @@ def main(argv: list[str] | None = None) -> int:
             "more than one id. PLAYTEST_CONCERN_SUITES is the env form."
         ),
     )
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Environment-supplied values are validated before the parser runs:
+    # argparse checks `choices` on a flag, not on a string default, so a typo
+    # in an env var would otherwise reach the run as a live value nobody saw
+    # rejected. PLAYTEST_BACKEND and a second, undocumented name for the same
+    # knob both existed; only the undocumented one was ever read.
+    env_choice("PLAYTEST_BACKEND", playtest_targets.BACKENDS, "stock")
+    provision_default = env_choice("PLAYTEST_PROVISION", playtest_targets.PROVISIONS, "")
+    ap = build_parser(provision_default)
     args = ap.parse_args(argv)
     # --suite-file names the suite the client is armed with, so it selects the
     # id unless --suite was given. Leaving the flag default (`demo`) in place
