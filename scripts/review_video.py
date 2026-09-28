@@ -94,8 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="print the full evidence envelope")
     args = parser.parse_args(argv)
 
-    output = args.output or default_output(args.clip, args.provider)
     try:
+        output = args.output or default_output(args.clip, args.provider)
         envelope = run_review(
             args.clip,
             provider=args.provider,

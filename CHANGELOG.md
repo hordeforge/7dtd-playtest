@@ -90,6 +90,23 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- **The vision-review intent had no size bound.** Everything in an intent goes
+  into the review prompt verbatim, so a pasted log in `purpose` or a thousand
+  `questions` was an unbounded provider request. `parse_intent` now refuses an
+  over-long field, item, list, or total, and an intent file or `--intent-text`
+  over 64 KiB is refused before it is read into memory.
+- **A provider name could write outside the clip folder.** The default
+  evidence name embeds the `--provider` string, and a failed review deletes
+  that file, so `--provider ../../escape` put the evidence (or its removal)
+  outside the clip directory. The name must now be a plain filename token,
+  refused before the review starts.
+- **`--attach-reviews` crashed the report on a hostile envelope.**
+  `collect_visual_reviews` assumed a JSON object with a nested object at
+  `intent.content`, so a `review-*.json` holding a list, `null`, or a dict
+  where a suite name belongs raised `AttributeError` after the run's own
+  result was known. Each level is shape-checked, an envelope over 8 MiB is
+  skipped with a warning, and a file whose intent is unusable still appears in
+  the report keyed by its stem.
 - **`sb` had no wall-clock bound.** `scripts/playtest_targets.py` ran every
   Safehouse call without a timeout, so a `sb up`, `sb stage` or `sb stop` that
   never returned blocked the orchestrator before its poll loop started, and the

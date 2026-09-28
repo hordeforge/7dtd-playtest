@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -36,6 +37,19 @@ GATEWAY_INSTALL_HINT = (
 )
 
 MAX_PRINTED_CHARS = 500
+
+# Intent caps. The intent is the one author-supplied text this repository
+# hands the gateway, and the gateway puts it in the review prompt verbatim, so
+# an unbounded field is an unbounded prompt: cost, prompt-flooding, and an
+# author able to bury the actual question under a pasted log. The useful
+# intent is a sentence or two per field, so these sit far above any real one.
+MAX_INTENT_FILE_BYTES = 64 * 1024
+MAX_INTENT_FIELD_CHARS = 4000
+MAX_INTENT_ITEM_CHARS = 1000
+MAX_INTENT_LIST_ITEMS = 50
+MAX_INTENT_TOTAL_CHARS = 16000
+
+_PROVIDER_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 RESULT_KEYS = (
     "summary",
@@ -75,7 +89,7 @@ def _string_field(data: dict[str, object], key: str, origin: str) -> str:
         return ""
     if not isinstance(value, str):
         raise ReviewError(f"{origin}: field {key!r} must be a string, got {type(value).__name__}")
-    return value.strip()
+    return _bounded(value.strip(), key, origin, MAX_INTENT_FIELD_CHARS)
 
 
 def _string_list(data: dict[str, object], key: str, origin: str) -> tuple[str, ...]:
@@ -84,7 +98,27 @@ def _string_list(data: dict[str, object], key: str, origin: str) -> tuple[str, .
         return ()
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ReviewError(f"{origin}: field {key!r} must be a list of strings")
-    return tuple(item.strip() for item in value if item.strip())
+    if len(value) > MAX_INTENT_LIST_ITEMS:
+        raise ReviewError(
+            f"{origin}: field {key!r} carries {len(value)} items, over the "
+            f"{MAX_INTENT_LIST_ITEMS} this review accepts; a list that long is a "
+            "pasted log, not a review concern"
+        )
+    return tuple(
+        _bounded(item.strip(), key, origin, MAX_INTENT_ITEM_CHARS)
+        for item in value
+        if item.strip()
+    )
+
+
+def _bounded(text: str, key: str, origin: str, limit: int) -> str:
+    if len(text) > limit:
+        raise ReviewError(
+            f"{origin}: field {key!r} is {len(text)} characters, over the {limit} "
+            "this review accepts; everything here goes into the provider prompt "
+            "verbatim, so an unbounded field is an unbounded request"
+        )
+    return text
 
 
 def parse_intent(data: object, origin: str) -> ReviewIntent:
@@ -116,13 +150,8 @@ def parse_intent(data: object, origin: str) -> ReviewIntent:
         )
     if "purpose" not in data:
         raise ReviewError(f"{origin}: intent is missing required field 'purpose'")
-    purpose = _string_field(data, "purpose", origin)
-    if not purpose:
-        raise ReviewError(
-            f"{origin}: 'purpose' must not be empty; context is never inferred from a filename"
-        )
-    return ReviewIntent(
-        purpose=purpose,
+    intent = ReviewIntent(
+        purpose=_string_field(data, "purpose", origin),
         subject=_string_field(data, "subject", origin),
         camera_path=_string_field(data, "camera_path", origin),
         desired_qualities=_string_field(data, "desired_qualities", origin),
@@ -131,9 +160,41 @@ def parse_intent(data: object, origin: str) -> ReviewIntent:
         suite=_string_field(data, "suite", origin),
         case=_string_field(data, "case", origin),
     )
+    if not intent.purpose:
+        raise ReviewError(
+            f"{origin}: 'purpose' must not be empty; context is never inferred from a filename"
+        )
+    total = sum(
+        len(part)
+        for part in (
+            intent.purpose,
+            intent.subject,
+            intent.camera_path,
+            intent.desired_qualities,
+            intent.suite,
+            intent.case,
+            *intent.avoid,
+            *intent.questions,
+        )
+    )
+    if total > MAX_INTENT_TOTAL_CHARS:
+        raise ReviewError(
+            f"{origin}: the intent is {total} characters in total, over the "
+            f"{MAX_INTENT_TOTAL_CHARS} this review accepts"
+        )
+    return intent
 
 
 def load_intent_file(path: Path) -> tuple[ReviewIntent, bytes]:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise ReviewError(f"cannot read intent file {path}: {exc}") from exc
+    if size > MAX_INTENT_FILE_BYTES:
+        raise ReviewError(
+            f"intent file {path} is {size} bytes, over the {MAX_INTENT_FILE_BYTES} "
+            "this review accepts"
+        )
     try:
         raw = path.read_bytes()
     except OSError as exc:
@@ -143,6 +204,11 @@ def load_intent_file(path: Path) -> tuple[ReviewIntent, bytes]:
 
 def parse_intent_text(text: str) -> tuple[ReviewIntent, bytes]:
     raw = text.encode("utf-8")
+    if len(raw) > MAX_INTENT_FILE_BYTES:
+        raise ReviewError(
+            f"--intent-text is {len(raw)} bytes, over the {MAX_INTENT_FILE_BYTES} "
+            "this review accepts"
+        )
     return parse_intent(_decode_json(raw, "--intent-text"), "--intent-text"), raw
 
 
@@ -408,6 +474,7 @@ def run_review(
         )
     if intent_path is not None and intent_text is not None:
         raise ReviewError("takes exactly one of --intent PATH or --intent-text JSON, never both")
+    provider = provider_token(provider)
     if intent_path is not None:
         intent, _ = load_intent_file(Path(intent_path))
     elif intent_text is not None:
@@ -529,4 +596,23 @@ def _discard_unvalidated(output: Path | None, output_existed: bool) -> None:
 def default_output(clip: Path, provider: str) -> Path:
     """The default evidence path beside the clip, per the review docs."""
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return clip / f"review-{provider}-{stamp}.json"
+    return clip / f"review-{provider_token(provider)}-{stamp}.json"
+
+
+def provider_token(provider: str) -> str:
+    """The provider name as it is safe to put in a filename.
+
+    The provider reaches this tool as a free-form string (a CLI flag, a
+    Makefile variable) and lands in the evidence filename, which a failed
+    review then deletes. `../` in that string writes the evidence, or takes an
+    earlier file with it, outside the clip folder it is meant to describe, so
+    anything that is not a plain name is refused before the review starts.
+    """
+    if not _PROVIDER_TOKEN.fullmatch(provider):
+        raise ReviewError(
+            f"provider {provider!r} is not a plain name; it becomes part of the "
+            "evidence filename, so it may hold only letters, digits, dot, dash "
+            "and underscore"
+        )
+    return provider
+

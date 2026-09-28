@@ -106,6 +106,14 @@ specifies for its own intent, and for the same reason: a model told nothing
 about what a clip is for cannot tell a reviewer anything useful about it
 either.
 
+The intent is the one author-supplied text this repository hands the gateway,
+and the gateway puts it in the review prompt verbatim, so it is size-capped
+here rather than at the provider: a field over 4,000 characters, a list item
+over 1,000, a list over 50 entries, 16,000 characters in total, or an intent
+file or `--intent-text` over 64 KiB is refused by `parse_intent` before any
+upload. An unbounded field is an unbounded request: it bills, and it lets a
+pasted log bury the question the review was actually asked.
+
 ### Provider input and frame budget
 
 Providers differ in what they can actually ingest: some accept a video file
@@ -186,6 +194,13 @@ evidence, matching the audio-review PRD's rule exactly (and stricter than
 this repo's own existing `--telnet-password` argument, which
 THREAT_MODEL.md already names as R1, a gap, not a pattern to repeat).
 
+The intent is author text, so it is data and never instruction: the gateway
+builds the prompt, and it is the gateway's job to delimit the intent from its
+own instructions and to ignore anything in it (or in a client log beside the
+frames, which is game and remote-player output) that asks the model to change
+what it was asked. This repository contributes the size caps above and nothing
+else to that boundary.
+
 ### Where this joins the playtesting feedback loop
 
 Three integration points, deliberately the only three:
@@ -218,6 +233,8 @@ Three integration points, deliberately the only three:
 |---|---|
 | `--allow-network` absent | Refuse before reading credentials or contacting a provider |
 | intent lacks `purpose` | Refuse locally, name the missing field |
+| intent field, list, total, or file over its cap | Refuse locally before the upload, naming the field and the limit |
+| `--provider` is not a plain filename token | Refuse before the review; it becomes part of the evidence filename, which a failed review deletes |
 | gateway not installed | Refuse before any upload, naming `deadeye` and its install hint |
 | provider/model not configured | The gateway refuses; its own last line is reported verbatim, never replaced by a local guess |
 | clip exceeds provider's frame/size limit | The gateway samples down and records what was dropped in its evidence; this repo adds nothing to and drops nothing from that record |

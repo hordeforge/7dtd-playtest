@@ -135,6 +135,73 @@ def test_intent_text_round_trips() -> None:
     assert raw.startswith(b"{")
 
 
+def test_an_oversized_intent_is_refused_before_it_reaches_the_gateway(
+    tmp_path: Path,
+) -> None:
+    """Everything in the intent goes into the review prompt verbatim, so an
+    unbounded field is an unbounded request: a pasted log must be refused here,
+    not billed by the provider."""
+    clip = _clip(tmp_path)
+    gateway = _FakeGateway()
+    cases = [
+        ({**VALID_INTENT, "purpose": "p" * (video_review.MAX_INTENT_FIELD_CHARS + 1)},
+         "field 'purpose'"),
+        ({**VALID_INTENT, "questions": ["q"] * (video_review.MAX_INTENT_LIST_ITEMS + 1)},
+         "items"),
+        ({**VALID_INTENT, "avoid": ["a" * 900] * 40}, "in total"),
+    ]
+    for document, expected in cases:
+        try:
+            parse_intent(document, "test")
+        except ReviewError as exc:
+            assert expected in str(exc), str(exc)
+        else:
+            raise AssertionError(f"oversized intent {list(document)} was accepted")
+    with _gateway_available():
+        try:
+            run_review(
+                clip,
+                intent_text=json.dumps(cases[0][0]),
+                allow_network=True,
+                runner=gateway,
+            )
+        except ReviewError:
+            pass
+        else:
+            raise AssertionError("an oversized inline intent must refuse the review")
+    assert gateway.calls == [], "the gateway must not be consulted with an oversized intent"
+
+
+def test_an_oversized_intent_file_is_refused(tmp_path: Path) -> None:
+    intent = tmp_path / "big.json"
+    intent.write_text(
+        " " * (video_review.MAX_INTENT_FILE_BYTES + 1) + json.dumps(VALID_INTENT),
+        encoding="utf-8",
+    )
+    try:
+        video_review.load_intent_file(intent)
+    except ReviewError as exc:
+        assert "over the" in str(exc)
+    else:
+        raise AssertionError("an oversized intent file must be refused")
+
+
+def test_a_provider_name_cannot_escape_the_clip_folder(tmp_path: Path) -> None:
+    """The provider name becomes part of the evidence filename, and a failed
+    review deletes that file, so `../` in it would write (or remove) a file
+    outside the clip it describes."""
+    clip = _clip(tmp_path)
+    for hostile in ("../../escape", "gem ini", "", ".", "a/b"):
+        try:
+            video_review.default_output(clip, hostile)
+        except ReviewError as exc:
+            assert "plain name" in str(exc)
+        else:
+            raise AssertionError(f"provider {hostile!r} was accepted as a filename")
+    assert video_review.default_output(clip, "gemini").parent == clip
+    assert video_review.default_output(clip, "gemini-2.5-pro").parent == clip
+
+
 def test_consent_is_demanded_before_the_gateway_is_consulted(tmp_path: Path) -> None:
     clip = _clip(tmp_path)
     intent = tmp_path / "i.json"
@@ -539,6 +606,9 @@ def main() -> int:
         test_scalar_and_null_moments_normalize()
         test_intent_requires_purpose()
         test_intent_text_round_trips()
+        test_an_oversized_intent_is_refused_before_it_reaches_the_gateway(root)
+        test_an_oversized_intent_file_is_refused(root)
+        test_a_provider_name_cannot_escape_the_clip_folder(root)
         test_consent_is_demanded_before_the_gateway_is_consulted(root)
         test_the_clip_and_intent_reach_the_gateway(root)
         test_a_missing_gateway_is_refused_with_the_install_route(root)

@@ -901,6 +901,46 @@ def test_unreadable_review_envelope_is_reported_not_dropped() -> None:
         assert "review-half-written.json" in stderr.getvalue(), stderr.getvalue()
 
 
+def test_collect_visual_reviews_survives_a_hostile_envelope() -> None:
+    """A review file is a model-influenced document a killed run can leave
+    half written, so a list, a null `intent`, or a dict where a name belongs
+    costs that file its key, never the whole report the run is about to print.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        evidence = Path(temporary) / "reviews"
+        evidence.mkdir()
+        good = evidence / "review-good.json"
+        good.write_text(
+            json.dumps({"intent": {"content": {"suite": "demo", "case": "ok"}}}),
+            encoding="utf-8",
+        )
+        shapes: list[object] = [
+            [],
+            "a string, not an envelope",
+            None,
+            {"intent": None},
+            {"intent": []},
+            {"intent": {"content": {"suite": {"a": 1}, "case": "ok"}}},
+            {"intent": {"content": {"suite": "demo", "case": 7}}},
+        ]
+        for index, shape in enumerate(shapes):
+            (evidence / f"review-hostile-{index}.json").write_text(
+                json.dumps(shape), encoding="utf-8"
+            )
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            reviews = playtest_run.collect_visual_reviews(evidence)
+
+        assert reviews.get("demo/ok") == str(good), reviews
+        # A non-object envelope is skipped and said so; one with an unusable
+        # intent still names its file, keyed by stem, so nothing silently goes
+        # missing from the report.
+        assert set(reviews) == {"demo/ok", *(f"review-hostile-{i}" for i in range(3, 7))}, reviews
+        for index in range(3):
+            assert f"review-hostile-{index}" in stderr.getvalue(), stderr.getvalue()
+
+
 def _run_report_summary(path: Path) -> tuple[int, str]:
     """Drive report_summary's real entry point, returning (exit code, stdout)."""
     out = io.StringIO()
@@ -1146,6 +1186,7 @@ def main() -> int:
     test_contract_lines_parse_under_the_games_log_prefix()
     test_collect_visual_reviews_maps_paths_and_never_verdicts()
     test_collect_visual_reviews_is_empty_without_a_directory()
+    test_collect_visual_reviews_survives_a_hostile_envelope()
     test_unreadable_review_envelope_is_reported_not_dropped()
     test_report_summary_prints_counts_and_fails_closed()
     test_fuzz_report_summary_never_launders_a_broken_lap()

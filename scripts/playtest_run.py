@@ -1320,6 +1320,12 @@ def write_report(path: Path, payload: dict) -> None:
     log(f"report → {path}")
 
 
+# A review envelope is a verdict about a clip: kilobytes. Anything larger is a
+# truncated write or a log someone renamed, and reading it would put whatever
+# size the file happens to be into the run's memory.
+MAX_VISUAL_REVIEW_BYTES = 8 * 1024 * 1024
+
+
 def collect_visual_reviews(directory: Path | None) -> dict[str, str]:
     """Evidence paths keyed by suite/case, from review envelopes under `directory`.
 
@@ -1328,23 +1334,41 @@ def collect_visual_reviews(directory: Path | None) -> dict[str, str]:
     `"<suite>/<case>"` from the recorded intent. Only **paths** reach the
     report: no verdict, score, or pass/fail derived from a review is ever
     included, so a review can never change a case's result by existing.
+
+    The files are model-influenced documents a failed run can leave half
+    written, so every level is shape-checked: a list, a null `intent`, or a
+    suite that is a dict must cost that file its key, not the whole report the
+    run is about to print.
     """
     if directory is None or not directory.is_dir():
         return {}
     reviews: dict[str, str] = {}
     for path in sorted(directory.rglob("review-*.json")):
         try:
+            if path.stat().st_size > MAX_VISUAL_REVIEW_BYTES:
+                warn(
+                    f"visual review {path} is larger than "
+                    f"{MAX_VISUAL_REVIEW_BYTES} bytes and was skipped"
+                )
+                continue
             document = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as ex:
             # A skipped envelope is evidence that silently vanished from the
             # report; the run still looks reviewed when it is not.
             warn(f"visual review {path} could not be read: {ex}")
             continue
-        intent = document.get("intent") or {}
-        content = intent.get("content") or {}
-        suite = content.get("suite") or ""
-        case = content.get("case") or ""
-        key = f"{suite}/{case}" if suite and case else path.stem
+        if not isinstance(document, dict):
+            warn(f"visual review {path} is not a JSON object and was skipped")
+            continue
+        intent = document.get("intent")
+        content = intent.get("content") if isinstance(intent, dict) else None
+        suite = content.get("suite") if isinstance(content, dict) else None
+        case = content.get("case") if isinstance(content, dict) else None
+        key = (
+            f"{suite}/{case}"
+            if isinstance(suite, str) and isinstance(case, str) and suite and case
+            else path.stem
+        )
         reviews[key] = str(path)
     return reviews
 
