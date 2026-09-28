@@ -74,10 +74,13 @@ uv run scripts/review_video.py <clip-dir> \
     --intent <path> --provider PROVIDER --model MODEL --allow-network --json
 ```
 
-`<clip-dir>` is exactly what `capture_video.sh` produced: the frame
-sequence, the muxed mp4 if `ffmpeg` was available, and the copied
-`client.log`. `--intent-text` may supply the same information inline; the
-JSON file is the reproducible route, matching the audio-review PRD's own
+`<clip-dir>` is exactly what `capture_video.sh --out DIR` produced: the
+muxed `<id>.mp4`, its contact sheet, the run log, and the copied
+`client.log`. The source frames stay in the client's
+`playtest-shots/clips/<id>/`, which the RESULT block names. `ffmpeg` is
+required by `capture_video.sh`, so a clip directory always has the mp4.
+`--intent-text` may supply the same information inline; the JSON file is
+the reproducible route, matching the audio-review PRD's own
 `--intent`/`--intent-text` split.
 
 ### Intent schema
@@ -104,13 +107,16 @@ either.
 
 Providers differ in what they can actually ingest: some accept a video file
 directly, most vision-chat APIs cap the number of images per request well
-below what a 10s/4fps clip produces (40 frames). The script asks the
-provider adapter for its declared limit and samples down to it (even
-spacing across the clip, always including the first and last frame) rather
-than silently truncating from one end. When frames are dropped to fit a
-limit, the evidence document records how many and which sampling was used;
-a review that quietly saw only the first eight frames of a forty-frame
-turntable is not honest about what it actually judged.
+below what a 10s/4fps clip produces (40 frames). That budget belongs to the
+**deadeye gateway**, not to this repository: `review_video.py` hands it the
+whole clip directory plus the intent and receives one envelope back, and the
+gateway owns the sampling decision (even spacing across the clip rather than
+truncation from one end) and records in its evidence which frames were
+submitted. A review that quietly saw only the first eight frames of a
+forty-frame turntable is not honest about what it actually judged, and the
+envelope is where that claim has to be made. This repo's own obligation is
+narrower: do not overwrite that record, and do not present a local schema
+pass as if it were a judgement about motion (see Evidence below).
 
 ### Result schema
 
@@ -131,8 +137,8 @@ frames alone (motion blur, precise timing between two fast-cut frames);
 
 ### Evidence and reproducibility
 
-`--output PATH` (default: `<clip-dir>/review-<provider>-<timestamp>.json`)
-writes:
+The gateway writes the evidence document, at `--output PATH` (default:
+`<clip-dir>/review-<provider>-<timestamp>.json`), carrying:
 
 - SHA-256 of every submitted frame/clip file and the intent file;
 - provider, model identifier, review timestamp;
@@ -142,9 +148,16 @@ writes:
 - disclosure confirmation and usage metadata if the provider reports it;
 - tool version and parameters, credentials removed.
 
-A later review never overwrites an earlier one by default; disagreement
-across repeated reviews is preserved and surfaced, not averaged into false
-certainty, matching the audio-review PRD's own rule.
+`review_video.py` passes that path through, refuses a returned envelope that
+is not a `deadeye-review` or whose `result` fails this repo's validator, and
+stamps the envelope it returns with `review_validated` and an
+`intent_summary` (`purpose`, `suite`, `case`) so a reader can tell a
+locally-validated result from an unchecked one.
+
+A later review never overwrites an earlier one by default (`--force` is the
+only way it can); disagreement across repeated reviews is preserved and
+surfaced, not averaged into false certainty, matching the audio-review PRD's
+own rule.
 
 The gateway writes that file before `video_review.py` has checked the
 envelope, so `run_review` rewrites it with the envelope it validated (adding
@@ -156,36 +169,39 @@ schema leaves no verdict-shaped file behind.
 
 ### Provider boundary and credentials
 
-A narrow adapter protocol: capability probe (accepted formats, frame/size
-limits), submission of frames or video plus text, structured-response
-handling, usage metadata, redaction. Credentials come only from provider
-configuration or environment variables, and are never accepted as a command
-argument, printed, or written into evidence, matching the audio-review PRD's
-rule exactly (and stricter than this repo's own existing
-`--telnet-password` argument, which THREAT_MODEL.md already names as R1, a
-gap, not a pattern to repeat).
+The provider boundary is the **deadeye gateway**, not an adapter protocol
+this repository owns. `review_video.py` builds one `deadeye review` argv
+(clip path, `--intent` or `--intent-text`, `--provider`, optional `--model`,
+`--allow-network`, `--json`, `--timeout`, `--output`) and parses the single
+JSON envelope it prints. Gateway availability is a PATH lookup
+(`deadeye_available`), never a network call, so `--help`, discovery, and an
+offline suite run reach no provider.
 
-The capability registry (a small module mirroring asset-pipeline's
-`capabilities.REGISTRY` shape) reports `unavailable`, `configured`, or `not
-probed` without contacting a provider during discovery, `--help`, or an
-offline suite run.
+Credentials come only from provider configuration or environment variables,
+and are never accepted as a command argument, printed, or written into
+evidence, matching the audio-review PRD's rule exactly (and stricter than
+this repo's own existing `--telnet-password` argument, which
+THREAT_MODEL.md already names as R1, a gap, not a pattern to repeat).
 
 ### Where this joins the playtesting feedback loop
 
 Three integration points, deliberately the only three:
 
-1. **Convenience chaining.** `make playtest-review-video SUITE=<id>` runs
-   `capture_video.sh` then `review_video.py` against the same output
+1. **Convenience chaining.** `make playtest-review-video SUITE=<id> INTENT=<path>`
+   runs `capture_video.sh` then `review_video.py` against the same output
    directory, so a run's clip, its `client.log`, and its review evidence are
    one self-contained folder under `.local/capture/`, matching the
    self-containment `capture_frames.sh` already established for its own
-   output.
+   output. Without `INTENT`, the target captures the clip and says the review
+   was skipped.
 2. **Discoverability in the report, never authority.** `playtest_run.py`'s
-   JSON report gains an optional, additive `visual_reviews` array (evidence
-   file paths only, keyed by case id) when `--attach-reviews DIR` is passed.
-   No verdict, score, or pass/fail derived from a review ever reaches the
-   report; the array exists so a person or an agent auditing a run can find
-   the evidence, not so the report can act on it.
+   JSON report gains an optional, additive `visual_reviews` map (evidence
+   file paths only, keyed by `<suite>/<case>` read from each envelope's
+   recorded intent, falling back to the file's stem) when
+   `--attach-reviews DIR` is passed. No verdict, score, or pass/fail derived
+   from a review ever reaches the report; the map exists so a person or an
+   agent auditing a run can find the evidence, not so the report can act on
+   it.
 3. **Nothing else.** The stable log contract (README's `[7dtd-playtest]`
    line table) is untouched. A case's `PASS`/`FAIL`/`SKIP` is computed
    exactly as it is today. This is the same posture the audio-review PRD
@@ -199,9 +215,10 @@ Three integration points, deliberately the only three:
 |---|---|
 | `--allow-network` absent | Refuse before reading credentials or contacting a provider |
 | intent lacks `purpose` | Refuse locally, name the missing field |
-| provider/model not configured | Report the capability state and configuration route |
-| clip exceeds provider's frame/size limit | Sample down, record what was dropped in the evidence |
-| provider cannot ingest actual frames/video | Refuse the adapter; a stills-incapable transcription is not a substitute |
+| gateway not installed | Refuse before any upload, naming `deadeye` and its install hint |
+| provider/model not configured | The gateway refuses; its own last line is reported verbatim, never replaced by a local guess |
+| clip exceeds provider's frame/size limit | The gateway samples down and records what was dropped in its evidence; this repo adds nothing to and drops nothing from that record |
+| provider cannot ingest actual frames/video | The gateway refuses the review; a stills-incapable transcription is not a substitute |
 | provider timeout, rate limit, or refusal | Exit non-zero; no partial verdict is preserved as a completed review |
 | model returns invalid structure | Preserve a redacted raw response only when requested; fail schema validation, and leave no evidence file behind |
 | usage/cost metadata unavailable | Mark unavailable rather than estimated |
@@ -214,11 +231,12 @@ Three integration points, deliberately the only three:
 
 1. Intent/result schema module (`scripts/video_review.py`), offline
    validation and redaction tests, no network dependency to import it.
-2. Fake local adapter, proven with a test that the exact sampled frame bytes
-   and the complete intent reach the adapter boundary, mirroring the
-   audio-review PRD's own first proof step.
-3. First real provider adapter, chosen for actual multi-frame or video
-   understanding, not a stills-only or transcription-only capability.
+2. Stubbed gateway runner, proven with a test that the clip path and the
+   complete intent reach the gateway boundary and that a hostile envelope
+   fails closed, mirroring the audio-review PRD's own first proof step.
+3. Provider reachability, owned by the deadeye gateway, which chooses a
+   provider for actual multi-frame or video understanding, not a
+   stills-only or transcription-only capability.
 4. `capture_video.sh` -> `review_video.py` wiring and the
    `playtest-review-video` make target.
 5. `--attach-reviews` on `playtest_run.py`, with a structural test in the
@@ -233,17 +251,23 @@ Three integration points, deliberately the only three:
 
 ## Acceptance criteria
 
-- [ ] A fake adapter test proves the exact sampled frame bytes and complete
-  intent reach the provider boundary.
+- [x] A stubbed-gateway test proves the clip path and the complete intent reach
+  the provider boundary, and that a missing gateway is refused with its
+  install route. Which frames of that clip are actually submitted is the
+  gateway's record, not this test's claim.
 - [ ] At least one real provider reviews a real staged clip and identifies a
   motion-dependent property a single still could not have shown.
-- [ ] Output validates against the stable result schema and names
-  observations tied to a frame index or timestamp where applicable.
+- [x] Output validates against the stable result schema and names
+  observations tied to a frame index or timestamp where applicable
+  (`test_the_envelope_result_is_validated_and_keeps_frame_moments`, plus a
+  seeded fuzz over hostile gateway results).
 - [ ] Rerunning against a revised clip preserves both hash-addressed evidence
-  documents for comparison.
-- [ ] No network call occurs without `--allow-network`; credentials never
-  appear in stdout, JSON output, logs, or stored evidence.
-- [ ] `playtest_run.py --attach-reviews` adds only paths to the report; no
+  documents for comparison. This repository gates only its half of that: it
+  passes `--output` through and makes overwriting an explicit `--force`.
+- [x] No network call occurs without `--allow-network` (the consent gate is
+  the first check in `run_review`, before the intent is even read); credentials
+  never appear in stdout, JSON output, logs, or stored evidence.
+- [x] `playtest_run.py --attach-reviews` adds only paths to the report; no
   case's PASS/FAIL changes because a review exists.
 - [ ] A human watches a reviewed clip and records whether the model's
   critique matched the experienced motion; only that human review accepts

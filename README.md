@@ -34,6 +34,10 @@ and live suite commands.
 Host-side concurrency (the exclusivity lock) is covered by deterministic
 simulation: `make dst`, documented in **[DST.md](DST.md)**.
 
+Design and decision records live in **[docs/](docs/README.md)**: in-game clip
+capture, vision-model review of a clip, the asset iteration loop they feed,
+and the threat model.
+
 Join/auto-connect is **not** here: install [`../7dtd-fastconnect/`](../7dtd-fastconnect/)
 as well. Design: [`../zdtd-server/docs/CLIENT_PLAYTEST.md`](../zdtd-server/docs/CLIENT_PLAYTEST.md).
 
@@ -894,9 +898,9 @@ Capture only a named clip:
 ```
 
 Same `--runner` contract and the same refuse-to-overlap guard as
-`capture_frames.sh`; without `ffmpeg` it exits non-zero and names the raw
-frame directory as the evidence that does exist. If `ffmpeg` is missing, the
-frames are still the evidence.
+`capture_frames.sh`. `ffmpeg` is required and is checked before the suite
+starts, so a run that could not produce an mp4 never begins; `montage` is
+optional and only adds the contact sheet.
 
 `Helpers.StartWalk` / `Helpers.StopWalk` expose the same real motor walk
 (`LocomotionDrive`, stock autorun, not teleport) to external providers, so a

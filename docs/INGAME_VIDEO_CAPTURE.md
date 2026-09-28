@@ -229,37 +229,45 @@ clip as if it were complete.
 ## Host-side: `scripts/capture_video.sh`
 
 Modeled directly on `scripts/capture_frames.sh`: same suite-run-in-background
-shape, same "refuse to start on top of a live run" guard (`pgrep -x` on the
-client/server process names, never `-f`), same "keep the client log with the
-run" self-containment, same `--runner` contract. It differs only in what it
-waits for and what it does once the wait ends:
+shape, same "refuse to start on top of a live run" guard, same "keep the
+client log with the run" self-containment, same `--runner` contract. The
+guard is `scripts/playtest_lock.py live` (exit 1 = something is up, exit 2 =
+the probe itself failed, and the script refuses on both), which is what
+`capture_frames.sh` uses too: the probe inspects each process's executable
+rather than matching a command line, so a `tail -f` or a wait loop watching
+the run cannot be mistaken for the game. It differs only in what it waits for
+and what it does once the wait ends:
 
 1. Wait for `clip complete <id>` in the client log (written after this run
    started, same anti-stale-log guard `capture_frames.sh` already uses for
    `scene staged`), rather than sampling on an external timer.
-2. Because the write is asynchronous, poll (up to ~1s) for the last expected
+2. Because the write is asynchronous, poll (up to 30 s) for the last expected
    frame file (`frame-<frames-1>.png`) to actually exist on disk before
    treating the clip as complete; the log line names the count, so the last
    index is known without guessing.
 3. Mux `playtest-shots/clips/<id>/frame-%04d.png` into
    `<out>/<id>.mp4` with `ffmpeg -framerate <clipFps> -i ... -pix_fmt yuv420p`.
    `ffmpeg` here only ever reads files this process already wrote to disk; it
-   never touches a display, a compositor, or a capture device. If `ffmpeg` is
-   missing, exit non-zero naming the frame directory as the fallback evidence
-   rather than silently shipping only frames with no note (same "prefer
-   missing over fakes" posture AGENTS.md already states for this repo).
-4. Build a contact sheet from the same frames with `montage`, exactly as
-   `capture_frames.sh` already does, so a reviewer who wants a single image
-   still gets one.
+   never touches a display, a compositor, or a capture device. `ffmpeg` is
+   checked before the suite starts and is required: a clip output directory
+   with no mp4 in it is not the artefact this script promises, so the run
+   does not begin at all (same "prefer missing over fakes" posture AGENTS.md
+   already states for this repo).
+4. Build a contact sheet from the same frames with `montage`, the same call
+   `capture_frames.sh` makes, so a reviewer who wants a single image still
+   gets one. Unlike `ffmpeg`, `montage` is optional: without it the mp4 and
+   the RESULT block still name the source frames.
 
 ```bash
 ./scripts/capture_video.sh --suite <id>
 ./scripts/capture_video.sh --suite <id> --out ./clips --runner ./my-wrapper.sh
 ```
 
-`CAPTURE_CLIP_ID` (default: the case id logged in `clip complete`),
-`CAPTURE_FPS`, and `CAPTURE_CROP` mirror `capture_frames.sh`'s tuning
-environment variables.
+`CAPTURE_CLIP_ID` (default: the case id logged in `clip complete`) and
+`CAPTURE_FPS` mirror `capture_frames.sh`'s tuning environment variables.
+`CAPTURE_CROP` has no counterpart here: it crops a desktop grab to the
+client window, and every frame in a clip is already the client window at
+`captureSuperSize`.
 
 ## Failure modes
 
@@ -268,8 +276,8 @@ environment variables.
 | `stage` never returns true | Same as `Staged` today: case fails, no frames were worth taking |
 | `onHold` throws | Logged, hold continues (frames already being taken are not discarded) |
 | render thread cannot keep up with `clipFps` | Fewer frames land in `holdSeconds`; `clip complete` reports the real count, never a padded one |
-| last frame file missing after the poll window | `capture_video.sh` reports the short count and mux fails loudly rather than muxing a gap as if it were continuous motion |
-| `ffmpeg` not installed | Exit non-zero, name the frame directory as the evidence that does exist |
+| last frame file missing after the poll window | `capture_video.sh` exits non-zero naming the missing `frame-XXXX.png` and the directory holding the frames that did land, rather than muxing a gap as if it were continuous motion |
+| reported and actual frame counts disagree | Warn, then mux what exists; the RESULT block prints both counts |
 | two staged clips reuse the same `id` in one run | `StagedClip` clears that clip's frame directory before each take, so the later take replaces the earlier evidence rather than mixing stale frames into it; name clip ids for what they show, same as any other case id |
 
 ## Implementation
@@ -292,14 +300,21 @@ environment variables.
 
 - [ ] A `StagedClip` case produces N frames written entirely by
   `ScreenCapture.CaptureScreenshot`; no external screenshot tool runs.
-- [ ] `capture_video.sh` waits on the `clip complete` marker in a log written
+- [x] `capture_video.sh` waits on the `clip complete` marker in a log written
   after its own run started (same anti-stale guard as `capture_frames.sh`).
-- [ ] `capture_video.sh` refuses to start over a live client/server, same
-  guard, same reason.
-- [ ] The muxed clip and its source frames survive in `.local/capture/`
-  alongside the run's `client.log`, self-contained the same way a
-  `capture_frames.sh` run already is.
-- [ ] README's stable log contract table lists `clip complete`.
+  The marker parse is pinned by `scripts/test_capture_video_surface.py`,
+  which runs the script's own parse fragment, so the log contract cannot
+  drift from the collector.
+- [x] `capture_video.sh` refuses to start over a live client/server, same
+  guard, same reason (`playtest_lock.py live`, refusing on both "something is
+  up" and "the probe could not tell").
+- [ ] The muxed clip survives in `.local/capture/` alongside the run's
+  `client.log` and run log, self-contained the same way a
+  `capture_frames.sh` run already is. The source frames deliberately stay in
+  the client's `playtest-shots/clips/<id>/` (a copy would double a
+  40-120 MB clip for evidence the mp4 already carries); the RESULT block
+  names that directory.
+- [x] README's stable log contract table lists `clip complete`.
 - [ ] A person watches a real turntable clip of a real staged subject and
   confirms it shows what the case claims it stages.
 

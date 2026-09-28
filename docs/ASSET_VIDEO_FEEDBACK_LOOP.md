@@ -101,11 +101,11 @@ already uses; shamway does not need to know that path's shape. What it needs
 is the same "adopt an already-captured artefact" primitive it already has:
 `capture.py`'s `record_existing(file, label, observable, root)` hashes and
 records a screenshot somebody (or something) else already took, rather than
-shamway taking its own. This plan asks for the same shape, one level up: a
+shamway taking its own. This plan asked for the same shape, one level up: a
 `--clip DIR` form that adopts an already-captured `7dtd-playtest` clip
-directory (frames, mp4, `client.log`) into shamway's own
-`.local/acceptance/` evidence tree, labeled and hash-addressed the same way
-`shamway client capture`'s single frames already are.
+directory into shamway's own `.local/acceptance/` evidence tree, labeled and
+hash-addressed the same way `shamway client capture`'s single frames already
+are.
 
 ### Where the model critique lands
 
@@ -180,7 +180,7 @@ justify one would come from.
 | Manifest entry requests a motion kind that does not fit the asset (a world-fixed decoration asked to turntable) | `acceptance-provider` defaults that entry to `fixed` and states why in the generated provider, rather than producing a meaningless spin |
 | Two reviews of the same revision disagree | Both kept; disagreement surfaced, never averaged, matching the audio-review PRD's rule |
 | Model critique is acted on but the next revision is worse | Both revisions' evidence remain, hash-addressed; nothing here prevents or flags a regression automatically, that judgement stays with the person iterating |
-| `shamway review-video` unavailable ([PRD 0002](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md)'s operation not yet built) | The loop still works manually: a person watches the adopted clip directly, same as any staged clip today |
+| `shamway review-video` unavailable (the deadeye gateway is not installed, or the operation is missing from the checkout) | The loop still works manually: a person watches the adopted clip directly, same as any staged clip today |
 
 ## Implementation
 
@@ -191,9 +191,11 @@ justify one would come from.
    what those two already specify.
 2. In `7dtd-asset-pipeline`: its PRD,
    [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
-   has landed; next build its `review-video` operation, then the
-   `acceptance-provider` manifest's motion-kind field and
-   `shamway client capture --clip`.
+   has landed and the Status above reports `shamway review-video`,
+   `shamway client capture --clip`, and the `acceptance-provider` motion-kind
+   field as implemented there. This repository cannot verify any of the three
+   from here; if one has not actually landed, this step is the list of what
+   still has to be built.
 3. Run the full loop once, end to end, on a real modlet asset with a known
    defect (an intentionally clipping garment, matching README's own worked
    example), and record whether the model's critique named the same problem
