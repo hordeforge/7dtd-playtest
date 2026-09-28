@@ -497,18 +497,56 @@ def config_summary(args: argparse.Namespace) -> str:
     return " ".join(parts)
 
 
+# Transcript correlation for the orchestrator's own lines. The client log
+# carries timestamps and the run report carries the artifact names, but a
+# `[playtest-orch]` line carried neither, so a captured CI transcript could not
+# be placed on the clock, ordered against the client log it describes, or
+# attributed to the run that wrote it. Every line now names when it was
+# written, how far into the run, and the lock session the report carries too,
+# so transcript -> report -> lock file is a lookup rather than a guess.
+_LOG_SESSION = ""
+_LOG_T0: float | None = None
+
+
+def set_log_identity(session: str, t0: float | None) -> None:
+    """Bind emitted lines to this run's session and start time.
+
+    `t0=None` (with an empty session) unbinds, which is what a caller outside
+    a run wants: lines are then timestamped but carry nothing to correlate to.
+    """
+    global _LOG_SESSION, _LOG_T0
+    _LOG_SESSION = session
+    _LOG_T0 = t0
+
+
+def _log_prefix() -> str:
+    """Correlation fields every orchestrator line carries.
+
+    Both stamps read the injected clock, so a simulated run stamps virtual
+    time like every other run-facing instant. Elapsed and the session are
+    omitted before `set_log_identity`, which is only bound once the run has a
+    session; a timestamped line without them is still orderable.
+    """
+    fields = [playtest_lock.format_utc(epoch_now())]
+    if _LOG_T0 is not None:
+        fields.append(f"t+{monotonic_now() - _LOG_T0:.1f}s")
+    if _LOG_SESSION:
+        fields.append(f"session={_LOG_SESSION}")
+    return " ".join(fields)
+
+
 def log(msg: str) -> None:
-    print(f"[playtest-orch] {msg}", flush=True)
+    print(f"[playtest-orch] {_log_prefix()} {msg}", flush=True)
 
 
 def warn(msg: str) -> None:
     """Recoverable problem: diagnostics belong on stderr, progress stays on stdout."""
-    print(f"[playtest-orch] warn: {msg}", file=sys.stderr, flush=True)
+    print(f"[playtest-orch] {_log_prefix()} warn: {msg}", file=sys.stderr, flush=True)
 
 
 def err(msg: str) -> None:
     """Terminal harness error (nonzero exit follows)."""
-    print(f"[playtest-orch] {msg}", file=sys.stderr, flush=True)
+    print(f"[playtest-orch] {_log_prefix()} {msg}", file=sys.stderr, flush=True)
 
 
 # Control characters: C0 except tab/LF, DEL, and the C1 block. ESC (\x1b) and
@@ -3181,6 +3219,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeout is None:
         args.timeout = seconds_from_env("PLAYTEST_TIMEOUT_SEC", 900.0)
 
+    # The run's identity, bound before the first line is written: the session
+    # is what the lock file, the run report and every transcript line below
+    # name, so a line emitted while the config is still printing is as
+    # attributable as one from the poll loop.
+    lock_session = (args.session or "").strip() or playtest_lock.new_session_id("playtest")
+    set_log_identity(lock_session, monotonic_now())
+
     # One effective-config line at startup (password redacted) so a misread
     # env var or stale shell default is visible in every log without --help.
     log("config: " + config_summary(args))
@@ -3310,7 +3355,7 @@ def main(argv: list[str] | None = None) -> int:
     # One-shot flag for the mid-run backend-exit announcement below; reset by
     # start_server() so each new server process gets exactly one verdict.
     server_exit_announced = False
-    lock_session = (args.session or "").strip() or playtest_lock.new_session_id("playtest")
+    # Session is derived and bound to the transcript above the config line.
     # Scoped to the client this run drives: a managed run owns a Safehouse
     # client instance with its own prefix and window, so several sandbox runs
     # can share a machine. A run on the operator's single Steam client keeps
@@ -3962,6 +4007,10 @@ def main(argv: list[str] | None = None) -> int:
                         "results": results,
                         "error": f"{rejoin_label} setup incomplete",
                         "server_exited_mid_run": server_exit_announced,
+                        "session": lock_session,
+                        "run_end_reason": "rejoin_setup_incomplete",
+                        "wall_sec": round(monotonic_now() - t0, 1),
+                        "ran_epoch": run_epoch,
                     },
                 )
                 write_junit(junit_path, args.suite, results)
@@ -4490,6 +4539,13 @@ def main(argv: list[str] | None = None) -> int:
             "timeout_sec": args.timeout,
             "wall_sec": round(wall_s, 1),
             "ran_epoch": run_epoch,
+            # The same identity every transcript line and the lock file
+            # carries, so a report found on its own (a CI artifact, the newest
+            # report in a logdir) names the run that wrote it and how that run
+            # ended. The run-ended marker says the same thing for processes
+            # watching live; a report read days later has no marker beside it.
+            "session": lock_session,
+            "run_end_reason": run_end_reason,
             # Structured echo of note_backend_exit(): a report whose cases
             # failed against an already-dead server must say so, not just the
             # terminal transcript.
@@ -4512,6 +4568,13 @@ def main(argv: list[str] | None = None) -> int:
         # placement and is never pruned; only the timestamped logdir defaults
         # are bounded.
         prune_run_artifacts(args.logdir, protect=(report_path, junit_path))
+        # One line naming where this run's evidence landed and why the poll
+        # loop ended, so the transcript points at the report instead of
+        # leaving that lookup to whoever reads the CI log.
+        log(
+            f"run ended reason={run_end_reason} wall_s={wall_s:.1f} "
+            f"report={report_path} junit={junit_path}"
+        )
 
         if done is None or (peer_client_suite and peer_done is None):
             missing = "primary" if done is None else "peer"

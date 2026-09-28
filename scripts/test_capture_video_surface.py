@@ -522,8 +522,11 @@ def check_stop_run() -> None:
                 'CHILD=""',
                 # The stand-in writes the child's pid from inside its own
                 # start-up, so read it once it exists: an empty read would
-                # make every check below vacuously pass.
-                'for _ in $(seq 1 50); do CHILD="$(cat ' + str(pid_file)
+                # make every check below vacuously pass. 30s, not 5s: a loaded
+                # CI box (the gates run in sequence behind a full pytest
+                # sweep) can leave a setsid bash waiting on its own start-up
+                # for seconds, and the read gave up first.
+                'for _ in $(seq 1 300); do CHILD="$(cat ' + str(pid_file)
                 + ' 2>/dev/null || true)"; [[ -n "$CHILD" ]] && break; sleep 0.1; done',
                 'if [[ -z "$CHILD" ]]; then echo "group=nopid"; else',
                 # A killed process still answers kill -0 for a few ms while

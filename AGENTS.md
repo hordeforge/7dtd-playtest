@@ -301,6 +301,15 @@ multi-target host gate (persist + mp + apm + soak_long). See README.
 
 ## Log contract
 
+**Host transcript** lines prefixed `[playtest-orch]` (do not reorder the
+fields): `[playtest-orch] <UTC ISO8601 Z> t+<elapsed>s session=<id> <msg>`
+(`warn:` after the fields on stderr). The timestamp, the elapsed offset from
+the monotonic clock and the lock session are what make a captured CI
+transcript pivotiable to `report-<epoch>.json` and the lock file; the same
+`session` and `run_end_reason` are fields in that report. A line emitted
+before the run binds its session (argparse-level refusal, harness crash at
+import) carries the timestamp and nothing else.
+
 **Stable** lines prefixed `[7dtd-playtest]` (do not rename tokens):
 
 - Human: `PASS|FAIL|SKIP suite/case detail`

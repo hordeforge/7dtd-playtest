@@ -206,6 +206,9 @@ Orchestrator exit codes:
 | 2 | Harness error (no DONE, server/client missing, timeout, **or lock refused**) |
 
 Reports land under `~/.cache/7dtd-playtest/report-*.json` (override `LOGDIR=`).
+Each report carries the run's `session` and `run_end_reason`, the same session
+every `[playtest-orch]` transcript line names, so a report found on its own in
+CI is attributable without the log that produced it.
 
 ### Host orchestrator environment
 

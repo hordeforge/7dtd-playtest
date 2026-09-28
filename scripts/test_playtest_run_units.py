@@ -1277,6 +1277,67 @@ def test_tcp_port_type_range() -> None:
     print("PASS tcp_port_range ports outside 1..65535 rejected at startup")
 
 
+def test_transcript_lines_carry_run_correlation() -> None:
+    """Every orchestrator line names when it was written, how far into the
+    run, and which session owns it.
+
+    The transcript is what a CI job keeps when a run fails, and before this
+    it carried none of that: a line could not be placed on the clock, ordered
+    against the client log it describes, or attributed to the report sitting
+    in the same logdir. Driven through the virtual clock so the stamps are
+    exact, not merely present.
+    """
+    clock = VirtualClock()
+    out, err_out = io.StringIO(), io.StringIO()
+    try:
+        with playtest_run.use_clock(clock):
+            playtest_run.set_log_identity("playtest-20260928-010101-abcdef0123", 0.0)
+            with contextlib.redirect_stdout(out):
+                playtest_run.log("suite starting")
+            clock.sleep(90.0)
+            with contextlib.redirect_stderr(err_out):
+                playtest_run.warn("telnet connect fail; retry next poll")
+        line = out.getvalue().strip()
+        # 1700000000 is 2023-11-14T22:13:20Z; the run's own elapsed clock,
+        # not the wall clock, names the offset into the run.
+        assert line.startswith(
+            "[playtest-orch] 2023-11-14T22:13:20Z t+0.0s "
+            "session=playtest-20260928-010101-abcdef0123 "
+        ), line
+        assert "suite starting" in line, line
+        warned = err_out.getvalue().strip()
+        assert "t+90.0s" in warned and "warn: telnet connect fail" in warned, warned
+    finally:
+        playtest_run.set_log_identity("", None)
+
+    # Before a run binds its identity (a crash at import, a harness start
+    # that fails before the session is derived) a line is still timestamped
+    # and still orderable; it just has nothing to correlate to yet.
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        playtest_run.log("no identity yet")
+    line = out.getvalue().strip()
+    assert re.match(r"^\[playtest-orch\] \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ ", line), line
+    assert "session=" not in line and " t+" not in line, line
+    print("PASS orchestrator transcript lines carry time, elapsed and session")
+
+
+def test_run_report_names_its_session_and_end_reason() -> None:
+    """A report found on its own (a CI artifact, the newest file in a
+    logdir) has no run-ended marker beside it, so it must name the session
+    its transcript and lock file use and how the run ended. Both report
+    payloads that can be written carry the pair."""
+    source = PLAYTEST_RUN.read_text(encoding="utf-8")
+    payloads = re.findall(r"write_report\(\s*report_path,\s*\{(.*?)\n\s*\}", source, re.S)
+    assert payloads, "no report payload found to check"
+    for body in payloads:
+        assert '"session": lock_session' in body, body
+    assert source.count('"run_end_reason"') == 2, source.count('"run_end_reason"')
+    assert '"run_end_reason": run_end_reason' in source
+    assert '"run_end_reason": "rejoin_setup_incomplete"' in source
+    print("PASS run reports name the session and the run end reason")
+
+
 def test_slowest_cases_drops_unusable_ms() -> None:
     """The slowest-case rows come from client-log JSON events, where `ms` is
     unbounded. A value past the float range must drop its own row instead of
@@ -3066,6 +3127,14 @@ def main() -> int:
         ("timeout_validation", test_positive_seconds_type_and_env_reader),
         ("tcp_port_range", test_tcp_port_type_range),
         ("slowest_cases_ms", test_slowest_cases_drops_unusable_ms),
+        (
+            "transcript_correlation",
+            test_transcript_lines_carry_run_correlation,
+        ),
+        (
+            "report_names_session_and_end_reason",
+            test_run_report_names_its_session_and_end_reason,
+        ),
         ("litenet_port_room", test_litenet_port_room_guard),
         ("telnet_port_range", test_telnet_port_range_guard),
         ("default_client_log", test_default_client_log_resolution),
