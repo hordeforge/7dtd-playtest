@@ -1,8 +1,10 @@
 # docs/
 
-Design and decision records for `7dtd-playtest`. Each one states its Status
-at the top: what is implemented, and which acceptance criteria still need a
-real client or a human watching the evidence.
+Design and decision records for `7dtd-playtest`. The three feature documents
+state their Status at the top: what is implemented, and which acceptance
+criteria still need a real client or a human watching the evidence.
+[THREAT_MODEL.md](THREAT_MODEL.md) instead records its last-reviewed commit
+and owner.
 
 | Document | Subject |
 |---|---|

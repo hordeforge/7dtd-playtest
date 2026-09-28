@@ -133,7 +133,7 @@ public static CaseDef StagedClip(
 ```
 
 The sketch below shows the shape of the callback; the shipped `StagedClip`
-(`CaseDef.cs:294`) is the authority for its exact timing.
+(`CaseDef.cs:297`) is the authority for its exact timing.
 
 Internally this is `Staged`'s `wait` callback with one change: instead of a
 single `if (ctx.IntA == 1 && ctx.IntB == 0 && elapsed >=

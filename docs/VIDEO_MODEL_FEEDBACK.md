@@ -312,11 +312,10 @@ Three integration points, deliberately the only three:
   video/multi-frame support, structured output, retention controls, and cost
   vary independently across sight and sound?
 - Should the versioned rubric live in this repo, or move somewhere shared
-  once `7dtd-asset-pipeline`'s `review-video` (specified in its
+  now that `7dtd-asset-pipeline`'s `review-video` has shipped (specified in its
   [PRD 0002](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md);
-  see [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md)) is built,
-  so the two do not drift into incompatible rubrics for the same kind of
-  judgement?
+  see [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md)), so the two
+  do not drift into incompatible rubrics for the same kind of judgement?
 - Does `--attach-reviews` belong as a first-class report field eventually, or
   stay a filesystem convention indefinitely? The stable log contract table
   in README.md is intentionally hard to extend; this plan defaults to never
