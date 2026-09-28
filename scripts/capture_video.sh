@@ -151,6 +151,14 @@ FRAME_COUNT="$(echo "$CLIP_LINE" | awk -F'frames=' '{print $2}' | awk '{print $1
 	echo "ERROR: could not parse the clip completion line: $CLIP_LINE" >&2
 	exit 2
 }
+# The frame count is not just compared below, it is arithmetic: LAST_INDEX is
+# FRAME_COUNT - 1 and the last-frame name is printf'd from it. A non-numeric or
+# zero count would abort inside $(( )) under `set -u`, or ask for "frame--1"
+# and report the frames as missing, which names the wrong cause.
+[[ "$FRAME_COUNT" =~ ^[1-9][0-9]*$ ]] || {
+	echo "ERROR: clip completion line has no positive frame count: $CLIP_LINE" >&2
+	exit 2
+}
 # Resolve the frames directory the way the mod and launch_client.sh do:
 # the Proton prefix's playtest-shots lives under COMPAT (env, set by the
 # same run that launched the client). A hardcoded default library silently

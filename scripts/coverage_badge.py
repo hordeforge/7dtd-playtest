@@ -18,6 +18,9 @@ USAGE = "usage: coverage_badge.py OUTPUT.svg"
 
 def percentage() -> int:
     out = Path(".coverage.json")
+    # The scratch report is unlinked in a finally: a json.loads, read or
+    # `coverage json` failure would otherwise leave .coverage.json in the
+    # project root, where the next run would pick up a stale one.
     try:
         subprocess.run(
             [sys.executable, "-m", "coverage", "json", "-q", "-o", str(out)],

@@ -24,6 +24,7 @@ SCRIPT = Path(__file__).resolve().parent / "capture_video.sh"
 # The parse fragment: the marker comment through the line before the guard.
 PARSE_START = "# clip complete <id> frames=N -> playtest-shots/clips/<id>"
 PARSE_END = '[[ -n "$CLIP_ID" && -n "$FRAME_COUNT" && -n "$CLIP_DIR" ]]'
+FRAME_COUNT_RE = '[[ "$FRAME_COUNT" =~ ^[1-9][0-9]*$ ]]'
 
 
 def parse_fragment() -> str:
@@ -76,6 +77,35 @@ def main() -> int:
     assert clip_id == "motion_thing" and frames == "48"
     assert clip_dir == "playtest-shots/clips/motion_thing"
     print("OK a bare marker (no client prefix) still parses")
+
+    # The frame count feeds arithmetic (LAST_INDEX = count - 1), so a count
+    # that is not a positive integer has to be rejected by name rather than
+    # aborting inside $(( )) or asking for "frame--1".
+    assert FRAME_COUNT_RE in text, "capture_video.sh lost its frame-count guard"
+    assert text.index(FRAME_COUNT_RE) > text.index(PARSE_END), (
+        "the frame-count guard must follow the parse"
+    )
+    for line, why in (
+        (prefixed.replace("frames=48", "frames=0"), "zero count"),
+        (prefixed.replace("frames=48", "frames=N/A"), "non-numeric count"),
+        (prefixed.replace("frames=48", "frames="), "empty count"),
+    ):
+        proc = subprocess.run(
+            ["bash", "-c", f'set -u\n{parse_fragment()}\n{FRAME_COUNT_RE}'],
+            env={"CLIP_LINE": line, "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0, f"{why} must be rejected: {proc.stdout!r}"
+
+    proc = subprocess.run(
+        ["bash", "-c", f'set -u\n{parse_fragment()}\n{FRAME_COUNT_RE}\necho ok'],
+        env={"CLIP_LINE": prefixed, "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0 and proc.stdout.strip() == "ok", proc.stderr
+    print("OK a non-positive or non-numeric frame count is rejected by name")
 
     print("RESULT PASS")
     return 0

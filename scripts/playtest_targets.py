@@ -248,7 +248,8 @@ def check_sandbox_available(plan: TargetPlan) -> None:
     if not sb.is_file():
         raise TargetError(
             f"Safehouse CLI missing: {sb}. A managed stock run is a sandbox "
-            "instance; check out 7dtd-sandbox beside this repo"
+            "instance; check out 7dtd-sandbox beside this repo or pass "
+            "--sandbox-root"
         )
 
 
@@ -267,15 +268,9 @@ def ensure_sandbox_server(
     """
     if not plan.is_sandbox:
         return {}
-    if plan.sandbox_root is None or plan.sandbox_server is None:
-        raise TargetError("managed stock plan is missing sandbox_root/server name")
-    sb = sb_path(plan.sandbox_root)
-    if not sb.is_file():
-        raise TargetError(
-            f"Safehouse CLI missing: {sb}. A managed stock run is a sandbox "
-            "instance; check out 7dtd-sandbox beside this repo or pass "
-            "--sandbox-root"
-        )
+    check_sandbox_available(plan)
+    assert plan.sandbox_root is not None
+    assert plan.sandbox_server is not None
 
     name = plan.sandbox_server
     inst = plan.sandbox_root / "instances" / name
@@ -372,26 +367,25 @@ def ensure_sandbox_client(
     return env_map
 
 
-def stop_sandbox_client(plan: TargetPlan) -> None:
-    """Best-effort ``sb stop`` for the sandbox client instance."""
-    if not plan.is_sandbox or plan.sandbox_root is None or plan.sandbox_client is None:
-        return
-    if not sb_path(plan.sandbox_root).is_file():
-        return
-    with contextlib.suppress(TargetError):
-        _run_sb(plan, ["stop", plan.sandbox_client], check=False)
-
-
-def stop_sandbox_server(plan: TargetPlan) -> None:
-    """Best-effort ``sb stop`` for the sandbox server instance."""
-    if not plan.is_sandbox or plan.sandbox_root is None or plan.sandbox_server is None:
+def _stop_sandbox_instance(plan: TargetPlan, name: str | None) -> None:
+    if not plan.is_sandbox or plan.sandbox_root is None or name is None:
         return
     if not sb_path(plan.sandbox_root).is_file():
         return
     # Teardown runs on the way out of a run that may already be failing; a stop
     # that cannot even start is reported by the caller's own exit path.
     with contextlib.suppress(TargetError):
-        _run_sb(plan, ["stop", plan.sandbox_server], check=False)
+        _run_sb(plan, ["stop", name], check=False)
+
+
+def stop_sandbox_client(plan: TargetPlan) -> None:
+    """Best-effort ``sb stop`` for the sandbox client instance."""
+    _stop_sandbox_instance(plan, plan.sandbox_client)
+
+
+def stop_sandbox_server(plan: TargetPlan) -> None:
+    """Best-effort ``sb stop`` for the sandbox server instance."""
+    _stop_sandbox_instance(plan, plan.sandbox_server)
 
 
 def _run_sb(

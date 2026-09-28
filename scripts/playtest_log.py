@@ -170,6 +170,10 @@ class ClientLogScan:
         self.malformed_events = 0
 
     def feed_line(self, line: str) -> None:
+        # The NRE scan sees every line, contract or not, so it cannot be left
+        # to the caller: a consumer that fed lines one at a time would report
+        # nre_like_total as 0 over a log that did crash.
+        self._count_nre(line)
         tail = _contract_tail(line)
         if tail is None:
             return
@@ -260,13 +264,12 @@ class ClientLogScan:
     def feed_lines(self, lines: Iterable[str]) -> None:
         """Parse already-split complete lines (see LogTail) in one pass.
 
-        Per line this is :meth:`feed_line` plus the NRE scan, without
-        splitting (and re-iterating) the same bytes twice on the
-        orchestrator's ~2 Hz poll path.
+        The same per-line work as :meth:`feed_line`, without splitting (and
+        re-iterating) the same bytes twice on the orchestrator's ~2 Hz poll
+        path.
         """
         for line in lines:
             self.feed_line(line)
-            self._count_nre(line)
 
     def result(self) -> ParsedClientLog:
         if self.json_results:

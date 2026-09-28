@@ -74,6 +74,12 @@ STEAM_ROOTS = (
     ".var/app/com.valvesoftware.Steam/data/Steam",
 )
 
+# Absolute slack allowed when a CVar expectation is compared with an observed
+# value. Stock CVars are floats, so exact equality is the wrong test; the same
+# number is the default of --loadgen-server-cvar-tolerance, which the operator
+# can widen.
+CVAR_ABS_TOLERANCE = 0.0001
+
 
 def peer_client_game(compat: Path) -> Path | None:
     """The game tree beside a peer's Proton prefix, when there is one.
@@ -785,6 +791,16 @@ def _finite_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _observed_cvar(latest: dict[tuple[str, str], dict], name: str) -> object:
+    """The CVar's raw observed value from the joined bot's latest state.
+
+    Raw, not numeric: a failure message has to show what actually arrived
+    ("abc", None, nan), which the parsed float would flatten to None.
+    """
+    state_event = latest.get(("cvar", name))
+    return state_event.get("value") if state_event else None
+
+
 def loadgen_joined_entity(events: list[dict]) -> int | None:
     """Return the newest positive entity id from a structured joined event."""
     for event in reversed(events):
@@ -846,10 +862,9 @@ def loadgen_expectation_failures_from_latest(
         if not math.isfinite(expected):
             failures.append(f"invalid CVar expectation {raw!r}")
             continue
-        state_event = latest.get(("cvar", name))
-        observed_raw = state_event.get("value") if state_event else None
+        observed_raw = _observed_cvar(latest, name)
         value = _finite_number(observed_raw)
-        if value is None or abs(value - expected) > 0.0001:
+        if value is None or abs(value - expected) > CVAR_ABS_TOLERANCE:
             failures.append(f"CVar {name} expected {expected:g}, observed {observed_raw!r}")
     for raw in buffs:
         try:
@@ -869,8 +884,7 @@ def loadgen_expectation_failures_from_latest(
         if not isinstance(active, bool) or active != expected:
             failures.append(f"buff {name} expected active={expected}, observed {active!r}")
     for name in positive_cvars or []:
-        state_event = latest.get(("cvar", name))
-        observed_raw = state_event.get("value") if state_event else None
+        observed_raw = _observed_cvar(latest, name)
         # NaN is not positive (<= 0 is False for it) and must not pass here.
         value = _finite_number(observed_raw)
         if value is None or value <= 0:
@@ -881,12 +895,14 @@ def loadgen_expectation_failures_from_latest(
         except ValueError:
             failures.append(f"invalid CVar equality {raw!r}")
             continue
-        left_event, right_event = latest.get(("cvar", left)), latest.get(("cvar", right))
-        left_value = left_event.get("value") if left_event else None
-        right_value = right_event.get("value") if right_event else None
+        left_value = _observed_cvar(latest, left)
+        right_value = _observed_cvar(latest, right)
         left_num = _finite_number(left_value)
         right_num = _finite_number(right_value)
-        if left_num is None or right_num is None or abs(left_num - right_num) > 0.0001:
+        if (
+            left_num is None or right_num is None
+            or abs(left_num - right_num) > CVAR_ABS_TOLERANCE
+        ):
             failures.append(
                 f"CVars {left} and {right} expected equal, observed "
                 f"{left_value!r} and {right_value!r}"
@@ -911,13 +927,12 @@ def parse_cvar_value(reply: str, name: str) -> float | None:
 
 def server_cvar_oracle_failures(
     tn: TelnetAdmin, entity_id: int, names: list[str], latest: dict[tuple[str, str], dict],
-    tolerance: float = 0.0001,
+    tolerance: float = CVAR_ABS_TOLERANCE,
 ) -> list[str]:
     """Compare server-authority CVar values with the joined bot's decoded state."""
     failures: list[str] = []
     for name in names:
-        event = latest.get(("cvar", name))
-        peer_raw = event.get("value") if event else None
+        peer_raw = _observed_cvar(latest, name)
         server_value = tn.get_cvar(name, entity_id)
         peer_value = _finite_number(peer_raw)
         if (
@@ -2303,7 +2318,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--loadgen-server-cvar-tolerance",
         type=float,
-        default=0.0001,
+        default=CVAR_ABS_TOLERANCE,
         metavar="VALUE",
         help="absolute tolerance for server-oracle versus decoded peer CVars",
     )

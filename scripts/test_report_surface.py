@@ -865,6 +865,29 @@ def test_report_summary_prints_counts_and_fails_closed() -> None:
     print("PASS report_summary counts print, hostile summaries fail closed")
 
 
+def test_feed_line_counts_nre_hits_without_the_batch_helper() -> None:
+    """The NRE scan belongs to feed_line, not to feed_lines.
+
+    A consumer that feeds the client log one line at a time (the multibyte
+    tail test above does) must still get nre_like_total over a log that did
+    crash; a split responsibility reports a clean 0 over a crashing run.
+    """
+    text = (
+        "[7dtd-playtest] PASS smoke/dig detail=ok\n"
+        "[game] noise line mentioning NullReferenceException\n"
+    )
+    line_at_a_time = playtest_log.ClientLogScan()
+    for line in text.splitlines():
+        line_at_a_time.feed_line(line)
+    batched = playtest_log.ClientLogScan()
+    batched.feed_lines(text.splitlines())
+    one = line_at_a_time.result()
+    two = batched.result()
+    assert one["nre_like_total"] == two["nre_like_total"] == 1, (one, two)
+    assert one["nre_like"] == two["nre_like"], (one, two)
+    print("PASS feed_line counts nre hits like feed_lines")
+
+
 def main() -> int:
     test_write_junit_escapes_log_derived_attributes()
     test_parse_client_log_survives_null_numbers()
@@ -874,6 +897,7 @@ def main() -> int:
     test_fuzz_parse_client_log_survives_hostile_logs()
     test_fuzz_write_junit_roundtrips_hostile_strings()
     test_incremental_scan_matches_whole_parse()
+    test_feed_line_counts_nre_hits_without_the_batch_helper()
     test_pump_log_tail_survives_truncation_between_phases()
     test_log_tail_keeps_multibyte_char_split_across_polls()
     test_log_tail_from_end_starts_at_current_size()
