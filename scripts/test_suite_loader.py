@@ -140,6 +140,31 @@ def test_reject_invalid_json() -> None:
             raise AssertionError("expected SuiteLoadError for malformed JSON")
 
 
+def test_non_utf8_suite_file_fails_closed() -> None:
+    """A suite doc is UTF-8 by contract; a cp1252 byte is a load error, not a traceback.
+
+    The orchestrator catches SuiteLoadError, so an undecodable file that
+    escaped as UnicodeDecodeError would abort the run with a stack trace
+    instead of naming the file.
+    """
+    with tempfile.TemporaryDirectory(prefix="suite-loader-") as td:
+        path = Path(td) / "cp1252.json"
+        path.write_bytes(json.dumps(MANAGED).encode("utf-8").replace(b'"x"', b'"caf\xe9"'))
+        try:
+            sl.load_suite_file(path)
+        except sl.SuiteLoadError as ex:
+            assert "not valid UTF-8" in str(ex)
+        else:
+            raise AssertionError("expected SuiteLoadError for a non-UTF-8 suite file")
+
+
+def test_non_ascii_suite_fields_load_verbatim() -> None:
+    """UTF-8 is what the loader decodes, so a non-ASCII id is carried, not mangled."""
+    with tempfile.TemporaryDirectory(prefix="suite-loader-") as td:
+        path = write(Path(td), {**MANAGED, "id": "café"}, "u.json")
+        assert sl.load_suite_file(path).id == "café"
+
+
 def test_server_values_are_stringified_for_the_game() -> None:
     """Stock ParseBool takes true/false, never Python's True/False."""
     doc = sl.parse_suite_dict(
@@ -241,6 +266,8 @@ TESTS = (
     ("reject_unknown_axes", test_reject_unknown_axes),
     ("reject_empty_and_duplicate_cases", test_reject_empty_and_duplicate_cases),
     ("reject_invalid_json", test_reject_invalid_json),
+    ("non_utf8_suite_file_fails_closed", test_non_utf8_suite_file_fails_closed),
+    ("non_ascii_suite_fields_load_verbatim", test_non_ascii_suite_fields_load_verbatim),
     ("server_values_are_stringified_for_the_game", test_server_values_are_stringified_for_the_game),
     ("external_suite_cannot_shadow_a_builtin", test_external_suite_cannot_shadow_a_builtin),
     ("resolve_mods_short_names_and_paths", test_resolve_mods_short_names_and_paths),

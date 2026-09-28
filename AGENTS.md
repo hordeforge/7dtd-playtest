@@ -332,6 +332,19 @@ belongs **here**, not in the consumer. Visual evidence uses `CaseDef.Staged`. Ne
 marker/hold/assert triple, that is what made every screenshot loop grep a
 different sentence.
 
+### Text at the boundaries
+
+Every byte that enters this repo is UTF-8, and every boundary says so:
+`read_text(encoding="utf-8")`, `subprocess.run(..., encoding="utf-8",
+errors="replace")` (`text=True` alone decodes with the process locale and
+raises on the first non-ASCII byte, which a C-locale service or CI job
+guarantees). Detail text reaches the log from remote LAN players, block and
+item names, and a verdict from the deadeye gateway, so it is not ASCII by
+assumption: the JSON encoder, the JUnit escaper (which also drops the
+characters XML 1.0 cannot represent) and the telnet reader all take it as it
+arrives. A file that will not decode is a load error naming the file, not a
+traceback past the caller's `SuiteLoadError` / `TargetError` handler.
+
 ### One concern per run. Do not mix tests.
 
 A playtest invocation proves **one concern**. Do not pile unrelated cases

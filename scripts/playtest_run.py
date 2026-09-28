@@ -1060,7 +1060,7 @@ def collect_visual_reviews(directory: Path | None) -> dict[str, str]:
     for path in sorted(directory.rglob("review-*.json")):
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
         intent = document.get("intent") or {}
         content = intent.get("content") or {}

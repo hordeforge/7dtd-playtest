@@ -264,6 +264,40 @@ def test_stop_is_best_effort_and_skips_non_sandbox() -> None:
         pt.stop_sandbox_server(pt.resolve_target(provision="managed", backend="zdtd"))
 
 
+def test_sb_output_with_non_ascii_bytes_is_decoded_not_raised() -> None:
+    """sb echoes sandbox paths, which carry the operator's home directory name.
+
+    Those bytes are UTF-8 whatever the process locale says, and a path that
+    is not even UTF-8 must not turn a healthy run into a traceback.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
+        root = Path(td)
+        _fake_sb(
+            root,
+            "printf 'ready for /home/caf\\xc3\\xa9/instances\\n'\n"
+            "printf 'raw byte: \\xe9\\n'\n",
+        )
+        proc = pt._run_sb(_plan_on(root), ["up", "srv-x"], check=False)
+        assert "café" in proc.stdout, proc.stdout
+        assert "raw byte:" in proc.stdout, proc.stdout
+
+
+def test_non_utf8_instance_env_is_named_not_ignored() -> None:
+    """A corrupt instance.env must not read as "no instance": that hands the
+    run default ports instead of this instance's."""
+    with tempfile.TemporaryDirectory(prefix="playtest-targets-") as td:
+        root = Path(td)
+        inst = root / "instances" / "srv-x"
+        inst.mkdir(parents=True)
+        (inst / "instance.env").write_bytes(b"SERVER_PORT=27105\nSERVER_GAME=/caf\xe9/game\n")
+        try:
+            pt.load_sandbox_env(root, "srv-x")
+        except pt.TargetError as ex:
+            assert "not valid UTF-8" in str(ex), ex
+        else:
+            raise AssertionError("expected TargetError for a non-UTF-8 instance.env")
+
+
 def main() -> int:
     fails = 0
     cases = [
@@ -280,6 +314,14 @@ def main() -> int:
         ("parse_sb_env_output", test_parse_sb_env_output),
         ("missing_sb_names_the_path", test_missing_sb_names_the_path),
         ("sb_failure_surfaces_its_message", test_sb_failure_surfaces_its_message),
+        (
+            "sb_output_with_non_ascii_bytes_is_decoded_not_raised",
+            test_sb_output_with_non_ascii_bytes_is_decoded_not_raised,
+        ),
+        (
+            "non_utf8_instance_env_is_named_not_ignored",
+            test_non_utf8_instance_env_is_named_not_ignored,
+        ),
         (
             "resolving_a_target_never_creates_an_instance",
             test_resolving_a_target_never_creates_an_instance,

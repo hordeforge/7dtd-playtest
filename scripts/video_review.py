@@ -357,7 +357,19 @@ def deadeye_available() -> bool:
 
 def _default_runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+        return subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            # A verdict is prose: em dashes, accents, emoji. Decoding it with
+            # the locale's encoding raises UnicodeDecodeError on the first
+            # non-ASCII byte under a C locale, which is a lost review, not a
+            # malformed one.
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
     except subprocess.TimeoutExpired as exc:
         raise ReviewError(
             f"the {GATEWAY} gateway did not answer within {timeout:g}s; no verdict was produced"

@@ -223,9 +223,15 @@ def load_sandbox_env(sandbox_root: Path, name: str) -> dict[str, str]:
     inst_env = sandbox_root / "instances" / name / "instance.env"
     if inst_env.is_file():
         try:
-            return parse_sb_env_output(inst_env.read_text(encoding="utf-8"))
+            text = inst_env.read_text(encoding="utf-8")
+        except UnicodeDecodeError as ex:
+            # sb writes UTF-8; anything else is a corrupted contract, and
+            # reading it as if it were absent would hand the run someone
+            # else's ports. Name it instead.
+            raise TargetError(f"{inst_env} is not valid UTF-8: {ex}") from ex
         except OSError:
             return {}
+        return parse_sb_env_output(text)
     return {}
 
 
@@ -405,6 +411,11 @@ def _run_sb(
             check=False,
             capture_output=True,
             text=True,
+            # sb echoes sandbox and instance paths, which carry the operator's
+            # home directory name; a locale-default decode raises on the first
+            # non-ASCII byte instead of reporting the failure.
+            encoding="utf-8",
+            errors="replace",
             cwd=str(plan.sandbox_root),
         )
     except OSError as ex:

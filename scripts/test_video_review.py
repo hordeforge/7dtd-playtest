@@ -523,6 +523,16 @@ def test_fuzz_validate_result_never_crashes_on_hostile_gateway_output() -> None:
     print("PASS result_fuzz 60 hostile gateway results fail closed or normalize")
 
 
+def test_gateway_output_is_decoded_as_utf8() -> None:
+    """A verdict is prose (em dashes, accents, emoji), so the gateway's bytes
+    are UTF-8 whatever the process locale says, and a byte that is not even
+    UTF-8 must not cost the run its review."""
+    script = r"printf 'the cuff \303\251 clips \360\237\216\211\n'; printf 'raw \xe9\n'"
+    proc = video_review._default_runner(["/bin/sh", "-c", script], 10.0)
+    assert "é" in proc.stdout and "\U0001f389" in proc.stdout, proc.stdout
+    assert "raw" in proc.stdout
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -541,6 +551,7 @@ def main() -> int:
         test_a_refused_review_keeps_an_earlier_evidence_file(root)
         test_terminal_safe_defangs_model_output()
         test_the_cli_prints_sanitized_model_text()
+        test_gateway_output_is_decoded_as_utf8()
         test_fuzz_validate_result_never_crashes_on_hostile_gateway_output()
     print("RESULT PASS")
     return 0

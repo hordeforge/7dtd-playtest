@@ -322,6 +322,11 @@ def load_suite_file(path: Path) -> SuiteDoc:
     """Load one suite JSON file."""
     try:
         text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as ex:
+        # A suite doc is UTF-8 by contract. A stray byte (a cp1252 quote from a
+        # Windows editor, a latin-1 world name) is a load failure like any
+        # other, not a traceback past the caller's SuiteLoadError handler.
+        raise SuiteLoadError(f"{path} is not valid UTF-8: {ex}") from ex
     except OSError as ex:
         raise SuiteLoadError(f"cannot read suite file {path}: {ex}") from ex
     try:
