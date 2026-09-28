@@ -171,6 +171,7 @@ GATES := \
 	test_playtest_compare.py \
 	test_capture_video_surface.py \
 	test_video_review.py \
+	test_windows_path_surface.py \
 	test_gate_list.py \
 	test_dep_sbom.py
 

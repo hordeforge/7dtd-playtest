@@ -404,7 +404,7 @@ README "Visual confirmation" has the `RegisterStaged` sample.
 
 ## Offline gates (no game install)
 
-`make test` runs lint + typecheck plus the twenty offline gate files on
+`make test` runs lint + typecheck plus the twenty-three offline gate files on
 every push (CI: `.github/workflows/ci.yml`). The analysis gates come first
 and are blocking:
 
@@ -512,6 +512,14 @@ the run order that both `make test` and `make coverage` expand):
     dependency and the csproj reference is `PrivateAssets="All"`), and derives
     a content-hash serial number. A dependency added without regenerating the
     lock, or a lockfile that stopped describing the tree, fails here offline.
+20. client-side path surface (`scripts/test_windows_path_surface.py`): the
+    host is Linux-only, but the mod runs on the client, which is a Windows
+    process under Proton. It pins what that filesystem accepts for a staged
+    frame or clip path: no empty name (which collapses onto the parent
+    directory), no reserved device name (`AUX`, `nul`, `COM1`...`LPT9`, any
+    casing, extension or not), and no path assembled from a hardcoded
+    separator. Read from the shipped C# because the mod cannot be compiled
+    offline.
 
 CI also runs a wider seed sweep with `make dst`. The mod build itself is not
 CI-able (game DLLs).
