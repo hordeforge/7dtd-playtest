@@ -24,22 +24,37 @@ UV_VERSION_ENV_RE = re.compile(
 SETUP_UV_USE_RE = re.compile(r"uses:\s*astral-sh/setup-uv@")
 UV_VERSION_REF = "${{ env.UV_VERSION }}"
 # How many lines after a `uses: astral-sh/setup-uv@` line still belong to that
-# step: the pinned action line, `with:`, and the version pin under it.
+# step: `with:`, the version pin, and the slack a reindented step needs. The
+# window has to stop before the next step's `uses:` or its lines are read as
+# this step's pin.
 SETUP_UV_STEP_LINES = 6
 
 
 def _git_dir(root: Path) -> Path | None:
-    """Resolve root/.git to a directory, following a worktree pointer file."""
+    """Resolve root/.git to the directory holding refs and packed-refs.
+
+    A linked worktree's pointer file names the per-worktree dir, whose
+    refs/ is empty and which has no packed-refs; the shared refs live in the
+    common dir that ``commondir`` points at, so follow it when present.
+    Without that hop the tag scan returns [] in every worktree and the
+    tag-coverage check passes vacuously.
+    """
     dot_git = root / ".git"
     if dot_git.is_file():
         text = dot_git.read_text(encoding="utf-8").strip()
         if not text.startswith("gitdir:"):
             return None
         target = Path(text.removeprefix("gitdir:").strip())
-        return target if target.is_absolute() else root / target
-    if dot_git.is_dir():
-        return dot_git
-    return None
+        git_dir = target if target.is_absolute() else root / target
+    elif dot_git.is_dir():
+        git_dir = dot_git
+    else:
+        return None
+    commondir = git_dir / "commondir"
+    if not commondir.is_file():
+        return git_dir
+    common = Path(commondir.read_text(encoding="utf-8").strip())
+    return common if common.is_absolute() else (git_dir / common).resolve()
 
 
 def _common_git_dir(git_dir: Path) -> Path:
@@ -113,12 +128,15 @@ def _release_spans(changelog: str) -> list[tuple[int, int, str]]:
 
 
 def undeclared_breaking_sections(changelog: str) -> list[str]:
-    """Version entries whose ``### Removed`` section omits the breaking marker.
+    """Version entries that remove something without the breaking marker.
 
     The pre-1.0 policy stated at the top of CHANGELOG.md: a minor may remove a
     public symbol, and the entry has to say so. 0.13.0 removed three
     ``Helpers`` methods without the marker, so a consumer reading the notes had
     no way to tell the removal from a dead-code tidy-up.
+
+    The marker counts anywhere in the version entry, not only under the
+    ``### Removed`` heading: the entry is the unit a reader reads.
     """
     return [
         name

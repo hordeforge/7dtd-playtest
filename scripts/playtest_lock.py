@@ -790,7 +790,12 @@ def heartbeat(
     path: Path | None = None,
     env: LockEnv | None = None,
 ) -> LockState:
-    """Refresh heartbeat for the owning session. No-op fail if not owner."""
+    """Refresh heartbeat for the owning session.
+
+    Raises PlaytestLockError(foreign_holder) rather than writing: a
+    heartbeat from a session the lock does not name would refresh a hold
+    someone else owns and keep their claim looking fresh.
+    """
     session = _require_session(session)
     e = _env(env)
     path = _lock_path(path, e)

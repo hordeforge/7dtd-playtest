@@ -44,7 +44,9 @@ def derive_seed(seed: int, label: str) -> int:
 
 
 class Rng:
-    """The one seeded randomness source. No module-level ``random`` anywhere."""
+    """The one seeded randomness source. Every draw comes from a
+    ``random.Random`` instance seeded here, never the module-level
+    ``random`` functions."""
 
     def __init__(self, seed: int, label: str = "root") -> None:
         self.seed = int(seed) & MAX_SEED
@@ -127,7 +129,8 @@ class TraceEvent:
 
 class Trace:
     """Recorded action history. Two runs of one seed must produce one digest;
-    a divergent replay is diffed line by line against this."""
+    a divergent replay fails on that digest comparison, and the trace is
+    kept (and tailed to stderr) for the failing seed."""
 
     def __init__(self) -> None:
         self.events: list[TraceEvent] = []
@@ -164,7 +167,8 @@ class Simulation:
     """Deterministic single-threaded scheduler.
 
     Actors are generators. ``yield <float>`` waits that many simulated
-    seconds; ``yield 0`` yields to any actor due at the same instant. All
+    seconds; ``yield 0`` re-queues the actor at the current instant, so
+    every actor already scheduled for that instant runs first. All
     ordering comes from (time, spawn/resume sequence), never from the OS.
     """
 

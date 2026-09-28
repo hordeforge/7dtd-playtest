@@ -298,7 +298,8 @@ def main(argv: list[str]) -> int:
             "  dep_sbom.py                      # CycloneDX JSON on stdout\n"
             "  dep_sbom.py dist/app.cdx.json    # same document, written to a file\n"
             "exit codes: 0 inventory written, 1 a committed input is missing or\n"
-            "unreadable, 2 bad usage"
+            "does not describe the tree it should (an unreadable lockfile, an\n"
+            "unrecorded license, a version the mod never declares), 2 bad usage"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

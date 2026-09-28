@@ -117,7 +117,10 @@ enforce (changelog entry, catalog/doc sync).
 
 ## One-command suites
 
-Default server is the **stock dedicated** (Navezgane, EAC off, port **26900**).
+Default server is the **stock dedicated** (Navezgane, EAC off). On the managed
+path it is a Safehouse instance and takes its port from the instance contract;
+port **26900** is the default only for a run that starts its own non-sandbox
+server, and `--port` is refused on a managed run.
 
 Full scenario list: **[SCENARIOS.md](SCENARIOS.md)** (demo / benchmark / full catalog).
 
@@ -135,7 +138,7 @@ Full scenario list: **[SCENARIOS.md](SCENARIOS.md)** (demo / benchmark / full ca
 | `make playtest-apm` | zdtd APM dump attach |
 | `make playtest-soak-long` | At least 15 minutes of host soak |
 | `make playtest-residual` | Persist + mp + apm + soak_long |
-| `make playtest-compare` | Compare stock and zdtd; defaults to `SUITE=smoke` and writes `workspace/comparison-playtest/<suite>/` |
+| `make playtest-compare` | Compare stock and zdtd; uses the Makefile's `SUITE` (`demo` unless overridden) and writes `workspace/comparison-playtest/<suite>/` |
 | `make playtest-repeat LAPS=3` | Flake detection across fresh-server laps; all laps must pass |
 
 `playtest-compare` diffs per case into `playtest-compare.{md,json}` and also
@@ -210,7 +213,7 @@ in the log without rerunning with `--help`.
 | `PLAYTEST_CONCERN_SUITES` | empty | The exact multi-id `--suite` list that is one declared concern |
 | `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach requires an explicit value |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
-| `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the run and the `scripts/capture_*.sh` helpers watch (`--print-client-log` prints the resolved path and exits). Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
+| `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the `scripts/capture_*.sh` helpers watch, and what `--print-client-log` prints before it exits. A run does not parse this path: it resolves the log from the client instance's own install. Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
 
 Booleans (`PLAYTEST_READONLY`, `PLAYTEST_TRACE_ENTITY`, `CLIENT_MUTE`) take
 `1` / `true` / `yes` / `on` or `0` / `false` / `no` / `off`, case-insensitive
@@ -228,8 +231,9 @@ warning on stderr instead of silently changing lock takeover timing.
 Automated client launches **mute the game process at the OS audio layer by
 default** (PipeWire/Pulse sink-input via `7dtd-fastconnect` `launch_client.sh` +
 orchestrator helper). This does **not** change game client settings (no
-GamePrefs / in-game audio sliders). Independent of master volume. Requires
-`pactl` and `jq`.
+GamePrefs / in-game audio sliders). Independent of master volume. Uses `pactl`
+and `jq` when they are installed; a missing one logs a warning in the mute
+helper and the run continues unmuted.
 
 | Env | Meaning |
 |---|---|
@@ -291,7 +295,7 @@ A suite is a JSON file beside your mod, passed with `--suite-file` (or
 | `readonly` | Attach only: never write to the host | `false` |
 | `fresh` | Fresh save. Hard true on managed, refused on attach | follows `provision` |
 | `server` | serverconfig pairs handed to `sb render-config` | empty |
-| `mods` / `server_mods` | Modlets staged per side. A short name is a built-in; anything else is a path relative to the suite file | `playtest`, `fastconnect` on both sides |
+| `mods` / `server_mods` | Modlets staged per side. A short name is a built-in; anything else is a path relative to the suite file | managed: `playtest`, `fastconnect` on both sides. attach: empty, and a non-empty list is refused (the run does not own the host's Mods folder) |
 | `host` | `fixtures` (host answers client barriers), `loadgen` | both `false` |
 | `cases[]` | `id`, `kind`, `ref`, `tags`, `barriers` | required |
 
@@ -434,6 +438,8 @@ provider cases):
 | `spawn_loadgen_peer` / `spawn_loadgen_bots` | Start loadgen peers/bots |
 | `bot_spawn` / `bot_player_near` | Server-side `BotMod` commands |
 | `teleport_persist_pad` | Teleport players to the persist pad |
+| `persist_setup_done` / `rejoin_setup_done` | No host action: the client reports its own phase (persist setup, rejoin setup) |
+| `parachute_lift` | Release the parachute (parachute suite) |
 | `apm_dump` | zdtd APM dump write (zdtd targets only) |
 
 Any other name is inert on this host (third-party hosts may grep their own).
@@ -764,7 +770,7 @@ Host runners (including third-party) scrape **stable** prefixes and tokens:
 [7dtd-playtest] SKIP suite/case detail
 [7dtd-playtest] barrier name
 [7dtd-playtest] scene staged name detail
-[7dtd-playtest] clip frame id index -> path
+[7dtd-playtest] clip frame id index x<superSize> -> path
 [7dtd-playtest] clip recording id superSize=N fps=M
 [7dtd-playtest] clip complete id frames=N -> playtest-shots/clips/id
 [7dtd-playtest] clip abandoned id frames=N -> playtest-shots/clips/id
@@ -915,14 +921,16 @@ Use a custom output directory and runner:
    lock handling); it is invoked as `<cmd> --suite <id>`, and defaults to this
    repo's `scripts/playtest_run.py` under `uv run --locked`. `CAPTURE_FRAMES`,
    `CAPTURE_INTERVAL` and `CAPTURE_CROP` tune the loop. It refuses to start
-   while a client or dedicated server is already up, because overlapping runs
-   photograph the wrong one. `-h` prints the full option list.
+   while a client is already up, because overlapping runs photograph the wrong
+   one. A dedicated or zdtd server does not block it: those belong to their own
+   instance and ports. `-h` prints the full option list.
 
 5. Anything a person judges by **ear** (a blast, an ambience, a cue) is
    recorded the same way with
    [`scripts/capture_audio.sh`](scripts/capture_audio.sh), which records the
    default sink's monitor for the length of one suite run and reports the
-   recording's peak amplitude, so a muted client cannot ship silence unnoticed.
+   recording's peak amplitude when `sox` is installed, so a muted client cannot
+   ship silence unnoticed on a host that has it.
    Same `--runner` contract, same refuse-to-overlap guard; the recording is
    material for a human verdict, and nothing in it judges. An empty recording
    exits 1 whatever the suite did, so a recorder that died on a busy monitor

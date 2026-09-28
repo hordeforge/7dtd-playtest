@@ -42,7 +42,9 @@ whether a case runs live, stages a scene, or is deferred, and a case asks the
 host for a fixture from inside the client with ``Report.Barrier(...)`` rather
 than through the ``barriers`` list.
 
-Unknown fields are ignored. Missing or contradictory fields fail closed.
+Unknown fields fail closed: every key outside DOCUMENT_KEYS is a
+SuiteLoadError, because a misspelled ``provision`` reads as unset. Missing or
+contradictory fields fail closed too.
 """
 
 from __future__ import annotations

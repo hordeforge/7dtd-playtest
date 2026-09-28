@@ -4,8 +4,9 @@
 The inventory is only worth trusting if it is a read of committed bytes, so
 these cases pin what a vulnerability scanner and a consumer depend on: every
 package in both lockfiles is present, each purl round-trips its locked version,
-the runtime/dev split matches what pyproject declares, every component names a
-license (or the reason it has none), and the serial number is a content hash
+the runtime/dev split matches what pyproject declares, every component names an
+SPDX license (an unrecorded one fails the inventory rather than shipping
+blank), and the serial number is a content hash
 (same tree, same id; changed tree, different id).
 """
 

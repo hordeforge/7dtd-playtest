@@ -81,12 +81,14 @@ STEAM_ROOTS = (
 CVAR_ABS_TOLERANCE = 0.0001
 
 
-# Every time read and every wait in this file goes through the clock below
-# instead of `time` directly. The run's whole timing surface (phase deadlines,
-# barrier and readiness polls, progress crumbs, the soak window) is then
-# drivable by a simulation that advances a virtual clock rather than waiting
-# out real minutes, which is the first of the seams DST.md lists as missing.
-# Production installs the real clock; nothing else differs between the two.
+# Every duration this file measures and every poll it loops on goes through the
+# clock below instead of `time` directly; `time` is read only to name a run's
+# artifacts (epoch_now, the quarantine copy's stamp). The run's whole timing
+# surface (phase deadlines, barrier and readiness polls, progress crumbs, the
+# soak window) is then drivable by a simulation that advances a virtual clock
+# rather than waiting out real minutes, which is the first of the seams DST.md
+# lists as missing. Production installs the real clock; nothing else differs
+# between the two.
 class Clock(Protocol):
     def monotonic(self) -> float: ...
     def wall(self) -> float: ...
@@ -261,15 +263,6 @@ def client_compat_for_game(game: Path, env: Mapping[str, str] | None = None) -> 
 PERSIST_PAD_XYZ = (520, 62, 950)
 PERSIST_PAD_COORDS = " ".join(str(v) for v in PERSIST_PAD_XYZ)
 
-# Client process identities shared by every pkill step (pre-run clean, rejoin
-# teardown, post-run finally): one table so a new runtime shape cannot be
-# added to one step and missed by the others. Site-specific extras (truncated
-# comm names, zdtd, loadgen) append to this list.
-# The client side only, on the managed path. A managed dedicated is a Safehouse
-# instance and is stopped by name (`sb stop`), which matches on that instance's
-# own SB_INSTANCE env: a blanket 7DaysToDieServer pkill from here would take
-# down every other sandbox instance on the machine, including another agent's
-# run.
 # The peer waits for this in the primary's log before connecting: the engine
 # rejects same-IP connects less than 500 ms apart, and two clients booting from
 # identical instances reach the menu together no matter how the launches were
@@ -286,6 +279,15 @@ TCP_PORT_MAX = 65535
 # start_loadgen joins the bots on ServerPort+2.
 LITENET_PORT_OFFSET = 2
 
+# Client process identities shared by every pkill step (pre-run clean, rejoin
+# teardown, post-run finally): one table so a new runtime shape cannot be
+# added to one step and missed by the others. Site-specific extras (truncated
+# comm names, zdtd, loadgen) append to this list.
+# The client side only, on the managed path. A managed dedicated is a Safehouse
+# instance and is stopped by name (`sb stop`), which matches on that instance's
+# own SB_INSTANCE env: a blanket 7DaysToDieServer pkill from here would take
+# down every other sandbox instance on the machine, including another agent's
+# run.
 GAME_PROC_PATTERNS = [
     r"[/]7DaysToDie\.exe",
     r"wine64-preloader.*7DaysToDie",

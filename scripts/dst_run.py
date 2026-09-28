@@ -134,7 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "a failure prints the seed, the replay command, and the tail of the\n"
             "event history on stderr; the run verdict is the exit code.\n"
-            "exit codes: 0 every seed held its invariants, 1 a seed violated one"
+            "exit codes: 0 every seed held its invariants, 1 a seed violated one,\n"
+            "2 bad usage"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

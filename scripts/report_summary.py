@@ -5,9 +5,10 @@ The lap aggregator in playtest_repeat.sh reads these three counts. It lives in
 its own file rather than inline in the shell so there is one language per file
 and the parsing is lintable and typed.
 
-A report whose summary is missing, malformed, or non-integral exits non-zero
-with nothing on stdout: the caller counts an unreadable lap as failed, so a
-silently-zeroed count would read as a clean lap.
+A report whose summary is missing, not an object, or carries a non-integral or
+negative count exits non-zero with nothing on stdout: the caller counts an
+unreadable lap as failed, so a silently-zeroed count would read as a clean
+lap. An absent count field is not that case; it reads 0.
 
 Usage: report_summary.py REPORT.json
 """

@@ -30,7 +30,7 @@ single frame, and states the reason plainly: a desktop or window screen grab
 is unreliable (the window may be unfocused, occluded, or not mapped, so it
 shows a stale or empty frame) and, on a host running more than one client,
 unsound (it photographs whatever is in front, which has repeatedly meant
-another session's client). `CaseDef.Staged` (CaseDef.cs:182) solves this for
+another session's client). `CaseDef.Staged` (CaseDef.cs:189) solves this for
 one frame: it calls `Helpers.CaptureFrame` (Helpers.Ui.cs), which uses
 Unity's own `ScreenCapture.CaptureScreenshot`, this client process's own
 framebuffer, from inside the game.
@@ -111,7 +111,7 @@ unaffected.
 
 ### `CaseDef.StagedClip`
 
-A new factory beside `CaseDef.Staged` (CaseDef.cs:182), built the same way
+A new factory beside `CaseDef.Staged` (CaseDef.cs:189), built the same way
 `Staged` is built: on top of `Live`, with the same `Report.Staged` marker
 emitted the instant staging succeeds (never at result time, for the same
 reason the doc comment on `Staged` already gives: a screenshot loop keyed on
@@ -133,8 +133,9 @@ public static CaseDef StagedClip(
 ```
 
 Internally this is `Staged`'s `wait` callback with one change: instead of a
-single `if (ctx.IntA == 1 && ctx.IntB == 0 && elapsed >= holdSeconds * 0.25f)`
-check that fires once, the clip variant tracks a frame counter in `ctx.IntB`
+single `if (ctx.IntA == 1 && ctx.IntB == 0 && elapsed >=
+Mathf.Min(1f, holdSeconds * 0.25f))` check that fires once (the clamp caps a
+short hold's first frame at one second), the clip variant tracks a frame counter in `ctx.IntB`
 and fires whenever `elapsed >= nextFrameTime`:
 
 ```csharp
@@ -212,7 +213,8 @@ same frame-sequence guarantee decoupled from staging:
 
 - `Helpers.BeginClip(id, superSize = 2, fps = 4f)` starts a clip; the
   recorder ticks on the same `GameManager.gmUpdate` hook as the scenario
-  runner (`Runner.Patch_GameManager_PlayTest.Postfix`), so it captures
+  runner (`Patch_GameManager_PlayTest.Postfix` in Runner.cs, the same hook
+`Runner.Tick()` runs on), so it captures
   between case callbacks and from any case, `Live` included.
 - `Helpers.EndClip(id)` stops it and emits the same
   `clip complete <id> frames=N` line, so `capture_video.sh` muxes the result
@@ -264,7 +266,7 @@ and what it does once the wait ends:
 ./scripts/capture_video.sh --suite <id> --out ./clips --runner ./my-wrapper.sh
 ```
 
-`CAPTURE_CLIP_ID` (default: the case id logged in `clip complete`) and
+`CAPTURE_CLIP_ID` (default: the first `clip complete` seen in the log) and
 `CAPTURE_FPS` mirror `capture_frames.sh`'s tuning environment variables.
 `CAPTURE_CROP` has no counterpart here: it crops a desktop grab to the
 client window, and every frame in a clip is already the client window at
@@ -306,9 +308,9 @@ client window, and every frame in a clip is already the client window at
   The marker parse is pinned by `scripts/test_capture_video_surface.py`,
   which runs the script's own parse fragment, so the log contract cannot
   drift from the collector.
-- [x] `capture_video.sh` refuses to start over a live client/server, same
-  guard, same reason (`playtest_lock.py live`, refusing on both "something is
-  up" and "the probe could not tell").
+- [x] `capture_video.sh` refuses to start over a live client, same guard, same
+  reason (`playtest_lock.py live`, refusing on both "something is up" and
+  "the probe could not tell"). A dedicated or zdtd server does not block it.
 - [ ] The muxed clip survives in `.local/capture/` alongside the run's
   `client.log` and run log, self-contained the same way a
   `capture_frames.sh` run already is. The source frames deliberately stay in

@@ -321,7 +321,7 @@ playtest-apm:
 # Same suite against stock AND zdtd, diffed per case into
 # workspace/comparison-playtest/<suite>/playtest-compare.{md,json}. A per-case
 # delta is a finding to triage (zdtd bug vs harness artifact vs known
-# divergence), never a pass to fake. SUITE?=smoke
+# divergence), never a pass to fake. SUITE is the Makefile default (demo).
 #
 # Integrity rule: the side dirs are wiped before each side runs, so a side
 # that fails to start (port collision, missing binary, refused lock) leaves NO

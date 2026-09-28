@@ -19,9 +19,9 @@ is byte-identical.
 ```
 make dst                       # regression seeds + 200 fresh seeds
 make dst-soak DST_SOAK_SEC=900 # tail-bug hunt, records failing seeds
-python3 scripts/dst_run.py --seed 18            # replay one run exactly
-python3 scripts/dst_run.py --regressions        # only the captured seeds
-python3 scripts/dst_run.py --agents 5 --no-faults
+uv run --locked python scripts/dst_run.py --seed 18     # replay one run exactly
+uv run --locked python scripts/dst_run.py --regressions # only the captured seeds
+uv run --locked python scripts/dst_run.py --agents 5 --no-faults
 ```
 
 200 seeds is about 200 simulated hours and takes ~2 seconds, because no wall

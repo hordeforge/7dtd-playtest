@@ -100,6 +100,7 @@ review:
 | `avoid` | Failure qualities: clipping, popping, z-fighting, wrong scale, jitter |
 | `questions` | Clip-specific concerns the reviewer must answer |
 | `suite` / `case` | The 7dtd-playtest suite and case id this clip came from, for traceability |
+| `schema_version` | Must equal the reader's `INTENT_SCHEMA_VERSION`; any other value is refused. Omit it and the reader fills in the current one |
 
 The command refuses an empty `purpose`, the same refusal the audio-review PRD
 specifies for its own intent, and for the same reason: a model told nothing
@@ -110,8 +111,9 @@ The intent is the one author-supplied text this repository hands the gateway,
 and the gateway puts it in the review prompt verbatim, so it is size-capped
 here rather than at the provider: a field over 4,000 characters, a list item
 over 1,000, a list over 50 entries, 16,000 characters in total, or an intent
-file or `--intent-text` over 64 KiB is refused by `parse_intent` before any
-upload. An unbounded field is an unbounded request: it bills, and it lets a
+file over 64 KiB (`load_intent_file`) or `--intent-text` over 64 KiB
+(`parse_intent_text`), are refused before any upload. The remaining caps are
+checked by `parse_intent`. An unbounded field is an unbounded request: it bills, and it lets a
 pasted log bury the question the review was actually asked.
 
 ### Provider input and frame budget
@@ -183,7 +185,9 @@ schema leaves no verdict-shaped file behind.
 The provider boundary is the **deadeye gateway**, not an adapter protocol
 this repository owns. `review_video.py` builds one `deadeye review` argv
 (clip path, `--intent` or `--intent-text`, `--provider`, optional `--model`,
-`--allow-network`, `--json`, `--timeout`, `--output`) and parses the single
+`--allow-network`, `--json`, `--timeout`, `--output`, `--keep-raw-response`
+only when the caller asked for it, and `--force` only to overwrite an
+existing evidence file) and parses the single
 JSON envelope it prints. Gateway availability is a PATH lookup
 (`deadeye_available`), never a network call, so `--help`, discovery, and an
 offline suite run reach no provider.
@@ -208,7 +212,10 @@ Three integration points, deliberately the only three:
 1. **Convenience chaining.** `make playtest-review-video SUITE=<id> INTENT=<path>`
    runs `capture_video.sh` then `review_video.py` against the same output
    directory, so a run's clip, its `client.log`, and its review evidence are
-   one self-contained folder under `.local/capture/`, matching the
+   one self-contained folder under `.local/capture/`. The target names that
+   folder `.local/capture/<suite>-review`, with no timestamp, so a repeated
+   run replaces the last one; a bare `capture_video.sh` uses
+   `.local/capture/<suite>-<stamp>/` instead. Matching the
    self-containment `capture_frames.sh` already established for its own
    output. Without `INTENT`, the target captures the clip and says the review
    was skipped.
@@ -240,7 +247,7 @@ Three integration points, deliberately the only three:
 | clip exceeds provider's frame/size limit | The gateway samples down and records what was dropped in its evidence; this repo adds nothing to and drops nothing from that record |
 | provider cannot ingest actual frames/video | The gateway refuses the review; a stills-incapable transcription is not a substitute |
 | provider timeout, rate limit, or refusal | Exit non-zero; no partial verdict is preserved as a completed review |
-| model returns invalid structure | Preserve a redacted raw response only when requested; fail schema validation, and leave no evidence file behind |
+| model returns invalid structure | Preserve a redacted raw response only when `--keep-raw-response` was passed; fail schema validation, and leave no evidence file behind |
 | usage/cost metadata unavailable | Mark unavailable rather than estimated |
 | repeated reviews of the same clip disagree | Preserve each, surface the disagreement |
 | model says the clip "looks right" | Record the wording as advisory only; no case's result changes |
