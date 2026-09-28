@@ -411,7 +411,11 @@ the run order that both `make test` and `make coverage` expand):
 
 1. catalog<->SCENARIOS surface (`scripts/test_catalog_surface.py`): live rows
    + counts total must equal Catalog.cs. A catalog addition that skips
-   SCENARIOS.md fails CI. The Catalog.cs readers both this gate and gate 17
+   SCENARIOS.md fails CI. It pins both directions of the barrier contract: a
+   suite that emits a fixture-serviced barrier must be listed in the host's
+   `FIXTURE_SUITE_IDS`, and every barrier Catalog emits must be a name the
+   host's `BARRIER_NAMES` routes (an unrouted one makes its case hang rather
+   than fail). The Catalog.cs readers both this gate and gate 17
    need live in `scripts/catalog_surface.py`, so a gate imports a parser
    rather than another gate.
 2. mod version surface (`scripts/test_version_surface.py`): ModInfo.xml ==
@@ -430,7 +434,9 @@ the run order that both `make test` and `make coverage` expand):
 8. deterministic simulation (`scripts/test_dst.py`)
 9. orchestrator local-init order gate (`scripts/test_no_unbound_locals.py`):
    catches the read-before-assignment crash class that once shipped in
-   `playtest_run.py` main(); only fires with real game binaries present.
+   `playtest_run.py` main(); only fires with real game binaries present. Every
+   host module under `scripts/` is in scope, taken from the directory, so a new
+   script is checked the day it lands rather than when someone remembers.
 10. orchestrator report/log surface (`scripts/test_report_surface.py`): JUnit
    and serverconfig XML attribute escaping plus parser survival on malformed
    JSON events, plus `scripts/report_summary.py` failing closed on a hostile
@@ -468,9 +474,10 @@ the run order that both `make test` and `make coverage` expand):
     declared or listed in `UNDECLARED_SUITES`.
 18. gate-list surface (`scripts/test_gate_list.py`): every `scripts/test_*.py`
     is listed in the Makefile `GATES`, every `GATES` entry exists and is
-    listed once, `test`/`coverage`/`test-one` share that one list, and CI runs
-    the same steps `make check` does. A new gate file that nobody added to
-    `GATES` runs under neither `make test` nor CI.
+    listed once, every `test_*` a gate defines is named by that gate's runner
+    (an unregistered test never executes), `test`/`coverage`/`test-one` share
+    that one list, and CI runs the same steps `make check` does. A new gate
+    file that nobody added to `GATES` runs under neither `make test` nor CI.
 18. dependency inventory (`scripts/test_dep_sbom.py`): the CycloneDX SBOM
     `make sbom` writes from `uv.lock` and `Source/PlayTestMod/packages.lock.json`
     lists every package both lockfiles resolve, carries the locked version in

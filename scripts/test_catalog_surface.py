@@ -245,6 +245,16 @@ def main() -> int:
         f"playtest_run.py FIXTURE_SUITE_IDS (their barriers would never fire): "
         f"{unlisted}"
     )
+    # The other direction: every barrier the catalog emits, including the three
+    # serviced on unconditional host paths, must be a name BARRIER_NAMES knows.
+    # A Catalog case that emits a name the host never routes to a handler waits
+    # on a barrier nobody services, and the case times out rather than fails.
+    emitted = set().union(*method_barriers.values())
+    unserviced = sorted(emitted - barrier_names)
+    assert not unserviced, (
+        "Catalog emits barriers the host has no BARRIER_NAMES entry for (they "
+        f"would never fire): {unserviced}"
+    )
     known_suites = suite_names(cat)
     aliases = expand_alias_ids(cat)
     unknown_fixture = sorted(fixture_ids - known_suites - aliases)
@@ -253,6 +263,8 @@ def main() -> int:
         f"(typo or removed suite): {unknown_fixture}"
     )
 
+    # Barrier names the orchestrator must route, pinned as quoted literals so a
+    # match in prose or a comment cannot stand in for a table entry.
     for name in (
         "kill_fixture_zombie",
         "spawn_zombie",
@@ -265,10 +277,13 @@ def main() -> int:
         "persist_setup_done",
         "apm_dump",
         "chat_echo",
-        "write_zdtd_apm_dump",
-        "start_loadgen",
     ):
-        assert name in orch, f"orchestrator missing {name}"
+        assert f'"{name}"' in orch, f"orchestrator missing the {name} barrier name"
+
+    # Host-side fixture handlers the same barriers depend on, pinned as
+    # definitions rather than as a bare substring.
+    for name in ("write_zdtd_apm_dump", "start_loadgen"):
+        assert re.search(rf"^def {name}\(", orch, re.M), f"orchestrator lost {name}()"
 
     print(
         "OK catalog surface:",

@@ -50,8 +50,21 @@ Release model (inferred practice, now pinned by `make test`):
 - **Gate-list surface** (`scripts/test_gate_list.py`, wired into the Makefile
   `GATES` list): fails when a `scripts/test_*.py` file is missing from `GATES`
   (it would run under neither `make test` nor CI) or when a `GATES` entry has
-  no file, and pins that `test`/`coverage`/`test-one` share one gate list and
-  that CI runs the same steps `make check` does.
+  no file, that a `test_*` defined in a gate is never named by that gate's own
+  runner (an unregistered test reads as coverage and never executes), and pins
+  that `test`/`coverage`/`test-one` share one gate list and that CI runs the
+  same steps `make check` does.
+- **Gates that read the orchestrator's source now read its code.**
+  `scripts/test_stock_peer_client.py` blanked the comments out before matching,
+  so a contract that was written up, commented out, or left behind by a
+  refactor no longer satisfies the check. `scripts/test_catalog_surface.py`
+  requires each barrier name as a quoted literal and each fixture handler as a
+  definition rather than as a bare substring, and pins the reverse direction of
+  the barrier contract: every barrier `Catalog.cs` emits must be a name the
+  host's `BARRIER_NAMES` routes, or its case waits on a barrier nobody
+  services. `scripts/test_no_unbound_locals.py` takes its file list from
+  `scripts/` instead of a hand-maintained tuple, so all twelve host modules it
+  was missing are checked and the next one is checked the day it lands.
 - **A removal can no longer ship undeclared.** The release model now states
   the pre-1.0 policy in full (a minor may remove a public symbol; the entry
   has to say so and name the replacement), and

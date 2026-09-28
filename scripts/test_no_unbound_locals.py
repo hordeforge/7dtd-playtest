@@ -25,16 +25,19 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
 
-# Host-side python entry points and libraries. The mod DLL is built by
-# dotnet (its own compile-time checks); these files have no other gate.
-GATED_FILES = (
-    "playtest_run.py",
-    "playtest_lock.py",
-    "playtest_compare.py",
-    "dst.py",
-    "dst_run.py",
-    "dst_sim.py",
-)
+# Every host-side python entry point and library, taken from the directory so a
+# new script is gated the day it lands. The mod DLL is built by dotnet (its own
+# compile-time checks); these files have no other gate.
+GATED_GLOBS = ("*.py",)
+
+
+def gated_files() -> list[str]:
+    return sorted(
+        path.name
+        for pattern in GATED_GLOBS
+        for path in SCRIPTS.glob(pattern)
+        if not path.name.startswith("test_")
+    )
 
 NESTED_SCOPES = (
     ast.FunctionDef,
@@ -193,17 +196,72 @@ def test_find_violations_accepts_safe_scopes() -> None:
     print("PASS unbound_locals_safe accepts params/global/comprehension/walrus/nested")
 
 
+def test_find_violations_honors_scope_boundaries() -> None:
+    """The per-language scope rules the docstring promises, each pinned.
+
+    A name bound by a comprehension target, a default, or a decorator belongs
+    to a scope of its own; the iterable of the outermost comprehension, a
+    default, and a decorator are evaluated in the enclosing one, so a read of
+    an enclosing name there before its only store is a real crash.
+    """
+    flagged = {
+        "comprehension iterable evaluates in the enclosing scope": (
+            "def f():\n    ys = [y for y in xs]\n    xs = 1\n    return ys\n",
+            "xs",
+        ),
+        "except handler binding is a store": (
+            "def f():\n    print(e)\n    try:\n        pass\n    except E as e:\n        pass\n",
+            "e",
+        ),
+        "for target is a store": (
+            "def f():\n    for i in r:\n        pass\n    r = 1\n    return i\n",
+            "r",
+        ),
+        "lambda default evaluates in the enclosing scope": (
+            "def f():\n    h = lambda q=late: q\n    late = 1\n    return h\n",
+            "late",
+        ),
+    }
+    for what, (src, name) in flagged.items():
+        probs = _violations(src)
+        assert any(f"{name!r}" in p for p in probs), f"{what} missed: {probs}"
+
+    not_flagged = {
+        "except handler name is readable in its own handler": (
+            "def f():\n    try:\n        pass\n    except E as e:\n        return e\n",
+            "e",
+        ),
+        "decorator name is not read from the decorated body": (
+            "def f():\n    pass\n@f\ndef g():\n    f = 1\n",
+            "f",
+        ),
+        "walrus inside a comprehension binds in the comprehension": (
+            "def f(xs):\n    return [(n := x) for x in xs]\n",
+            "n",
+        ),
+    }
+    for what, (src, name) in not_flagged.items():
+        probs = [p for p in _violations(src) if f"{name!r}" in p]
+        assert not probs, f"false positive, {what}:\n{src}{probs}"
+    print("PASS unbound_locals_scopes pins comprehension/default/except/decorator rules")
+
+
 def main() -> int:
     test_find_violations_flags_read_before_store()
     test_find_violations_accepts_safe_scopes()
+    test_find_violations_honors_scope_boundaries()
     failures = 0
-    for fname in GATED_FILES:
+    for fname in gated_files():
         path = SCRIPTS / fname
         if not path.is_file():
             print(f"FAIL no_unbound_locals: missing gated file {fname}")
             failures += 1
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.walk(tree)):
+            print(f"FAIL no_unbound_locals: {fname} has no function scope to check")
+            failures += 1
+            continue
         problems = find_violations(tree)
         if problems:
             failures += 1

@@ -9,6 +9,7 @@ stay the ones `make check` performs.
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -106,15 +107,59 @@ def check_documented() -> None:
     )
 
 
+def orphan_tests(gate: Path) -> list[str]:
+    """Module-level ``test_*`` functions the gate's own runner never names.
+
+    A script gate dispatches through a hand-maintained registry (a ``TESTS``
+    tuple, a list of cases, direct calls in ``main``). A test left out of that
+    registry is dead weight: it reads as coverage in review and never runs, so
+    the assertion it makes is the one nobody gets. Gates that hand themselves to
+    pytest collect by definition, so they are exempt.
+    """
+    src = gate.read_text(encoding="utf-8")
+    if "pytest.main" in src:
+        return []
+    tree = ast.parse(src, filename=str(gate))
+    defined = {
+        n.name
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
+    }
+    if not defined:
+        return []
+    referenced: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            referenced.add(node.attr)
+    return sorted(defined - referenced)
+
+
+def check_every_gate_test_runs() -> None:
+    orphans = {
+        name: found
+        for name in (p.name for p in sorted(SCRIPTS.glob("test_*.py")))
+        if (found := orphan_tests(SCRIPTS / name))
+    }
+    detail = "\n  ".join(f"{n}: {', '.join(f)}" for n, f in orphans.items())
+    assert not orphans, (
+        "test function(s) defined but never named by their gate's runner, so "
+        f"they never execute:\n  {detail}"
+    )
+
+
 def main() -> int:
     check_list()
     check_test_and_coverage_share_one_list()
     check_ci_matches_check_target()
+    check_every_gate_test_runs()
     check_documented()
     print("PASS every scripts/test_*.py is listed in the Makefile GATES")
     print("PASS every GATES entry exists and is listed once")
     print("PASS make test / make coverage / make test-one share one gate list")
     print("PASS CI runs the same steps make check does")
+    print("PASS every test_* in a gate is dispatched by that gate's runner")
     print("RESULT PASS")
     return 0
 
