@@ -177,6 +177,13 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- **One copy of the capture scripts' shared plumbing.**
+  `scripts/capture_common.sh` holds the live-run guard (three identical
+  copies), the byte-offset log gate and the `stop_run` teardown (two copies
+  each), and `capture_audio.sh`, `capture_frames.sh` and `capture_video.sh`
+  source it. A fix to one copy used to leave the others answering a question
+  they no longer asked. `scripts/test_capture_video_surface.py` runs the
+  shared text and fails if a script goes back to a private copy.
 - **One boolean spelling table for every env knob.** `PLAYTEST_READONLY`,
   `PLAYTEST_TRACE_ENTITY` and `CLIENT_MUTE` accepted different token sets, so
   `PLAYTEST_READONLY=false` armed readonly while `PLAYTEST_TRACE_ENTITY=yes`

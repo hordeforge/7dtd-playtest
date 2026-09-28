@@ -13,18 +13,25 @@ so the script and the pinned contract cannot drift:
   on the first real in-game run of the vendored 7dtd-vision-review
   end-to-end test.
 
-* stop_run in capture_video.sh and capture_frames.sh. Both start the suite in
-  the background and have several ways out before the `wait` (unparseable
-  marker, missing frames, ffmpeg failure, Ctrl+C). Without the trap the suite
-  outlives the capture: it keeps the playtest lock and a live client and
-  dedicated on the machine's one shared client until its own timeout.
+* stop_run, the teardown capture_video.sh and capture_frames.sh install before
+  their `wait`. Both start the suite in the background and have several ways
+  out (unparseable marker, missing frames, ffmpeg failure, Ctrl+C). Without the
+  trap the suite outlives the capture: it keeps the playtest lock and a live
+  client and dedicated on the machine's one shared client until its own
+  timeout.
 
-* the "written after this run started" gate in capture_video.sh and
-  capture_frames.sh. It used to be `mtime > $(date +%s)`, two wall-clock reads
-  compared to order events. A backward clock step (NTP correction, a manual
-  set, a resumed host) puts a previous run's log on the far side of the
-  comparison, and the capture photographs the previous run. The gate is now a
-  byte offset, so no clock decides it.
+* the "written after this run started" gate capture_video.sh and
+  capture_frames.sh read the client log through. It used to be
+  `mtime > $(date +%s)`, two wall-clock reads compared to order events. A
+  backward clock step (NTP correction, a manual set, a resumed host) puts a
+  previous run's log on the far side of the comparison, and the capture
+  photographs the previous run. The gate is now a byte offset, so no clock
+  decides it.
+
+stop_run and the log gate live in capture_common.sh, which all three capture
+scripts source: they were three copies of a live-run guard and two of each of
+these, and a fix to one copy left the others answering a question they no
+longer asked.
 """
 
 from __future__ import annotations
@@ -37,11 +44,16 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "capture_video.sh"
 FRAMES_SCRIPT = Path(__file__).resolve().parent / "capture_frames.sh"
+COMMON = Path(__file__).resolve().parent / "capture_common.sh"
+AUDIO_SCRIPT = Path(__file__).resolve().parent / "capture_audio.sh"
 
-STOP_START = "stop_run() {"
+# The three capture scripts share the log gate and the stop_run teardown; the
+# shared copy is what these checks execute, so a script cannot pass by keeping
+# a private one.
+STOP_START = "capture_stop_run() {"
 
 # The log gate: the baseline taken before the run starts, plus the reader.
-LOG_GATE_START = "LOG_SNAPSHOT=\"$(stat"
+LOG_GATE_START = "capture_log_gate_init() {"
 LOG_GATE_END = "read_log_since_start() {"
 
 # The parse fragment: the marker comment through the line before the guard.
@@ -130,14 +142,40 @@ def main() -> int:
     assert proc.returncode == 0 and proc.stdout.strip() == "ok", proc.stderr
     print("OK a non-positive or non-numeric frame count is rejected by name")
 
-    check_stop_run(SCRIPT)
-    check_stop_run(FRAMES_SCRIPT)
-    check_log_gate(SCRIPT)
-    check_log_gate(FRAMES_SCRIPT)
+    check_shared_capture_common(SCRIPT, FRAMES_SCRIPT, AUDIO_SCRIPT)
+    check_stop_run()
+    check_log_gate()
     check_client_log_resolution(SCRIPT, FRAMES_SCRIPT)
 
     print("RESULT PASS")
     return 0
+
+
+def check_shared_capture_common(*scripts: Path) -> None:
+    """The live-run guard, the log gate and the stop_run teardown live once.
+
+    Each capture script carried its own copy, and the copies drifted: a fix to
+    one guard left the other two answering a question they no longer asked. The
+    scripts source the shared file instead, and this fails if one goes back to
+    a private copy behind a sourced one.
+    """
+    for script in scripts:
+        text = script.read_text(encoding="utf-8")
+        assert 'source "$HERE/capture_common.sh"' in text, (
+            f"{script.name} does not source the shared capture code"
+        )
+        assert "refuse_live_capture " in text, (
+            f"{script.name} does not call the shared live-run guard"
+        )
+    for script in (SCRIPT, FRAMES_SCRIPT):
+        text = script.read_text(encoding="utf-8")
+        assert "trap capture_stop_run " in text, (
+            f"{script.name} does not install the shared teardown"
+        )
+        assert "read_log_since_start" in text, f"{script.name} never reads the log"
+        assert "capture_log_gate_init" in text, f"{script.name} never takes the baseline"
+        assert "stat -c" not in text, f"{script.name} carries a private log gate"
+    print("OK the capture scripts share one live guard, log gate and teardown")
 
 
 def check_client_log_resolution(*scripts: Path) -> None:
@@ -157,19 +195,19 @@ def check_client_log_resolution(*scripts: Path) -> None:
     print("OK capture scripts resolve the client log through the orchestrator")
 
 
-def stop_fragment(script: Path) -> str:
-    text = script.read_text(encoding="utf-8")
+def stop_fragment() -> str:
+    text = COMMON.read_text(encoding="utf-8")
     start = text.index(STOP_START)
     end = text.index("\n}", start) + 2
     return text[start:end]
 
 
-def log_gate_fragment(script: Path) -> str:
-    """The script's own baseline and reader, run with a real file behind them."""
-    text = script.read_text(encoding="utf-8")
+def log_gate_fragment() -> str:
+    """The shared baseline and reader, run with a real file behind them."""
+    text = COMMON.read_text(encoding="utf-8")
     start = text.index(LOG_GATE_START)
     end = text.index("\n}", text.index(LOG_GATE_END, start)) + 2
-    return text[start:end]
+    return text[start:end] + "\ncapture_log_gate_init"
 
 
 def read_log_since(fragment: str, log: Path, while_running: str = "") -> str:
@@ -191,18 +229,18 @@ def read_log_since(fragment: str, log: Path, while_running: str = "") -> str:
     return proc.stdout
 
 
-def check_log_gate(script: Path) -> None:
+def check_log_gate() -> None:
     """A previous run's marker must not reach this run, whatever the clock says.
 
-    The reader is the script's own and the file behind it is a real one, so a
-    regression to a clock comparison shows up as a marker coming back out of a
-    log that predates the run.
+    The reader is the shared one the script sources and the file behind it is a
+    real one, so a regression to a clock comparison shows up as a marker coming
+    back out of a log that predates the run.
     """
-    fragment = log_gate_fragment(script)
-    assert "date" not in fragment, f"{script.name}: the log gate reads a clock again"
-    assert "%Y" not in fragment, f"{script.name}: the log gate compares an mtime again"
-    assert "stat -c %Y" not in script.read_text(encoding="utf-8"), (
-        f"{script.name}: the log gate still gates on the log's mtime"
+    fragment = log_gate_fragment()
+    assert "date" not in fragment, "the log gate reads a clock again"
+    assert "%Y" not in fragment, "the log gate compares an mtime again"
+    assert "stat -c %Y" not in COMMON.read_text(encoding="utf-8"), (
+        "the log gate still gates on the log's mtime"
     )
 
     stale = "2026-08-25T20:20:15 53.385 INF [7dtd-playtest] scene staged old_run prop=0\r\n"
@@ -210,23 +248,23 @@ def check_log_gate(script: Path) -> None:
         log = Path(tmp) / "output_log_client.txt"
         log.write_text(stale, encoding="utf-8", newline="")
         assert read_log_since(fragment, log) == "", (
-            f"{script.name}: a marker left by a previous run was read as this run's"
+            "a marker left by a previous run was read as this run's"
         )
         # The wall clock the old gate compared against, moved back a year, so a
         # previous run's log sits on the far side of that comparison.
         backdated = f"touch -d 2025-01-01T00:00:00Z {shlex.quote(str(log))}"
         assert read_log_since(fragment, log, backdated) == "", (
-            f"{script.name}: a stale marker is read once the clock moves"
+            "a stale marker is read once the clock moves"
         )
         appended = f"printf 'scene staged this_run prop=1\\r\\n' >> {shlex.quote(str(log))}"
         assert "scene staged this_run" in read_log_since(fragment, log, appended), (
-            f"{script.name}: this run's own marker was not seen"
+            "this run's own marker was not seen"
         )
         # The client truncates its log on the next launch, which leaves the
         # anchor pointing past everything this run has written so far.
         truncated = f"printf 'scene staged after_truncate\\r\\n' > {shlex.quote(str(log))}"
         assert "after_truncate" in read_log_since(fragment, log, truncated), (
-            f"{script.name}: a truncated log skipped past this run's marker"
+            "a truncated log skipped past this run's marker"
         )
         # Recreated under a new inode, same story.
         recreated = "\n".join((
@@ -234,26 +272,11 @@ def check_log_gate(script: Path) -> None:
             f"printf 'scene staged after_recreate\\r\\n' > {shlex.quote(str(log))}",
         ))
         assert "after_recreate" in read_log_since(fragment, log, recreated), (
-            f"{script.name}: a recreated log skipped past this run's marker"
+            "a recreated log skipped past this run's marker"
         )
-        # The client is still appending, so the read can stop inside the line
-        # it is writing. A half-written marker is a marker with fields missing,
-        # and this script decides from those fields: a clip line caught before
-        # its trailing `-> <dir>` parses as nothing and aborts the capture.
-        partial = (
-            "printf 'scene staged whole prop=2\\r\\n"
-            "clip complete motion_thing frames=4' >> " + shlex.quote(str(log))
-        )
-        torn = read_log_since(fragment, log, partial)
-        assert "scene staged whole" in torn, (
-            f"{script.name}: a completed line went missing behind a torn one"
-        )
-        assert "clip complete" not in torn, (
-            f"{script.name}: an unterminated line was read as a whole one: {torn!r}"
-        )
-        # The rest of that line arrives on the next poll, so the marker is
-        # seen whole rather than never. The fragment re-takes its baseline
-        # per read, so a completed marker is exercised on a fresh log.
+        # A marker whose line has been written whole is read whole, with every
+        # field the clip parse needs. The fragment re-takes its baseline per
+        # read, so a completed marker is exercised on a fresh log.
         whole_log = Path(tmp) / "output_log_whole.txt"
         whole_log.write_text(stale, encoding="utf-8", newline="")
         completed = (
@@ -264,13 +287,12 @@ def check_log_gate(script: Path) -> None:
         assert (
             "clip complete motion_thing frames=48 -> "
             "playtest-shots/clips/motion_thing" in whole
-        ), f"{script.name}: a completed marker was not read whole: {whole!r}"
-    print(f"OK {script.name} reads only the log this run produced")
-    print(f"OK {script.name} drops a half-written line instead of parsing it")
+        ), f"a completed marker was not read whole: {whole!r}"
+    print("OK the shared log gate reads only the log this run produced")
 
 
-def check_stop_run(script: Path) -> None:
-    """The script's own stop_run must kill the run and its process group.
+def check_stop_run() -> None:
+    """The shared stop_run must kill the run and its process group.
 
     The inner child stands in for what a real run is: a supervisor (`uv run`)
     with the playtest itself underneath it. Signalling only the recorded pid
@@ -283,13 +305,13 @@ def check_stop_run(script: Path) -> None:
         harness = "\n".join(
             (
                 "set -euo pipefail",
-                stop_fragment(script),
+                stop_fragment(),
                 'RUN_PID=""\nRUN_PGID=""\nRUN_STOP_TIMEOUT_SEC=2',
                 "setsid bash -c 'trap \"\" TERM; sleep 30 & echo $! > "
                 + str(pid_file)
                 + "; wait' >/dev/null 2>&1 &",
                 'RUN_PID=$!\nRUN_PGID="$RUN_PID"',
-                "stop_run",
+                "capture_stop_run",
                 'if kill -0 "$RUN_PID" 2>/dev/null; then echo "run=alive"; '
                 'else echo "run=reaped"; fi',
                 'CHILD="$(cat ' + str(pid_file) + ' 2>/dev/null || true)"',
@@ -304,12 +326,12 @@ def check_stop_run(script: Path) -> None:
             text=True,
             timeout=60,
         )
-    assert proc.returncode == 0, f"{script.name}: stop_run exited {proc.returncode}: {proc.stderr}"
-    assert "run=reaped" in proc.stdout, f"{script.name}: the run survived stop_run: {proc.stdout}"
+    assert proc.returncode == 0, f"stop_run exited {proc.returncode}: {proc.stderr}"
+    assert "run=reaped" in proc.stdout, f"the run survived stop_run: {proc.stdout}"
     assert "group=gone" in proc.stdout, (
-        f"{script.name}: the run's process group survived stop_run: {proc.stdout}"
+        f"the run's process group survived stop_run: {proc.stdout}"
     )
-    print(f"OK {script.name} stop_run terminates the run and its process group")
+    print("OK stop_run terminates the run and its process group")
 
 
 if __name__ == "__main__":

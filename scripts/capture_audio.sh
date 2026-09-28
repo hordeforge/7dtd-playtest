@@ -30,6 +30,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
+# shellcheck source=scripts/capture_common.sh
+source "$HERE/capture_common.sh"
 
 SUITE="${PLAYTEST_SUITE:-}"
 OUT=""
@@ -60,32 +62,9 @@ RUNNER="${RUNNER:-${PY[*]} $HERE/playtest_run.py --suite}"
 command -v parec >/dev/null || { echo "ERROR: parec (PulseAudio/PipeWire) is required" >&2; exit 2; }
 command -v pactl >/dev/null || { echo "ERROR: pactl is required" >&2; exit 2; }
 
-# Refuse to start on top of a live run: the monitor records the whole sink, so
-# an overlapping run's audio lands in this recording and nobody can tell whose
-# blast was heard.
-#
-# pgrep -f on the command line would match any process whose cmdline merely
-# contains the game's name, which includes the monitoring commands a session
-# runs while watching a run. Instead reuse the orchestrator's own runtime
-# probe (playtest_lock): it inspects each process's executable, so the
-# stock/Proton client (including the Wine preloader phase) is detected with no
-# drift between this guard and the runner's lock. `live` reports the client
-# only: a stock dedicated or a zdtd owns its own instance and ports, so
-# neither blocks a capture.
-runtime_rc=0
-"${PY[@]}" "$HERE/playtest_lock.py" live || runtime_rc=$?
-case $runtime_rc in
-	0) : ;;
-	1)
-		echo "ERROR: a 7 Days to Die client is already running." >&2
-		echo "       Let it finish before capturing; overlapping runs record each other." >&2
-		exit 1
-		;;
-	*)
-		echo "ERROR: could not verify that no 7 Days to Die runtime is live; refusing." >&2
-		exit 2
-		;;
-esac
+# The monitor records the whole sink, so an overlapping run's audio lands in
+# this recording and nobody can tell whose blast was heard.
+refuse_live_capture "record each other"
 
 SINK="$(pactl get-default-sink 2>/dev/null)"
 [[ -n "$SINK" ]] || { echo "ERROR: no default sink" >&2; exit 2; }

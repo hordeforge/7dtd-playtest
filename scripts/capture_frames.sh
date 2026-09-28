@@ -40,6 +40,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
+# shellcheck source=scripts/capture_common.sh
+source "$HERE/capture_common.sh"
 
 SUITE="${PLAYTEST_SUITE:-}"
 OUT=""
@@ -83,34 +85,7 @@ command -v magick >/dev/null || { echo "ERROR: ImageMagick (magick) is required"
 # no run was writing.
 CLIENT_LOG="$("${PY[@]}" "$HERE/playtest_run.py" --print-client-log)"
 
-# Refuse to start on top of a live run: the previous run's client is still
-# writing that log, so a "newer than start" check passes against ITS marker and
-# the frames belong to the wrong run.
-#
-# pgrep -f on the command line would match any process whose cmdline merely
-# contains the game's name, which includes the monitoring commands a session
-# runs while watching a run (a `tail -f` of the client log, a `pgrep` in a
-# wait loop). That false positive is not theoretical. Instead reuse the
-# orchestrator's own runtime probe (playtest_lock): it inspects each
-# process's executable, so the stock/Proton client (including the Wine
-# preloader phase) is detected with no drift between this guard and the
-# lock the runner itself enforces. `live` reports the client only: a stock
-# dedicated or a zdtd belongs to its own instance and ports, so neither
-# blocks a capture.
-runtime_rc=0
-"${PY[@]}" "$HERE/playtest_lock.py" live || runtime_rc=$?
-case $runtime_rc in
-	0) : ;;
-	1)
-		echo "ERROR: a 7 Days to Die client is already running." >&2
-		echo "       Let it finish before capturing; overlapping runs photograph the wrong one." >&2
-		exit 1
-		;;
-	*)
-		echo "ERROR: could not verify that no 7 Days to Die runtime is live; refusing." >&2
-		exit 2
-		;;
-esac
+refuse_live_capture "photograph the wrong one"
 
 mkdir -p "$OUT"
 # A reused --out must not mix takes: every artifact below has a name only this
@@ -121,50 +96,7 @@ mkdir -p "$OUT/cropped"
 rm -f "$OUT"/cropped/frame-*.png
 RUN_LOG="$OUT/run.log"
 
-# Where this run's log begins, as a byte offset into the client log as it is
-# right now. "Written after this run started" is a fact about the file's
-# contents, so it is answered with an offset rather than by comparing the log's
-# mtime against `date`: an NTP correction, a manual clock change or a resumed
-# host moves the wall clock under the run and inverts that comparison, which
-# lets a previous run's marker trigger this one.
-LOG_SNAPSHOT="$(stat -c '%i %s' "$CLIENT_LOG" 2>/dev/null || echo '0 0')"
-LOG_INODE="${LOG_SNAPSHOT%% *}"
-LOG_BASE="${LOG_SNAPSHOT##* }"
-
-# NEW_LOG: the part of the client log this run has produced. A log the client
-# recreated or truncated carries no baseline to skip, so the anchor resets to
-# its new zero rather than skipping past everything this run wrote.
-#
-# The client appends to this file while we read it, so the read is pinned to
-# one stat snapshot (head -c "$size", not a bare tail) and the unterminated
-# last line is dropped. A marker caught half-written is a marker with fields
-# missing: the clip line would parse as a smaller frame count and abort the
-# capture on a line the next poll would have read whole.
-read_log_since_start() {
-	local snapshot inode size chunk
-	snapshot="$(stat -c '%i %s' "$CLIENT_LOG" 2>/dev/null || echo '0 0')"
-	inode="${snapshot%% *}"
-	size="${snapshot##* }"
-	if [[ "$inode" != "$LOG_INODE" ]] || (( size < LOG_BASE )); then
-		LOG_INODE="$inode"
-		LOG_BASE=0
-	fi
-	NEW_LOG=""
-	if (( size > LOG_BASE )); then
-		# The trailing x survives command substitution's newline stripping,
-		# so a snapshot that ended mid-line is still recognisable below.
-		chunk="$(head -c "$size" -- "$CLIENT_LOG" | tail -c "+$((LOG_BASE + 1))"; printf x)"
-		chunk="${chunk%x}"
-		if [[ -z "$chunk" ]]; then
-			NEW_LOG=""
-		elif [[ "$chunk" == *$'\n' ]]; then
-			NEW_LOG="${chunk%$'\n'}"
-		else
-			NEW_LOG="${chunk%$'\n'*}"
-		fi
-	fi
-	return 0
-}
+capture_log_gate_init
 
 echo "CAPTURE FRAMES"
 echo "  suite         $SUITE"
@@ -174,44 +106,10 @@ echo "  client log    $CLIENT_LOG"
 echo "  marker        $MARKER"
 echo
 
-# Every path out of this script before the `wait` below must stop the run it
-# started. The suite holds the playtest exclusivity lock, and with it a live
-# client and dedicated, so a capture that gives up or is interrupted leaves the
-# machine's one shared client busy until the run's own timeout. setsid puts
-# the run in its own process group, so the teardown signals the orchestrator
-# and everything it spawned, not just the pid the shell happened to record.
 RUN_PID=""
 RUN_PGID=""
 RUN_STOP_TIMEOUT_SEC="${RUN_STOP_TIMEOUT_SEC:-30}"
-stop_run() {
-	if [[ -z "$RUN_PID" ]] || ! kill -0 "$RUN_PID" 2>/dev/null; then
-		return 0
-	fi
-	# TERM, not KILL: the orchestrator converts it into its own teardown
-	# (stop the runtimes, release the lock) instead of being cut off mid-run.
-	if [[ -n "$RUN_PGID" ]]; then
-		kill -TERM -- "-$RUN_PGID" 2>/dev/null || true
-	else
-		kill -TERM "$RUN_PID" 2>/dev/null || true
-	fi
-	# Bounded: a run that has already wedged (or one that ignores TERM) must
-	# not hold this script's exit open, which is the very path that exists to
-	# let the machine go.
-	local deadline=$((SECONDS + RUN_STOP_TIMEOUT_SEC))
-	while kill -0 "$RUN_PID" 2>/dev/null && (( SECONDS < deadline )); do
-		sleep 0.2
-	done
-	if kill -0 "$RUN_PID" 2>/dev/null; then
-		echo "ERROR: the suite ignored SIGTERM for ${RUN_STOP_TIMEOUT_SEC}s; killing it" >&2
-		if [[ -n "$RUN_PGID" ]]; then
-			kill -KILL -- "-$RUN_PGID" 2>/dev/null || true
-		else
-			kill -KILL "$RUN_PID" 2>/dev/null || true
-		fi
-	fi
-	wait "$RUN_PID" 2>/dev/null || true
-}
-trap stop_run EXIT INT TERM
+trap capture_stop_run EXIT INT TERM
 
 # The suite in the background; the loop reads only the part of the client log
 # that appeared after the baseline above, so a marker left by a previous run
