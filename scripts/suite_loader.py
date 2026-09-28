@@ -50,9 +50,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Keep in sync with playtest_targets (avoid an import cycle in the gates).
-ALLOWED_PROVISIONS = ("managed", "attach")
-ALLOWED_BACKENDS = ("stock", "zdtd")
+import playtest_targets
+
+# The two target axes are named once, in playtest_targets, which owns their
+# resolution; this loader only re-exports the vocabularies so the gates and
+# the published schema can read the allowed values from one place.
+ALLOWED_PROVISIONS: tuple[str, ...] = playtest_targets.PROVISIONS
+ALLOWED_BACKENDS: tuple[str, ...] = playtest_targets.BACKENDS
 ALLOWED_KINDS = ("live", "staged", "defer")
 
 # Both sides run the same mods by default, which is this workspace's documented

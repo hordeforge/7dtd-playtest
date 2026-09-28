@@ -1902,6 +1902,25 @@ def test_telnet_admin_pinned_to_loopback() -> None:
     print("PASS telnet_admin_pinned_to_loopback")
 
 
+def test_explicit_server_flag_beats_the_suite_document() -> None:
+    """Whichever spoke last about the backend wins, in a fixed order.
+
+    The suite document supplies the backend for an undecorated run; an
+    explicit ``--server`` (any spelling) and PLAYTEST_BACKEND outrank it. The
+    flag used to be detected by searching the argument list for the exact
+    token ``--server``, so ``--server=zdtd`` read as "not given" and the
+    stock suite document silently moved the run back to the stock dedicated.
+    """
+    rb = playtest_run.resolve_backend
+    assert rb("zdtd", "stock", None) == "zdtd"
+    assert rb("stock", "zdtd", None) == "stock"
+    assert rb(None, "stock", "zdtd") == "zdtd"
+    assert rb(None, "zdtd", None) == "zdtd"
+    assert rb(None, None, None) == "stock"
+    assert rb("", "stock", None) == "stock"
+    print("PASS explicit_server_flag_beats_the_suite")
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -2028,6 +2047,10 @@ def main() -> int:
         (
             "telnet_admin_pinned_to_loopback",
             test_telnet_admin_pinned_to_loopback,
+        ),
+        (
+            "explicit_server_flag_beats_the_suite",
+            test_explicit_server_flag_beats_the_suite_document,
         ),
     ):
         try:

@@ -2046,6 +2046,26 @@ def heartbeat_claim_lost(heartbeat: playtest_lock.HeartbeatThread | None) -> boo
     return heartbeat is not None and heartbeat.loop.lost_claim
 
 
+def resolve_backend(
+    backend_flag: str | None, suite_backend: str | None, env_backend: str | None
+) -> str:
+    """Which server this run targets: flag, then env, then the suite document.
+
+    Precedence is by who said it most recently and most explicitly. The
+    operator's ``--server`` (any spelling, including ``--server=zdtd``) wins;
+    then ``PLAYTEST_BACKEND``; then the suite document's ``backend``, which is
+    what makes an undecorated ``--suite core`` reproducible. With nobody
+    speaking, stock.
+    """
+    if backend_flag:
+        return backend_flag
+    if env_backend:
+        return env_backend
+    if suite_backend:
+        return suite_backend
+    return "stock"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="stock-client playtest orchestrator",
@@ -2122,10 +2142,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--server",
-        choices=("stock", "zdtd"),
-        default=os.environ.get("PLAYTEST_SERVER", "stock"),
+        choices=playtest_targets.BACKENDS,
+        # None means "the operator said nothing": the suite document may then
+        # speak for the backend. Whether a flag was passed is the parser's
+        # job, not a search through sys.argv (which misses --server=zdtd).
+        default=os.environ.get("PLAYTEST_SERVER") or None,
         help=(
-            "which server is under test (env PLAYTEST_SERVER; default stock)"
+            "which server is under test (env PLAYTEST_SERVER; a suite "
+            "document supplies it when neither is given; default stock)"
         ),
     )
     ap.add_argument(
@@ -2393,12 +2417,14 @@ def main(argv: list[str] | None = None) -> int:
     # the suite is what makes an undecorated `--suite core` reproducible.
     provision_raw = (args.provision or "").strip() or None
     readonly = bool(args.readonly)
-    backend_raw = args.server
+    backend_raw = resolve_backend(
+        args.server,
+        suite_doc.backend if suite_doc is not None else None,
+        os.environ.get("PLAYTEST_BACKEND"),
+    )
     if suite_doc is not None:
         if provision_raw is None:
             provision_raw = suite_doc.provision
-        if not os.environ.get("PLAYTEST_BACKEND") and "--server" not in (argv or sys.argv[1:]):
-            backend_raw = suite_doc.backend
         readonly = readonly or suite_doc.readonly
     try:
         target_plan = playtest_targets.resolve_target(

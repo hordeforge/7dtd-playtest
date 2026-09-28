@@ -92,6 +92,21 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Fixed
 
+- **The backend a run targeted was not the one that was asked for.**
+  `playtest_run.py` decided whether the operator had passed `--server` by
+  searching the argument list for that exact token, so `--server=zdtd` read as
+  "not given" and the suite document's `backend` quietly sent the run to the
+  stock dedicated instead. `PLAYTEST_BACKEND` was dead for the same reason:
+  the argparse default was a literal `stock`, so `resolve_target` never
+  reached its env fallback. The parser now reports a `None` default and
+  `resolve_backend` ranks flag, then env, then suite document.
+- **A suite document's `kind` could contradict the case it names.** `kind` is
+  the one field in a document that states how a case runs, and it is a copy of
+  what `CaseDef.Live` / `CaseDef.Defer` already decided, with nothing
+  comparing the two: a document could declare `live` for a deferred case (the
+  report then shows a skip the suite never declared) or `defer` for a live
+  one (a green run that measured nothing). `catalog_surface` reads the factory
+  per case and `test_suite_refs` fails on the drift.
 - **Reruns no longer answer with the previous run's state.** A run that died
   before its poll loop ended left `<logdir>/run-ended` behind, so a rerun's
   capture loop saw a stale end marker and stopped instead of photographing

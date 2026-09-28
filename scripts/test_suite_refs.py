@@ -21,7 +21,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import suite_loader
-from catalog_surface import CATALOG, REF_PREFIX, add_method_case_ids, append_suite_map
+from catalog_surface import (
+    CATALOG,
+    REF_PREFIX,
+    add_method_case_ids,
+    add_method_case_kinds,
+    append_suite_map,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "Source" / "PlayTestMod" / "Runner.cs"
@@ -146,10 +152,61 @@ def test_undeclared_suites_are_listed() -> None:
     print("PASS undeclared_suites_are_listed")
 
 
+def catalog_case_kinds() -> dict[str, dict[str, str]]:
+    """Suite id -> case id -> the kind its factory builds, from Catalog.cs."""
+    src = CATALOG.read_text(encoding="utf-8")
+    by_method = add_method_case_kinds(src)
+    out: dict[str, dict[str, str]] = {}
+    for suite, adds in append_suite_map(src).items():
+        kinds: dict[str, str] = {}
+        for add in adds:
+            for case_id, kind in by_method.get(add, {}).items():
+                if case_id in kinds and kinds[case_id] != kind:
+                    raise AssertionError(
+                        f"catalog case {suite}.{case_id} is built both live and "
+                        "deferred; its declared kind is ambiguous"
+                    )
+                kinds[case_id] = kind
+        out[suite] = kinds
+    return out
+
+
+def test_declared_kind_matches_the_implementation() -> None:
+    """A case's declared kind is the kind its CaseDef factory builds.
+
+    ``kind`` is the only field in a suite document that states how a case
+    runs, and it is a copy: CaseDef.Live runs, CaseDef.Defer records a skip.
+    Nothing consumed the copy, so a document could claim ``live`` for a case
+    the client defers (the report then shows a skip the suite never declared)
+    or ``defer`` for a live one (a green run that measured nothing). Pinning
+    them here is what keeps the copy true.
+    """
+    implemented = catalog_case_kinds()
+    drift: list[str] = []
+    for suite_id, doc in sorted(suite_loader.discover_suites().items()):
+        for case in doc.cases:
+            if not case.ref.startswith(REF_PREFIX):
+                # An external provider owns how its case runs; no catalog ref
+                # pins it offline.
+                continue
+            case_name = case.ref[len(REF_PREFIX) :].partition(".")[2]
+            expected = implemented.get(suite_id, {}).get(case_name)
+            if expected is None:
+                continue  # reported by the implementation gate
+            if case.kind != expected:
+                drift.append(
+                    f"{suite_id}/{case.id}: declares kind {case.kind!r}, "
+                    f"Catalog builds it {expected!r}"
+                )
+    assert not drift, "declared case kind does not match Catalog.cs:\n  " + "\n  ".join(drift)
+    print("PASS declared_kind_matches_the_implementation")
+
+
 TESTS = (
     test_ref_format_is_pinned_on_both_sides,
     test_every_declared_ref_has_an_implementation,
     test_every_declared_suite_declares_all_its_cases,
+    test_declared_kind_matches_the_implementation,
     test_undeclared_suites_are_listed,
 )
 

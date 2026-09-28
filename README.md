@@ -278,8 +278,16 @@ neither the config nor the instances, so the loader refuses one that carries
 them. `kind` and `barriers` are declarative and the host does not act on them:
 the `ref` implementation decides whether a case runs live, stages a scene, or
 is deferred, and a case requests a fixture from inside the client with
-`Report.Barrier("spawn_zombie")`. Unknown fields are ignored; missing or
-contradictory ones fail closed with the file and field in the message.
+`Report.Barrier("spawn_zombie")`. A declared `kind` that contradicts the
+factory its `ref` builds (`CaseDef.Live` or `CaseDef.Defer`) fails an offline
+gate, so the document cannot claim a live case that only ever records a skip.
+Unknown fields are ignored; missing or contradictory ones fail closed with the
+file and field in the message.
+
+`provision` and `backend` resolve in one order: the operator's flag, then the
+environment (`PLAYTEST_PROVISION`, `PLAYTEST_BACKEND`), then the suite
+document. A document therefore makes an undecorated `--suite core`
+reproducible without ever overruling a decision made on the command line.
 
 ### Minimal provider
 

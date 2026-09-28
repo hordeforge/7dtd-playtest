@@ -76,22 +76,33 @@ def append_suite_map(src: str) -> dict[str, list[str]]:
     return result
 
 
-def _attribute_to_add_method(src: str, items: list[tuple[int, str]]) -> dict[str, set[str]]:
+def _add_headers(src: str) -> list[tuple[int, str]]:
     headers = [
         (m.start(), m.group(1))
         for m in re.finditer(r"\bstatic void Add([A-Z]\w*)\s*\(", src)
     ]
     assert headers, "Catalog.cs lost every Add method header"
+    return headers
+
+
+def _owning_add_method(
+    headers: list[tuple[int, str]], pos: int, item: str
+) -> str:
+    owner = None
+    for hpos, name in headers:
+        if hpos < pos:
+            owner = name
+        else:
+            break
+    assert owner, f"{item!r} declared before any Add method header"
+    return owner
+
+
+def _attribute_to_add_method(src: str, items: list[tuple[int, str]]) -> dict[str, set[str]]:
+    headers = _add_headers(src)
     out: dict[str, set[str]] = {}
     for pos, item in items:
-        owner = None
-        for hpos, name in headers:
-            if hpos < pos:
-                owner = name
-            else:
-                break
-        assert owner, f"{item!r} declared before any Add method header"
-        out.setdefault(owner, set()).add(item)
+        out.setdefault(_owning_add_method(headers, pos, item), set()).add(item)
     return out
 
 
@@ -107,6 +118,33 @@ def add_method_case_ids(src: str) -> dict[str, set[str]]:
     ]
     assert cases, "Catalog.cs lost every Live/Defer case"
     return _attribute_to_add_method(src, cases)
+
+
+def add_method_case_kinds(src: str) -> dict[str, dict[str, str]]:
+    """Case id -> the kind a suite document must declare, per Add method.
+
+    A suite document repeats what the case factory already says: ``CaseDef
+    .Defer`` builds a case that records skip, ``CaseDef.Live`` one that runs.
+    The JSON is the tool-readable copy, so the two have to be pinned together
+    offline or a document can claim ``live`` for a deferred case (the run
+    reports a skip the suite never declared) or ``defer`` for a live one (a
+    green run that measured nothing). Catalog.cs builds every case with one
+    of those two factories; a staged case is declared by an external
+    provider, which no catalog ref pins.
+    """
+    items = [
+        (m.start(), m.group(2), "live" if m.group(1) == "Live" else "defer")
+        for m in re.finditer(
+            r'\b(Live|Defer)\s*\(\s*suite\s*,\s*"([a-z0-9_]+)"', src
+        )
+    ]
+    assert items, "Catalog.cs lost every Live/Defer case"
+    headers = _add_headers(src)
+    kinds: dict[str, dict[str, str]] = {}
+    for pos, case_id, kind in items:
+        owner = _owning_add_method(headers, pos, case_id)
+        kinds.setdefault(owner, {})[case_id] = kind
+    return kinds
 
 
 def add_method_barriers(src: str) -> dict[str, set[str]]:
