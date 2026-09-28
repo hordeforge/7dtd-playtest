@@ -128,7 +128,9 @@ while :; do
 	read_log_since_start
 	if [[ -n "$NEW_LOG" ]]; then
 		if [[ -n "$CLIP_ID" ]]; then
-			hit="$(grep -E "clip complete $CLIP_ID " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
+			# Fixed-string: the id is a name, and a regex would let a `.`
+			# or a `[` in --clip-id match a different clip.
+			hit="$(grep -F "clip complete $CLIP_ID " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
 		else
 			hit="$(grep "clip complete " <<<"$NEW_LOG" 2>/dev/null | tail -1 || true)"
 		fi
@@ -176,6 +178,17 @@ FRAME_COUNT="$(echo "$CLIP_LINE" | awk -F'frames=' '{print $2}' | awk '{print $1
 # and report the frames as missing, which names the wrong cause.
 [[ "$FRAME_COUNT" =~ ^[1-9][0-9]*$ ]] || {
 	echo "ERROR: clip completion line has no positive frame count: $CLIP_LINE" >&2
+	exit 2
+}
+# The id is the one field on this line that is not the harness's own. The
+# client log also carries whatever a remote LAN peer typed (a playtest
+# instance joins without a join password), and a line holding
+# `clip complete <anything> -> <anything>` anywhere in it wins this match. The
+# id then names the directory frames are read out of and the mp4 this script
+# writes, so it is checked against the alphabet Helpers.AssetName produces
+# rather than left to `basename` above, which only keeps the separators out.
+[[ "$CLIP_ID" =~ ^[a-z0-9_-]{1,64}$ ]] || {
+	echo "ERROR: clip completion line names no capture-safe clip: $CLIP_LINE" >&2
 	exit 2
 }
 # Resolve the frames directory the way the mod and launch_client.sh do:

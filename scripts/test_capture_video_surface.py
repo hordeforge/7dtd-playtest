@@ -60,6 +60,7 @@ LOG_GATE_END = "read_log_since_start() {"
 PARSE_START = "# clip complete <id> frames=N -> playtest-shots/clips/<id>"
 PARSE_END = '[[ -n "$CLIP_ID" && -n "$FRAME_COUNT" && -n "$CLIP_DIR" ]]'
 FRAME_COUNT_RE = '[[ "$FRAME_COUNT" =~ ^[1-9][0-9]*$ ]]'
+CLIP_ID_RE = '[[ "$CLIP_ID" =~ ^[a-z0-9_-]{1,64}$ ]]'
 
 
 def parse_fragment() -> str:
@@ -67,6 +68,19 @@ def parse_fragment() -> str:
     start = text.index(PARSE_START)
     end = text.index(PARSE_END, start)
     return text[start:end].strip("\n")
+
+
+def guards_fragment() -> str:
+    """The script's own frame-count and clip-id guards, bodies included.
+
+    The bare `[[ ... ]]` test is not the contract: what rejects a hostile line
+    is the `|| { ...; exit 2; }` the script hangs on it, so that is what runs
+    here rather than a copy of the pattern.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+    start = text.index(FRAME_COUNT_RE)
+    end = text.index("\n}", text.index(CLIP_ID_RE, start)) + 2
+    return text[start:end]
 
 
 def run_parse(line: str) -> tuple[str, str, str]:
@@ -142,6 +156,8 @@ def main() -> int:
     assert proc.returncode == 0 and proc.stdout.strip() == "ok", proc.stderr
     print("OK a non-positive or non-numeric frame count is rejected by name")
 
+    check_clip_id_guard(prefixed)
+
     check_shared_capture_common(SCRIPT, FRAMES_SCRIPT, AUDIO_SCRIPT)
     check_stop_run()
     check_log_gate()
@@ -149,6 +165,69 @@ def main() -> int:
 
     print("RESULT PASS")
     return 0
+
+
+def check_clip_id_guard(marker: str) -> None:
+    """The parsed clip id must be a name, not a path the log chose.
+
+    The client log carries whatever a remote LAN peer typed, and the playtest
+    instance joins without a join password, so a line holding
+    `clip complete <x> frames=N -> <y>` anywhere in it reaches this parse
+    before the client's own marker does. The id then names the directory
+    frames are read out of and the mp4 this script writes, so it is held to
+    the alphabet Helpers.AssetName produces. `basename` alone only keeps the
+    separators out: `..` and a glob character still name something.
+    """
+    guards = f"{parse_fragment()}\n{guards_fragment()}\necho ok"
+
+    def verdict(line: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["bash", "-c", guards],
+            env={"CLIP_LINE": line, "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+        )
+
+    for clip_id, why in (
+        ("..", "parent directory"),
+        ("../..", "traversal past the frames root"),
+        ("*", "glob over every clip directory"),
+        ("a b", "a name carrying a space"),
+        ("a.mp4", "a name carrying a dot"),
+        ("a;rm", "a name carrying a shell metacharacter"),
+        ("x" * 65, "a name longer than any clip id"),
+    ):
+        line = f"clip complete motion frames=48 -> playtest-shots/clips/{clip_id}"
+        proc = verdict(line)
+        assert proc.returncode != 0, f"{why} must be rejected: {proc.stdout!r}"
+
+    for clip_id in ("motion_thing", "shirt-01", "_nul", "a" * 64):
+        line = f"clip complete motion frames=48 -> playtest-shots/clips/{clip_id}"
+        proc = verdict(line)
+        assert proc.returncode == 0 and proc.stdout.strip() == "ok", (
+            f"{clip_id!r} is a legal clip id and must pass: {proc.stderr}"
+        )
+
+    # The chat-shaped line, prefix and all, is the case the guard exists for.
+    # A peer's text survives the basename as a bare name, so the id is still
+    # only a name here; the frames directory is then looked up under the
+    # shots root and a name that is not a clip of this run is not there.
+    chat = (
+        "2026-09-28T20:20:15 53.385 INF [7dtd-playtest] <bob> says: "
+        "clip complete motion frames=48 -> ../../../../etc"
+    )
+    clip_id, _, _ = run_parse(chat)
+    assert clip_id == "etc", f"the traversal basename did not parse as {clip_id!r}"
+    assert "/" not in clip_id, f"a separator survived into the clip id: {clip_id!r}"
+    # With the separators gone, what is left to reject is a name that is not
+    # one the mod writes: a dot, a glob, a relative segment.
+    for line in (
+        chat.replace("../../../../etc", "clips/.."),
+        chat.replace("../../../../etc", "clips/*"),
+    ):
+        assert verdict(line).returncode != 0, f"accepted {line!r}"
+    assert verdict(marker).returncode == 0, "the harness's own marker must still pass"
+    print("OK a log-derived clip id is held to the capture name alphabet")
 
 
 def check_shared_capture_common(*scripts: Path) -> None:
