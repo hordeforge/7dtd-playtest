@@ -781,7 +781,12 @@ contract. `clip frame` names each frame of a `CaseDef.StagedClip` sequence;
 is the single completion signal a waiting host process greps for, emitted
 once the hold (or an on-demand `EndClip`) ends with the real frame count
 (never a padded one); `clip abandoned` marks a clip a failed case left
-active, which is never the completion marker. Optional host
+active, which is never the completion marker. Every `clip` id above is the
+asset name `Helpers.AssetName` derives: NFC-normalized, ASCII letters, digits,
+`-` and `_` kept, anything else `_`. The marker, the `scene staged` name and
+the frames directory are that one string, so a host reading a directory out of
+`clip complete` always reads the directory the frames were written to.
+Optional host
 reports: `~/.cache/7dtd-playtest/report-*.json` (`LOGDIR=`).
 
 ### Visual confirmation: what a suite cannot tell you

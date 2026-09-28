@@ -1925,6 +1925,15 @@ def test_scrub_strips_control_chars_from_echoed_log_text() -> None:
     assert scrub("hide\x0bme\x00\x07") == "hideme"
     assert scrub("cr\rinjected") == "crinjected", "CR must go (line-rewrite)"
     assert scrub("keep\ttabs\nand\nlines") == "keep\ttabs\nand\nlines"
+    # C1 is the 8-bit form of the same escapes: U+009B is CSI, so a log line
+    # that decodes to it repaints the operator's terminal exactly as ESC [ does.
+    # video_review.terminal_safe already stripped the block; this is the echo
+    # path, and the two agreed on nothing until now.
+    assert scrub("csi\x9b2Jcleared") == "csi2Jcleared"
+    assert scrub("pad\x80\x9fend") == "padend"
+    assert scrub("café 🧟 keeps its text") == "café 🧟 keeps its text", (
+        "C1 is a control range, not a byte-range test on the text"
+    )
     print("PASS log_scrub control chars stripped from terminal echoes")
 
 

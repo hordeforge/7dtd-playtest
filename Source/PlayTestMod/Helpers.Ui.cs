@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using System.Text;
 using UnityEngine;
 
 namespace ZdtdPlaytest
@@ -172,7 +173,7 @@ namespace ZdtdPlaytest
             if (string.IsNullOrEmpty(name)) name = "frame";
             string dir = ShotsRoot();
             if (dir == null) return null;
-            string safe = SafeFileName(name);
+            string safe = AssetName(name);
             string path = WriteScreenshot(dir, safe + ".png", superSize,
                 "capture of " + safe + " failed");
             if (path == null) return null;
@@ -224,7 +225,7 @@ namespace ZdtdPlaytest
             if (string.IsNullOrEmpty(clipId)) clipId = "clip";
             string shots = ShotsRoot();
             if (shots == null) return null;
-            string safe = SafeFileName(clipId);
+            string safe = AssetName(clipId);
             string dir = System.IO.Path.Combine(shots, "clips", safe);
             string path = WriteScreenshot(dir, string.Format("frame-{0:D4}.png", frameIndex),
                 superSize, "clip frame " + safe + " " + frameIndex + " failed");
@@ -255,7 +256,7 @@ namespace ZdtdPlaytest
             if (string.IsNullOrEmpty(clipId)) clipId = "clip";
             string shots = ShotsRoot();
             if (shots == null) return;
-            string dir = System.IO.Path.Combine(shots, "clips", SafeFileName(clipId));
+            string dir = System.IO.Path.Combine(shots, "clips", AssetName(clipId));
             try
             {
                 if (System.IO.Directory.Exists(dir))
@@ -296,12 +297,37 @@ namespace ZdtdPlaytest
             return path;
         }
 
-        /// <summary>A file name that cannot escape its directory.</summary>
-        static string SafeFileName(string name)
+        /// <summary>
+        /// The one name an id becomes on disk and in the lines collectors read.
+        /// </summary>
+        /// <remarks>
+        /// <para>The clip contract is a round trip: a collector reads the
+        /// trailing directory out of the <c>clip complete</c> line and looks
+        /// the frames up under it. Deriving that name separately from the
+        /// directory the frames are written into (marker carrying the raw id,
+        /// frames written under a sanitized one) sent the collector to a
+        /// directory that was never created, and the run reported no frames
+        /// for a take that recorded them.</para>
+        ///
+        /// <para>Normalized to NFC first. A name that arrives decomposed
+        /// (<c>e</c> followed by U+0301) is the same character to a reader and
+        /// to a normalizing filesystem, but a different string to every
+        /// comparison here, so the same scene would occupy two directories
+        /// depending on which editor typed it.</para>
+        ///
+        /// <para>ASCII letters, digits, <c>-</c> and <c>_</c> survive and
+        /// everything else becomes <c>_</c>: no separator, drive letter or
+        /// path segment can be smuggled in, and the name is byte-identical on
+        /// every host that stores it. The mapping is idempotent, so applying
+        /// it to an already-safe name is a no-op.</para>
+        /// </remarks>
+        public static string AssetName(string name)
         {
-            var sb = new System.Text.StringBuilder(name.Length);
-            foreach (char c in name)
-                sb.Append(char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_');
+            if (string.IsNullOrEmpty(name)) return "unnamed";
+            string normalized = name.Normalize(NormalizationForm.FormC);
+            var sb = new System.Text.StringBuilder(normalized.Length);
+            foreach (char c in normalized)
+                sb.Append((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
             return sb.ToString();
         }
     }

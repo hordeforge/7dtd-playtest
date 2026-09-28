@@ -17,11 +17,73 @@ CASEDEF = ROOT / "Source" / "PlayTestMod" / "CaseDef.cs"
 CATALOG = ROOT / "Source" / "PlayTestMod" / "Catalog.cs"
 PROVIDER = ROOT / "Source" / "PlayTestMod" / "ScenarioProvider.cs"
 HELPERS_GLOB = sorted((ROOT / "Source" / "PlayTestMod").glob("Helpers*.cs"))
+CLIPRECORDER = ROOT / "Source" / "PlayTestMod" / "ClipRecorder.cs"
 REPORT = ROOT / "Source" / "PlayTestMod" / "Report.cs"
 README = ROOT / "README.md"
 AGENTS = ROOT / "AGENTS.md"
 MAKEFILE = ROOT / "Makefile"
 SCENARIOS = ROOT / "SCENARIOS.md"
+
+
+def check_asset_name_round_trip() -> None:
+    """The clip id a log line names must be the directory the frames land in.
+
+    A collector reads the trailing directory out of the `clip complete` line
+    and looks the frames up under it, so those are two halves of one round
+    trip. They were derived separately (frames written under a sanitized name,
+    marker carrying the raw id), which sent a collector to a directory that
+    was never created and reported a take as having no frames.
+    """
+    helpers = "\n".join(p.read_text(encoding="utf-8") for p in HELPERS_GLOB)
+    casedef = (ROOT / "Source" / "PlayTestMod" / "CaseDef.cs").read_text(encoding="utf-8")
+    cliprecorder = CLIPRECORDER.read_text(encoding="utf-8")
+
+    assert "SafeFileName" not in helpers, (
+        "the old name is back; the marker and the directory must share one "
+        "function or they drift again"
+    )
+    asset_body = method_body(
+        helpers, r"public\s+static\s+string\s+AssetName\s*\([^)]*\)"
+    )
+    assert "Normalize(NormalizationForm.FormC)" in asset_body, (
+        "AssetName must normalize to NFC: the same name typed decomposed and "
+        "composed is one character to a reader and two directories here"
+    )
+    for keep in ("'a'", "'z'", "'0'", "'9'", "'_'", "'-"):
+        assert keep in asset_body, f"AssetName must keep {keep} verbatim"
+    assert "IsLetterOrDigit" not in asset_body, (
+        "IsLetterOrDigit is Unicode-aware, so the name stops being byte-stable "
+        "across the hosts that store it"
+    )
+
+    # Every line that names a clip directory names the asset name.
+    assert 'clip complete " + Helpers.AssetName(id)' in casedef, (
+        "the completion line must carry the asset name, not the raw id"
+    )
+    assert '" -> playtest-shots/clips/" + Helpers.AssetName(id)' in casedef, (
+        "the directory in the completion line is the one a collector looks up"
+    )
+    assert "Report.Staged(Helpers.AssetName(id)" in casedef, (
+        "the staged scene a reviewer is told about is the clip directory"
+    )
+    for emitter in ("clip recording ", "clip complete ", "clip abandoned "):
+        line = next(
+            (ln for ln in cliprecorder.splitlines() if emitter in ln and "Log." in ln),
+            None,
+        )
+        assert line is not None, f"ClipRecorder lost its {emitter!r} line"
+        assert "_activeId" in line, (
+            f"{emitter.strip()!r} must print the stored asset name, not the raw id"
+        )
+    assert "string safeId = Helpers.AssetName(id);" in cliprecorder, (
+        "Begin must normalize once so recording, completion and abandonment "
+        "all name the same directory"
+    )
+    assert "_activeId != Helpers.AssetName(id)" in cliprecorder, (
+        "End must compare against the same name Begin stored, or a clip can "
+        "never be ended"
+    )
+    print("OK clip id, staged name and frames directory are one AssetName")
 
 
 def main() -> int:
@@ -469,6 +531,7 @@ def main() -> int:
     assert "TraceEntity = EnvTrue(traceEntity);" in runner
     assert "else if (EnvTrue(legacy))" in runner
     print("OK client boolean env shares the host on/off spellings")
+    check_asset_name_round_trip()
     return 0
 
 

@@ -340,8 +340,10 @@ namespace ZdtdPlaytest
                     // take's evidence.
                     Helpers.ResetClipDir(id);
                     // Immediately, not at result time: a collector keyed on the
-                    // result photographs the disconnect dialog.
-                    Report.Staged(id, ctx.Detail);
+                    // result photographs the disconnect dialog. The staged name
+                    // is the asset name, so the scene a reviewer is told about
+                    // and the directory the frames are in are the same string.
+                    Report.Staged(Helpers.AssetName(id), ctx.Detail);
                 },
                 wait: ctx =>
                 {
@@ -369,8 +371,11 @@ namespace ZdtdPlaytest
                         ClearStaged();
                         // The single, well-defined completion signal a waiting
                         // host process greps for; the count is the real one.
-                        Log.Out("[7dtd-playtest] clip complete " + id + " frames=" + ctx.IntB
-                            + " -> playtest-shots/clips/" + id);
+                        // AssetName, not the raw id: a collector takes the
+                        // directory from this line and looks the frames up
+                        // under it, so the two names have to be one.
+                        Log.Out("[7dtd-playtest] clip complete " + Helpers.AssetName(id) + " frames=" + ctx.IntB
+                            + " -> playtest-shots/clips/" + Helpers.AssetName(id));
                     }
                     return done;
                 },

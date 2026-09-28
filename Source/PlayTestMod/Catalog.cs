@@ -4673,7 +4673,12 @@ namespace ZdtdPlaytest
                         bool notPreseed = text.IndexOf("APM_PRESEED", StringComparison.Ordinal) < 0
                             && text.IndexOf("APM_DUMP_FAILED", StringComparison.Ordinal) < 0;
                         ok = hasApm && hasRun && notPreseed;
-                        ctx.Detail = "path=" + path + " bytes=" + text.Length
+                        // The file's length on disk, not the decoded string's:
+                        // text.Length counts UTF-16 code units, so a dump with
+                        // a non-ASCII line or an emoji in it reported a
+                        // "bytes=" figure that was never the file's size.
+                        ctx.Detail = "path=" + path
+                            + " bytes=" + new System.IO.FileInfo(path).Length
                             + " apm=" + hasApm + " run=" + hasRun
                             + " rid=" + (runId.Length > 0) + " ok=" + ok;
                         if (ok) ctx.PlaceBlockType = 1;

@@ -48,25 +48,31 @@ namespace ZdtdPlaytest
             if (!(fps > 0f))
                 throw new ArgumentOutOfRangeException(nameof(fps), fps,
                     "ClipRecorder.Begin fps must be > 0");
+            // The id becomes the directory the frames are written into and the
+            // name the completion line carries, so it is normalized once here
+            // and every line below prints the same string the collector reads
+            // back out. AssetName is idempotent, so ResetClipDir and
+            // CaptureClipFrame re-deriving it changes nothing.
+            string safeId = Helpers.AssetName(id);
             if (_activeId != null)
             {
                 // A second clip while one runs cannot interleave into the same
                 // directory; abandon the first so its frames stay addressable
                 // and the second starts clean.
-                Log.Warning("[7dtd-playtest] clip " + _activeId + " still active; abandoning it before " + id);
+                Log.Warning("[7dtd-playtest] clip " + _activeId + " still active; abandoning it before " + safeId);
                 Abandon();
             }
             // A reused id must not inherit the previous take's frames: the
             // completion line names this directory, so anything left in it
             // would be muxed and counted as part of this recording.
-            Helpers.ResetClipDir(id);
-            _activeId = id;
+            Helpers.ResetClipDir(safeId);
+            _activeId = safeId;
             _superSize = superSize;
             _interval = 1f / fps;
             _frames = 0;
             _startedAt = Time.unscaledTime;
             _nextFrameAt = _startedAt;
-            Log.Out("[7dtd-playtest] clip recording " + id + " superSize=" + superSize + " fps=" + fps);
+            Log.Out("[7dtd-playtest] clip recording " + _activeId + " superSize=" + superSize + " fps=" + fps);
         }
 
         /// <summary>Stop recording <paramref name="id"/> and emit its completion line.</summary>
@@ -74,7 +80,7 @@ namespace ZdtdPlaytest
         {
             if (string.IsNullOrEmpty(id))
                 throw new ArgumentException("ClipRecorder.End needs a clip id");
-            if (_activeId != id)
+            if (_activeId != Helpers.AssetName(id))
             {
                 Log.Warning("[7dtd-playtest] clip " + id + " is not recording; nothing to end");
                 return;

@@ -506,12 +506,15 @@ def err(msg: str) -> None:
     print(f"[playtest-orch] {msg}", file=sys.stderr, flush=True)
 
 
-# Control characters (C0 except tab/LF, plus DEL). ESC (\x1b) and CR (\x0d)
-# are covered by the \x0b-\x0d and \x0e-\x1f ranges. Log bytes echoed to the
-# operator terminal carry remote chat text verbatim; without stripping, a
-# crafted line can emit arbitrary terminal escape sequences into the run's
-# stdout or rewrite already-written lines via CR.
-_LOG_CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+# Control characters: C0 except tab/LF, DEL, and the C1 block. ESC (\x1b) and
+# CR (\x0d) are both inside the \x0b-\x1f range. C1 belongs here for the same
+# reason ESC does: U+009B is the 8-bit CSI, and a log byte that decodes to it
+# reaches a terminal as an escape introducer, so a line that passed C0-only
+# scrubbing could still repaint the operator's screen. The game log carries
+# remote chat text verbatim, and the sibling text-defanging helper
+# (video_review.terminal_safe) already covered the same range; this was the
+# one place the two disagreed.
+_LOG_CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 def scrub(text: str) -> str:

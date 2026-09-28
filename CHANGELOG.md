@@ -241,6 +241,25 @@ Migration, by symbol:
 
 ### Fixed
 
+- **A clip marker named a directory that was never created.** Frames were
+  written to `playtest-shots/clips/<id>` under a sanitized name while the
+  `clip complete` line, the `scene staged` name and the on-demand recorder's
+  three log lines carried the raw id. `scripts/capture_video.sh` takes the
+  directory from that line and looks the frames up under it, so any id holding
+  a character the sanitizer rewrites (`motion.2`, `walk cycle`, or an `é`
+  typed decomposed as `e` + U+0301) reported "no frames found" for a take that
+  had recorded them. `Helpers.AssetName` is now the single name: normalized to
+  NFC, ASCII letters/digits/`-`/`_` kept, everything else `_`, idempotent, and
+  used for the directory, the staged name and every marker line.
+  `test_scenario_provider_surface.py` pins that they cannot drift apart again.
+- **Lengths reported in the wrong unit.** `ChatProbe.LastLength` counted UTF-16
+  code units, so one emoji in a LAN player's chat read as `chat_len=2`, and the
+  `soak_apm_budget` detail labelled `text.Length` as `bytes=`, a figure that
+  was never the dump's size on disk. It is now the file length.
+- **`scrub` let C1 controls through.** The orchestrator's terminal echo
+  stripped C0 and DEL but not U+0080-U+009F, whose U+009B is the 8-bit CSI, so
+  a log line carrying one could still repaint the operator's screen.
+  `video_review.terminal_safe` already covered the range; the two now agree.
 - **The vision-review intent had no size bound.** Everything in an intent goes
   into the review prompt verbatim, so a pasted log in `purpose` or a thousand
   `questions` was an unbounded provider request. `parse_intent` now refuses an

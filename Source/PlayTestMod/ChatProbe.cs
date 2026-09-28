@@ -19,9 +19,33 @@ namespace ZdtdPlaytest
         static string Last = "";
 
         /// <summary>Length of the last captured message; its text is never exposed.</summary>
+        /// <remarks>
+        /// Counted in code points, not <see cref="string.Length"/>'s UTF-16 code
+        /// units: a C# string counts one emoji as two, so the number a reader
+        /// took from <c>chat_len=4</c> would not be the number of characters
+        /// that arrived. No verdict reads this; it is the size of a message
+        /// nobody is allowed to see.
+        /// </remarks>
         public static int LastLength
         {
-            get { lock (Gate) { return Last == null ? 0 : Last.Length; } }
+            get
+            {
+                lock (Gate)
+                {
+                    if (string.IsNullOrEmpty(Last)) return 0;
+                    int count = 0;
+                    for (int i = 0; i < Last.Length; i++)
+                    {
+                        count++;
+                        // A well-formed surrogate pair is one character held in
+                        // two units; do not count the trailing half again.
+                        if (char.IsHighSurrogate(Last[i]) && i + 1 < Last.Length
+                            && char.IsLowSurrogate(Last[i + 1]))
+                            i++;
+                    }
+                    return count;
+                }
+            }
         }
 
         public static void Clear()
