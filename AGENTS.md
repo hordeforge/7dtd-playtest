@@ -249,6 +249,7 @@ make playtest-smoke       # stock dedicated + smoke (exit 0/1/2)
 make playtest-core        # stock dedicated + gate alias (live-only smoke+core)
 make playtest-zdtd        # demo suite against zdtd (port 27025)
 make sbom                       # CycloneDX inventory of both committed lockfiles
+make package                    # release zip: dist/7dtd-playtest-<version>.zip (needs GAME=)
 make playtest-review-video SUITE=<id> INTENT=<path>  # capture staged clips, then vision-review them through deadeye
 make playtest SUITE=core SERVER=stock       # managed Safehouse instance
 make playtest SUITE=smoke PROVISION=attach READONLY=1  # live host, attach-only
@@ -511,7 +512,9 @@ the run order that both `make test` and `make coverage` expand):
     is listed in the Makefile `GATES`, every `GATES` entry exists and is
     listed once, every `test_*` a gate defines is named by that gate's runner
     (an unregistered test never executes), `test`/`coverage`/`test-one` share
-    that one list, and CI runs the same steps `make check` does. A new gate
+    that one list, CI runs the same steps `make check` does, and every
+    `make <target>` a workflow names (step or backticked comment) is a
+    Makefile target. A new gate
     file that nobody added to `GATES` runs under neither `make test` nor CI.
 19. dependency inventory (`scripts/test_dep_sbom.py`): the CycloneDX SBOM
     `make sbom` writes from `uv.lock` and `Source/PlayTestMod/packages.lock.json`

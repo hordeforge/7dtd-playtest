@@ -102,6 +102,17 @@ Release model (inferred practice, now pinned by `make test`):
   `test_quarantine_restore.py` and `test_playtest_compare.py`; README
   "State, backups, and recovery" is the runbook.
 
+- **`make package` builds the release archive.** The release workflow told a
+  maintainer to run a target the Makefile never had, so the mod zip had no
+  command to produce it. The target builds the mod, then writes
+  `dist/7dtd-playtest-<version>.zip` (version read from `ModInfo.xml`) with the
+  `Mods/7dtd-playtest/` layout the game extracts from, using stdlib
+  `python -m zipfile` so packaging needs no host `zip` on top of uv, and
+  leaving the build's pdb out of the archive. The
+  gate-list gate now also fails when a workflow names a make target the
+  Makefile does not define, so the same drift cannot come back. `make sbom`
+  also gained the `require-uv` preflight every other uv target has.
+
 - **Injectable clock for the orchestrator** (`playtest_run.use_clock()`).
   Every time read and wait in `playtest_run.py` now goes through
   `monotonic_now()`, `epoch_now()`, or `pause()`; `SystemClock` is the only

@@ -5,7 +5,8 @@ A new scripts/test_*.py that nobody added to the Makefile GATES list is a gate
 that never runs locally or in CI, so a broken change passes green until it
 reaches main. The inverse (a GATES entry with no file) makes `make test` fail
 on a clean clone. Both are checked here, together with the CI steps that must
-stay the ones `make check` performs.
+stay the ones `make check` performs, and the make targets the workflows name
+(step or comment), which must exist in the Makefile.
 """
 from __future__ import annotations
 
@@ -17,10 +18,15 @@ ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 SCRIPTS = ROOT / "scripts"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+WORKFLOWS = ROOT / ".github" / "workflows"
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 GATES_VAR = "GATES"
 GATES_ASSIGN = re.compile(rf"^{GATES_VAR}[ \t]*:?=[ \t]*((?:.*\\\n)*.*)$", re.MULTILINE)
+MAKE_INVOCATION_RE = re.compile(r"^\s*(?:-\s*run:\s+)?(?:[A-Za-z_]\w*=\S+\s+)*make\s+(\S+)")
+# The comment idiom in these workflows is a backticked command, which is how
+# a release step names the maintainer command it cannot run itself.
+MAKE_PROSE_RE = re.compile(r"`make ([^`\s]+)`")
 
 
 def gates_from_makefile(makefile: str) -> list[str]:
@@ -96,6 +102,36 @@ def check_ci_matches_check_target() -> None:
         assert step in check_body, f"make check no longer runs `{step}`"
 
 
+def makefile_targets() -> set[str]:
+    text = MAKEFILE.read_text(encoding="utf-8")
+    return {m.group(1) for m in re.finditer(r"^([A-Za-z0-9_][\w.-]*):", text, re.MULTILINE)}
+
+
+def check_workflow_targets_exist() -> None:
+    """Every `make <target>` a workflow names, in a step or a comment, exists.
+
+    A workflow that runs or tells a maintainer to run a target nobody defined
+    fails at the moment it is followed, on the one machine that has the game
+    install. The release workflow already named `make package` with no such
+    target, so the release archive had no command to run.
+    """
+    targets = makefile_targets()
+    missing: dict[str, set[str]] = {}
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        text = workflow.read_text(encoding="utf-8")
+        named = {
+            name
+            for name in (*MAKE_INVOCATION_RE.findall(text), *MAKE_PROSE_RE.findall(text))
+            if not name.startswith(("-", ".", "$"))
+        }
+        unknown = sorted(named - targets)
+        if unknown:
+            missing[workflow.name] = set(unknown)
+    assert not missing, "workflow(s) name a make target the Makefile does not define: " + ", ".join(
+        f"{name} ({', '.join(sorted(gone))})" for name, gone in sorted(missing.items())
+    )
+
+
 def check_documented() -> None:
     makefile = MAKEFILE.read_text(encoding="utf-8")
     for surface in (ROOT / "CONTRIBUTING.md", ROOT / "AGENTS.md"):
@@ -154,12 +190,14 @@ def main() -> int:
     check_test_and_coverage_share_one_list()
     check_ci_matches_check_target()
     check_every_gate_test_runs()
+    check_workflow_targets_exist()
     check_documented()
     print("PASS every scripts/test_*.py is listed in the Makefile GATES")
     print("PASS every GATES entry exists and is listed once")
     print("PASS make test / make coverage / make test-one share one gate list")
     print("PASS CI runs the same steps make check does")
     print("PASS every test_* in a gate is dispatched by that gate's runner")
+    print("PASS every make target a workflow names exists in the Makefile")
     print("RESULT PASS")
     return 0
 

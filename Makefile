@@ -45,7 +45,7 @@ ifneq ($(DOTNET_ROOT),)
   export PATH := $(DOTNET_ROOT):$(PATH)
 endif
 
-.PHONY: help build install uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke \
+.PHONY: help build install package uninstall clean require-uv test test-one coverage lint typecheck check dst dst-soak sbom playtest playtest-smoke \
 	playtest-core \
 	playtest-demo playtest-bench playtest-gate playtest-full \
 	playtest-zdtd playtest-persist playtest-mp playtest-soak-long playtest-apm \
@@ -65,7 +65,8 @@ help:
 	@echo "  make sbom                        CycloneDX inventory of uv.lock + packages.lock.json"
 	@echo
 	@echo "Mod build (needs dotnet SDK 8.0.x + game at GAME=):"
-	@echo "  make build | install | install-pair | uninstall | clean"
+	@echo "  make build | install | install-pair | package | uninstall | clean"
+	@echo "  make package                   the release zip: dist/7dtd-playtest-<version>.zip"
 	@echo
 	@echo "Live suites (needs game client; see README):"
 	@echo "  make playtest SUITE=demo [SERVER=stock|zdtd] [PROVISION=attach READONLY=1]"
@@ -106,6 +107,33 @@ install-pair:
 		exit 2; }
 	$(MAKE) install
 	$(MAKE) -C "$(CONNECT_DIR)" install GAME="$(GAME)"
+
+# The release archive: the same built mod the install target stages, zipped
+# under the Mods/<modname>/ prefix the game expects, named for the version
+# ModInfo.xml ships (the version the release workflow gates the tag on).
+# `python -m zipfile` is stdlib, so packaging needs no host `zip` on top of
+# the uv every other host Python command already requires. The pdb the build
+# drops beside the dll is deleted first: a symbol file for a stack trace no
+# player reads, at twice the dll's size.
+MOD_VERSION = $(shell sed -n 's/.*<Version[^>]*value="\([^"]*\)".*/\1/p' \
+  "$(ROOT)/ModInfo.xml" | head -1)
+ARCHIVE ?= $(ROOT)/dist/$(MOD_NAME)-$(MOD_VERSION).zip
+
+package: build require-uv
+	@test -n "$(MOD_VERSION)" || { \
+		echo "no <Version value=\"...\"> in $(ROOT)/ModInfo.xml; nothing to name the archive"; \
+		exit 2; }
+	@test -f "$(DIST)/$(MOD_NAME).dll" || { \
+		echo "make package: $(DIST)/$(MOD_NAME).dll is missing; 'make build' did not produce it"; \
+		exit 2; }
+	@rm -f "$(ARCHIVE)"
+	@rm -f "$(DIST)/$(MOD_NAME).pdb"
+	cd "$(DIST)/.." && $(UV) -m zipfile -c "$(ARCHIVE)" "$(MOD_NAME)"
+	@test -f "$(ARCHIVE)" || { \
+		echo "make package: no archive at $(ARCHIVE)"; \
+		exit 2; }
+	@echo "OK -> $(ARCHIVE)"
+	@echo "attach this file to the GitHub release for v$(MOD_VERSION)"
 
 uninstall:
 	rm -rf "$(INSTALL_DIR)"
@@ -217,7 +245,7 @@ test-one: require-uv
 # (both hash-pinned) rather than resolving, so it needs no network and no
 # scanner; the release workflow attaches the output to the tag.
 SBOM ?= $(ROOT)/dist/7dtd-playtest.cdx.json
-sbom:
+sbom: require-uv
 	@mkdir -p "$(dir $(SBOM))"
 	$(UV) "$(ROOT)/scripts/dep_sbom.py" "$(SBOM)"
 	@echo "OK -> $(SBOM)"

@@ -28,6 +28,9 @@ install the playtest and connection mods together:
 make install-pair
 ```
 
+To build the release archive instead of installing it, `make package` writes
+`dist/7dtd-playtest-<version>.zip` (the version `ModInfo.xml` ships).
+
 Everything below is reference detail, including the offline development loop
 and live suite commands.
 
@@ -1165,7 +1168,9 @@ and pushes it to the `badges` branch. A `vX.Y.Z` tag runs
 `ModInfo.xml`, then builds the CycloneDX inventory for that tag from the two
 committed lockfiles and records its serial number and component count in the
 run summary. The mod archive is still built by a maintainer with a game
-install and attached to the release.
+install, with `make package`, and attached to the release: it builds the mod
+and writes `dist/7dtd-playtest-<version>.zip`, laid out as `Mods/7dtd-playtest/`
+so it extracts into a game install without moving files.
 
 ### Host orchestrator secrets
 
