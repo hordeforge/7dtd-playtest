@@ -20,7 +20,13 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import video_review  # noqa: E402
-from video_review import ReviewError, parse_intent, parse_intent_text, run_review  # noqa: E402
+from video_review import (  # noqa: E402
+    ReviewError,
+    parse_intent,
+    parse_intent_text,
+    run_review,
+    terminal_safe,
+)
 
 VALID_INTENT = {
     "schema_version": 1,
@@ -223,6 +229,134 @@ def test_credentials_never_reach_stdout_or_evidence(tmp_path: Path) -> None:
     assert "GEMINI_API_KEY" not in argv_text, "credentials must never be passed as arguments"
 
 
+def test_the_evidence_file_is_the_validated_envelope(tmp_path: Path) -> None:
+    """What lands on disk is what this tool checked, not the raw envelope."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    output = clip / "review-gemini-validated.json"
+    gateway = _FakeGateway()
+    with _gateway_available():
+        envelope = run_review(
+            clip, intent_path=intent, allow_network=True, output=output, runner=gateway
+        )
+    stored = json.loads(output.read_text(encoding="utf-8"))
+    assert stored["review_validated"] is True
+    assert stored["intent_summary"] == envelope["intent_summary"]
+    assert stored["result"]["issues"][0]["at_frame"] == [2.0, 3.0]
+
+
+def test_the_stored_result_is_the_normalized_one(tmp_path: Path) -> None:
+    """The provider's aliases (`frame`, `seconds`) are normalized away before
+    anything is read or stored, so no consumer sees the raw model shape."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    output = clip / "review-gemini-aliases.json"
+    raw = _envelope()
+    result = raw["result"]
+    assert isinstance(result, dict)
+    result["issues"] = [{"description": "pops", "frame": 7, "seconds": 1.5}]
+    with _gateway_available():
+        envelope = run_review(
+            clip, intent_path=intent, allow_network=True, output=output,
+            runner=_FakeGateway(raw),
+        )
+    returned = envelope["result"]
+    assert isinstance(returned, dict)
+    issues = returned["issues"]
+    assert isinstance(issues, list)
+    first = issues[0]
+    assert isinstance(first, dict)
+    assert first == {"description": "pops", "at_seconds": [1.5, 1.5], "at_frame": [7.0, 7.0]}
+    assert json.loads(output.read_text(encoding="utf-8"))["result"]["issues"] == issues
+
+
+def test_an_invalid_result_leaves_no_evidence_behind(tmp_path: Path) -> None:
+    """The gateway writes --output before validation runs; an unchecked
+    envelope must not survive as a review a later reader would trust."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    output = clip / "review-gemini-invalid.json"
+    broken = _envelope()
+    broken["result"] = {"summary": "looks great"}  # a model that skipped the schema
+    with _gateway_available():
+        try:
+            run_review(
+                clip, intent_path=intent, allow_network=True, output=output,
+                runner=_FakeGateway(broken),
+            )
+        except ReviewError:
+            pass
+        else:
+            raise AssertionError("an invalid result must fail validation")
+    assert not output.exists(), "an unvalidated envelope was left on disk as evidence"
+
+
+def test_a_refused_review_keeps_an_earlier_evidence_file(tmp_path: Path) -> None:
+    """The gateway never overwrites an earlier review by default and refuses
+    instead; a refusal must not delete that earlier review either."""
+    clip = _clip(tmp_path)
+    intent = tmp_path / "i.json"
+    intent.write_text(json.dumps(VALID_INTENT), encoding="utf-8")
+    output = clip / "review-gemini-earlier.json"
+    earlier = '{"kind": "deadeye-review", "review_id": "earlier"}'
+    output.write_text(earlier, encoding="utf-8")
+
+    def refuse(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="evidence exists")
+
+    with _gateway_available():
+        try:
+            run_review(
+                clip, intent_path=intent, allow_network=True, output=output, runner=refuse
+            )
+        except ReviewError as exc:
+            assert "refused" in str(exc)
+        else:
+            raise AssertionError("a refusing gateway must fail the review")
+    assert output.read_text(encoding="utf-8") == earlier, (
+        "an earlier review was destroyed by a refused one"
+    )
+
+
+def test_terminal_safe_defangs_model_output() -> None:
+    """Model text cannot repaint, hide, or forge a line in the operator's
+    terminal, and cannot flood it either."""
+    hostile = "\x1b[2K\rPASS core/fake_the_pass says it is fine\nissue: real"
+    rendered = terminal_safe(hostile)
+    assert "\x1b" not in rendered and "\r" not in rendered and "\n" not in rendered
+    assert rendered == "[2K PASS core/fake_the_pass says it is fine issue: real"
+    flooded = terminal_safe("x" * 5000)
+    assert len(flooded) == video_review.MAX_PRINTED_CHARS + 3
+    assert flooded.endswith("...")
+    assert terminal_safe("keeps\nreadable text") == "keeps readable text"
+
+
+def test_the_cli_prints_sanitized_model_text() -> None:
+    """The human-readable path is the one that renders model output raw."""
+    import io
+    from contextlib import redirect_stdout
+
+    import review_video
+
+    envelope = _envelope()
+    result = envelope["result"]
+    assert isinstance(result, dict)
+    result["summary"] = "\x1b[31mreads well\x1b[0m"
+    result["issues"] = [{"description": "clips\x07 at the shoulder", "at_frame": [2, 3]}]
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        code = review_video._print_result(envelope, Path("evidence.json"))
+    assert code == 0
+    printed = buffer.getvalue()
+    assert "\x1b" not in printed and "\x07" not in printed
+    assert printed.splitlines()[0] == "summary: [31mreads well [0m"
+    assert "tokens: 3" in printed
+    assert "evidence: evidence.json" in printed
+
+
 @contextlib.contextmanager
 def _gateway_available(present: bool = True) -> Iterator[None]:
     """Context manager stubbing the gateway-on-PATH probe."""
@@ -401,6 +535,12 @@ def main() -> int:
         test_the_envelope_result_is_validated_and_keeps_frame_moments(root)
         test_an_invalid_result_from_the_gateway_fails_validation(root)
         test_credentials_never_reach_stdout_or_evidence(root)
+        test_the_evidence_file_is_the_validated_envelope(root)
+        test_the_stored_result_is_the_normalized_one(root)
+        test_an_invalid_result_leaves_no_evidence_behind(root)
+        test_a_refused_review_keeps_an_earlier_evidence_file(root)
+        test_terminal_safe_defangs_model_output()
+        test_the_cli_prints_sanitized_model_text()
         test_fuzz_validate_result_never_crashes_on_hostile_gateway_output()
     print("RESULT PASS")
     return 0

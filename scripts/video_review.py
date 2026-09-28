@@ -35,6 +35,8 @@ GATEWAY_INSTALL_HINT = (
     "on PATH, e.g. with: uv tool install --from git+https://github.com/hordeforge/7dtd-vision-review"
 )
 
+MAX_PRINTED_CHARS = 500
+
 RESULT_KEYS = (
     "summary",
     "strengths",
@@ -318,6 +320,30 @@ def _moment(value: object, *, non_negative: bool) -> list[float] | None:
     return [number, number]
 
 
+# -- rendering ----------------------------------------------------------------
+
+
+def terminal_safe(text: str) -> str:
+    """Model-authored text flattened for a terminal.
+
+    The summary and issue descriptions a review returns are model output, not
+    text this tool wrote: C0/C1 control characters (ESC sequences that repaint
+    or hide the lines around them) and embedded newlines (a forged
+    `PASS suite/case` line in the same stream as the playtest log) are
+    flattened to single spaces, and an overlong answer is truncated, so a
+    verbose or hostile model cannot own the reader's screen.
+    """
+    flattened = "".join(
+        " " if character < " " or character == "\x7f" or "\x80" <= character <= "\x9f"
+        else character
+        for character in text
+    )
+    collapsed = " ".join(flattened.split())
+    if len(collapsed) > MAX_PRINTED_CHARS:
+        return collapsed[:MAX_PRINTED_CHARS] + "..."
+    return collapsed
+
+
 # -- the deadeye boundary -----------------------------------------------------
 
 
@@ -409,32 +435,76 @@ def run_review(
         argv += ["--force"]
 
     execute = runner or _default_runner
-    result = execute(argv, timeout_seconds)
-    if result.returncode != 0:
-        message = (result.stderr or result.stdout or "").strip().splitlines()
-        raise ReviewError(
-            f"the {GATEWAY} gateway refused the review"
-            + (f": {message[-1]}" if message else "")
-        )
+    # The gateway writes --output itself, so an envelope reaches disk before
+    # this tool has looked at it. An evidence path that did not exist before
+    # this call is this call's to keep or remove; one that did is an earlier
+    # review, which a refusal must never delete.
+    output_existed = output is not None and output.exists()
     try:
-        envelope = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise ReviewError(f"the {GATEWAY} gateway returned a non-JSON envelope: {exc}") from exc
-    if not isinstance(envelope, dict) or envelope.get("kind") != "deadeye-review":
-        raise ReviewError(
-            f"the {GATEWAY} gateway returned an unexpected envelope; is the installed "
-            "version the hordeforge gateway?"
-        )
-    if not isinstance(envelope.get("result"), dict):
-        raise ReviewError("the gateway returned no validated result")
-    validate_result(envelope["result"])
+        result = execute(argv, timeout_seconds)
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout or "").strip().splitlines()
+            raise ReviewError(
+                f"the {GATEWAY} gateway refused the review"
+                + (f": {message[-1]}" if message else "")
+            )
+        try:
+            envelope = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise ReviewError(
+                f"the {GATEWAY} gateway returned a non-JSON envelope: {exc}"
+            ) from exc
+        if not isinstance(envelope, dict) or envelope.get("kind") != "deadeye-review":
+            raise ReviewError(
+                f"the {GATEWAY} gateway returned an unexpected envelope; is the installed "
+                "version the hordeforge gateway?"
+            )
+        if not isinstance(envelope.get("result"), dict):
+            raise ReviewError("the gateway returned no validated result")
+        # Keep the normalized copy, not the provider's: the result a caller
+        # reads and the result stored below are the one that passed.
+        envelope["result"] = validate_result(envelope["result"])
+    except ReviewError:
+        _discard_unvalidated(output, output_existed)
+        raise
     envelope["review_validated"] = True
     envelope["intent_summary"] = {
         "purpose": intent.purpose,
         "suite": intent.suite,
         "case": intent.case,
     }
+    if output is not None:
+        # Rewrite what the gateway wrote: the evidence on disk is the envelope
+        # this tool validated, so a later reader cannot mistake an unchecked
+        # provider response for a review. Replaced atomically, so a failed
+        # write cannot truncate an earlier review at the same path.
+        _write_evidence(output, envelope)
     return envelope
+
+
+def _write_evidence(output: Path, envelope: dict[str, object]) -> None:
+    staging = output.with_name(f".{output.name}.partial")
+    try:
+        staging.write_text(
+            json.dumps(envelope, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        staging.replace(output)
+    except OSError as exc:
+        staging.unlink(missing_ok=True)
+        raise ReviewError(f"cannot write the evidence file {output}: {exc}") from exc
+
+
+def _discard_unvalidated(output: Path | None, output_existed: bool) -> None:
+    """Remove the evidence this call left behind when the review did not validate."""
+    if output is None or output_existed or not output.exists():
+        return
+    try:
+        output.unlink()
+    except OSError as exc:
+        raise ReviewError(
+            f"the {GATEWAY} gateway left an unvalidated envelope at {output} and it "
+            f"cannot be removed ({exc}); delete it before trusting that folder"
+        ) from exc
 
 
 def default_output(clip: Path, provider: str) -> Path:

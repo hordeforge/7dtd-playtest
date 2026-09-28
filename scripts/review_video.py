@@ -27,6 +27,7 @@ from video_review import (
     ReviewError,
     default_output,
     run_review,
+    terminal_safe,
 )
 
 
@@ -94,19 +95,43 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(envelope, indent=2, sort_keys=True))
     else:
-        result = envelope["result"]
-        assert isinstance(result, dict)
-        summary = result["summary"]
-        issues = result["issues"]
-        assert isinstance(summary, str)
-        assert isinstance(issues, list)
-        print(f"summary: {summary}")
-        for issue in issues:
-            if isinstance(issue, dict):
-                description = issue.get("description")
-                print(f"issue: {description if isinstance(description, str) else issue}")
-        print(f"evidence: {output}")
+        return _print_result(envelope, output)
     return 0
+
+
+def _print_result(envelope: dict[str, object], output: Path) -> int:
+    """Print the human-readable review. The gateway, not the model, fixed the
+    envelope's shape; the summary and issue descriptions are model-authored and
+    go through `terminal_safe` before they reach the operator's screen."""
+    result = envelope["result"]
+    assert isinstance(result, dict)
+    summary = result["summary"]
+    issues = result["issues"]
+    confidence = result["confidence"]
+    assert isinstance(summary, str)
+    assert isinstance(issues, list)
+    assert isinstance(confidence, float)
+    print(f"summary: {terminal_safe(summary)}")
+    for issue in issues:
+        if isinstance(issue, dict):
+            description = issue.get("description")
+            text = description if isinstance(description, str) else str(issue)
+            print(f"issue: {terminal_safe(text)}")
+    print(f"confidence: {confidence:g} (advisory only; a human accepts the clip)")
+    print(f"tokens: {_token_count(envelope)}")
+    print(f"evidence: {output}")
+    return 0
+
+
+def _token_count(envelope: dict[str, object]) -> str:
+    """Reported token usage, or `unavailable` when the provider sent none."""
+    usage = envelope.get("usage")
+    if isinstance(usage, dict):
+        for key in ("totalTokenCount", "total_token_count", "input_tokens", "prompt_tokens"):
+            value = usage.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return str(value)
+    return "unavailable"
 
 
 if __name__ == "__main__":

@@ -146,6 +146,14 @@ A later review never overwrites an earlier one by default; disagreement
 across repeated reviews is preserved and surfaced, not averaged into false
 certainty, matching the audio-review PRD's own rule.
 
+The gateway writes that file before `video_review.py` has checked the
+envelope, so `run_review` rewrites it with the envelope it validated (adding
+`review_validated` and the intent summary) and deletes the file again if
+validation fails. An evidence path that already held a review is left alone
+on failure, because it belongs to an earlier run. What a reader opens is
+therefore always a review this tool checked, and a model that skipped the
+schema leaves no verdict-shaped file behind.
+
 ### Provider boundary and credentials
 
 A narrow adapter protocol: capability probe (accepted formats, frame/size
@@ -195,10 +203,11 @@ Three integration points, deliberately the only three:
 | clip exceeds provider's frame/size limit | Sample down, record what was dropped in the evidence |
 | provider cannot ingest actual frames/video | Refuse the adapter; a stills-incapable transcription is not a substitute |
 | provider timeout, rate limit, or refusal | Exit non-zero; no partial verdict is preserved as a completed review |
-| model returns invalid structure | Preserve a redacted raw response only when requested; fail schema validation |
+| model returns invalid structure | Preserve a redacted raw response only when requested; fail schema validation, and leave no evidence file behind |
 | usage/cost metadata unavailable | Mark unavailable rather than estimated |
 | repeated reviews of the same clip disagree | Preserve each, surface the disagreement |
 | model says the clip "looks right" | Record the wording as advisory only; no case's result changes |
+| model output carries terminal control characters or floods the screen | `terminal_safe` flattens C0/C1 control characters and newlines and truncates at 500 characters before printing; the JSON envelope is unaffected |
 | human disagrees with the model | Human sign-off controls acceptance; the disagreement itself is retained as evaluation evidence |
 
 ## Implementation

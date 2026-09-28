@@ -53,6 +53,15 @@ Release model (inferred practice, now pinned by `make test`):
   peer logs: the observer verdict is a whole-file read, so a rerun that never
   reached a loadgen barrier used to check CVars and buffs against the
   previous run's `joined` bot.
+- **An unvalidated review could be left on disk as evidence.** The gateway
+  writes `--output` before `video_review.run_review` checks the envelope, so a
+  provider response that failed schema validation stayed in the clip folder
+  under a `review-<provider>-<timestamp>.json` name and read as a verdict. The
+  validated envelope is now what gets written, and a failure removes the
+  evidence this call created (an earlier review at the same path is never
+  touched). `terminal_safe` flattens control characters and truncates
+  model-authored text before `review_video.py` prints it, and the human
+  output now states the reported token count and that confidence is advisory.
 
 ## [0.13.0] - 2026-09-21
 
