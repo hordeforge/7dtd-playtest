@@ -13,6 +13,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest import mock
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS = ROOT / "scripts"
@@ -230,6 +233,39 @@ def test_oversized_freshness_window_is_a_usage_error(tmp_path: Path) -> None:
     assert r.returncode == 2, r.stderr
     assert "at most" in r.stderr
     assert "Traceback" not in r.stderr
+
+
+def test_baseline_outputs_are_published_atomically(tmp_path: Path) -> None:
+    """The committed baseline must never be a half-written document.
+
+    workspace/comparison-playtest/*/ is the one long-lived result, and the
+    report-*.json inputs are gitignored, so a torn write here leaves a file
+    that parses as a diff and no other copy to compare it against. A failed
+    rename keeps the previous generation byte for byte, and the temp file it
+    was writing never survives.
+    """
+    out = tmp_path / "out"
+    out.mkdir()
+    baseline = out / "playtest-compare.json"
+    baseline.write_text('{"generation": "previous"}', encoding="utf-8")
+
+    def failing_replace(src: object, dst: object) -> None:
+        raise OSError("simulated crash before publish")
+
+    with mock.patch("os.replace", failing_replace), pytest.raises(OSError):
+        playtest_compare.write_text_atomic(
+            baseline, json.dumps({"generation": "next"}))
+    assert baseline.read_text(encoding="utf-8") == '{"generation": "previous"}'
+    assert not list(out.glob(".playtest-compare.json.tmp.*"))
+
+    s = tmp_path / "stock.log"
+    z = tmp_path / "zdtd.log"
+    s.write_text(STOCK_LOG, encoding="utf-8")
+    z.write_text(ZDTD_LOG, encoding="utf-8")
+    r = _run_cli("--stock", str(s), "--zdtd", str(z), "--out", str(out))
+    assert r.returncode == 0, r.stderr
+    assert json.loads(baseline.read_text(encoding="utf-8"))["compared"] is True
+    assert not list(out.glob(".playtest-compare.*.tmp.*")), "a temp file outlived the run"
 
 
 def test_unwritable_out_dir_is_exit_4_not_traceback(tmp_path: Path) -> None:
@@ -573,5 +609,4 @@ def test_fuzz_compare_survives_hostile_report_pairs(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    import pytest
     sys.exit(pytest.main([__file__, "-q"]))

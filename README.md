@@ -632,7 +632,7 @@ Durable state this system owns, and what an incident costs:
 | Compare baselines (`playtest-compare.json/md` per suite) | `workspace/comparison-playtest/`, committed | Yes (git remote) |
 | Run artifacts: `report-*.json`, `junit-*.xml`, server/client logs | `<logdir>` (default `~/.cache/7dtd-playtest`, env `LOGDIR`); timestamped reports/junit pruned to newest 50 per pattern per run, and a prune that cannot delete warns | No |
 | Captured evidence: clip, contact sheet, frames, audio, `client.log`, and the deadeye review envelope | `.local/capture/<suite>-<stamp>/` (gitignored; `--out DIR` overrides) | No |
-| Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/` | No |
+| Wiped saves / zdtd worlds / previous client logs (soft-delete window) | `<logdir>/quarantine/<UTC-stamp>-<kind>/`, each with a `restore.jsonl` naming where every file came from | No |
 | Exclusivity lock | `~/.cache/7dtd-playtest/playtest_running` | No (self-healing) |
 
 Run artifacts carry what a remote LAN player on the test server wrote into
@@ -661,9 +661,25 @@ Recovery facts:
   stock save, zdtd `players.zsv`/`containers.zct`/`blockmeta.zbm`, chunk
   overlays, and the previous client log move into
   `<logdir>/quarantine/`; the newest `QUARANTINE_KEEP = 5` entries are kept
-  (oldest pruned). Copy an entry's contents back to its original path to
-  restore. If the quarantine itself is unwritable, data stays in place and
-  the run warns about stale reuse instead of destroying anything.
+  (oldest pruned, and a prune that drops a restorable entry names the paths
+  it held on the run log). If the quarantine itself is unwritable, data stays
+  in place and the run warns about stale reuse instead of destroying anything.
+
+  Every move appends `{src, dest}` to the entry's `restore.jsonl`, so the
+  copy-back does not depend on remembering which `--world` produced it:
+
+  ```bash
+  python3 scripts/quarantine_restore.py list
+  python3 scripts/quarantine_restore.py show 20260921T031500Z   # the plan
+  python3 scripts/quarantine_restore.py restore 20260921T031500Z --apply
+  ```
+
+  `restore` writes nothing without `--apply`, keeps a file that already sits
+  at the original path unless `--force` is passed, and takes `--move` to
+  delete the quarantined copy afterwards. Paths are the absolute ones the run
+  recorded, so a restore on another machine writes where the run said it
+  wrote. The quarantine is on the same local disk as the logdir and has no
+  off-host copy: losing that disk loses the entry.
 - **Interrupted run:** kill leftovers with the orchestrator's own clean pass,
   then clear the lock per the [Live-client exclusivity lock](#live-client-exclusivity-lock)
   rules (fresh heartbeat means another holder is alive; stale plus no live

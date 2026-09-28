@@ -472,7 +472,15 @@ the run order that both `make test` and `make coverage` expand):
    fresh-save removes only every world's copy of the named game save
    (quarantined under `<logdir>/quarantine`, newest 5 kept, never
    hard-deleted).
-12. compare diff (`scripts/test_playtest_compare.py`, pytest via uv).
+11b. quarantine restore (`scripts/test_quarantine_restore.py`): every
+   quarantined move records `{src, dest}` in the entry's `restore.jsonl`, and
+   `scripts/quarantine_restore.py` puts a swept-aside world back from it (dry
+   run without `--apply`, never clobbers an existing original). A quarantine
+   is the only copy of what a run moved aside, so a regression here is
+   unrecoverable data, not a wrong verdict.
+12. compare diff (`scripts/test_playtest_compare.py`, pytest via uv), which
+   also pins that the committed baselines under `workspace/comparison-playtest/`
+   are published by atomic rename.
 13. capture-clip marker surface (`scripts/test_capture_video_surface.py`):
     the `scene staged` line `capture_frames.sh` keys on parses the clip id
     from the trailing directory, CRLF-safe.

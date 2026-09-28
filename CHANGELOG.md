@@ -85,6 +85,23 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Added
 
+- **`scripts/quarantine_restore.py`: put a swept-aside world back.**
+  `--fresh-save` moves the zdtd world state, its chunk overlays and the
+  previous client log under `<logdir>/quarantine/` instead of deleting them,
+  but nothing recorded where each file came from, so the copy-back depended
+  on an operator remembering the `--world` (or log path) that produced an
+  entry. Every move now appends `{src, dest}` to the entry's `restore.jsonl`,
+  fsynced, and the new CLI reads it: `list`, `show <entry>`, and
+  `restore <entry> --apply` (dry run by default, refuses to overwrite an
+  existing original without `--force`, `--move` reclaims the quarantined
+  copy). A quarantine prune that drops a restorable entry now names the
+  paths it held on the run log instead of deleting the only copy silently.
+  The compare baselines under `workspace/comparison-playtest/` are published
+  by atomic rename, so a killed comparison cannot leave a truncated document
+  that git records as the long-lived record. Gated by
+  `test_quarantine_restore.py` and `test_playtest_compare.py`; README
+  "State, backups, and recovery" is the runbook.
+
 - **Injectable clock for the orchestrator** (`playtest_run.use_clock()`).
   Every time read and wait in `playtest_run.py` now goes through
   `monotonic_now()`, `epoch_now()`, or `pause()`; `SystemClock` is the only

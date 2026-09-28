@@ -25,9 +25,12 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
+import os
 import re
+import secrets
 import sys
 import time
 from datetime import UTC, datetime
@@ -46,6 +49,26 @@ MAX_FRESHNESS_MINUTES = 10**9
 
 class CompareError(ValueError):
     """A comparison input the tool refuses to diff."""
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Publish ``text`` at ``path`` so no reader sees a partial document.
+
+    The orchestrator has its own copy (playtest_run.write_text_atomic); this
+    CLI runs standalone, and its outputs are the committed baselines, so a
+    crash must leave the previous generation intact rather than a truncated
+    one that still parses as a diff.
+    """
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
 
 
 def _count(value: object) -> int:
@@ -417,10 +440,15 @@ def main() -> int:
 
     try:
         args.out.mkdir(parents=True, exist_ok=True)
-        (args.out / "playtest-compare.md").write_text(
-            "\n".join(lines) + "\n", encoding="utf-8")
-        (args.out / "playtest-compare.json").write_text(
-            json.dumps(payload, indent=1, sort_keys=True), encoding="utf-8")
+        # The default --out is the committed workspace/ baseline dir, so these
+        # two files are the only durable record of a comparison once the
+        # gitignored report-*.json inputs are pruned. A plain write_text
+        # truncates first: a kill mid-write leaves a half document that git
+        # records as a valid baseline, with no other copy to compare against.
+        write_text_atomic(args.out / "playtest-compare.md",
+                          "\n".join(lines) + "\n")
+        write_text_atomic(args.out / "playtest-compare.json",
+                          json.dumps(payload, indent=1, sort_keys=True))
     except OSError as ex:
         # An unwritable --out must not fall through to a traceback with
         # Python's default exit 1, which this CLI documents as "no playtest

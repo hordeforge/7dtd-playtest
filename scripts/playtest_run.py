@@ -34,6 +34,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 import playtest_lock  # noqa: E402
 import playtest_targets  # noqa: E402
+import quarantine_restore  # noqa: E402
 import suite_loader  # noqa: E402
 from playtest_log import (  # noqa: E402
     ClientLogScan,
@@ -1818,6 +1819,18 @@ def install_signal_handlers() -> None:
 QUARANTINE_DIRNAME = "quarantine"
 QUARANTINE_KEEP = 5
 
+
+def default_logdir() -> Path:
+    """Where runs keep reports, logs and the quarantine (env LOGDIR).
+
+    `scripts/quarantine_restore.py` reads this so an operator restoring a
+    swept-aside world does not have to know where the run put its evidence.
+    """
+    return Path(
+        os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest"))
+    )
+
+
 # Per-run evidence (report-<epoch>.json / junit-<epoch>.xml) lands in the
 # cache logdir on every orchestrated run and nothing reads older generations
 # back: without a bound, months of runs fill the disk one file pair at a
@@ -1876,7 +1889,12 @@ def prune_run_artifacts(logdir: Path, keep: int = REPORT_KEEP) -> None:
 
 
 def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
-    """Keep only the newest `keep` quarantine entries (dirs or files)."""
+    """Keep only the newest `keep` quarantine entries (dirs or files).
+
+    An entry older than the window is the last copy of whatever a run swept
+    aside, so its recorded restore paths are named in the run log before it
+    goes: the prune is bounded, but a pruned world is gone.
+    """
     try:
         entries = sorted(qroot.iterdir())
     except OSError as ex:
@@ -1884,6 +1902,14 @@ def prune_quarantine(qroot: Path, keep: int = QUARANTINE_KEEP) -> None:
         return
     for old in entries[:-keep]:
         if old.is_dir():
+            recorded = quarantine_restore.read_manifest(old)
+            if recorded:
+                names = ", ".join(str(src) for src, _ in recorded[:3])
+                more = f" (+{len(recorded) - 3} more)" if len(recorded) > 3 else ""
+                warn(
+                    f"quarantine: pruning {old.name} past the newest "
+                    f"{keep} entries; it held the only copy of {names}{more}"
+                )
             shutil.rmtree(old, ignore_errors=True)
         else:
             with contextlib.suppress(OSError):
@@ -1912,15 +1938,28 @@ def _quarantine_entry(qroot: Path, label: str) -> Path | None:
 
 
 def _quarantine_move(src: Path, entry: Path, rel: str) -> bool:
-    """Move src to entry/<rel>/<name>; False leaves src untouched in place."""
+    """Move src to entry/<rel>/<name>; False leaves src untouched in place.
+
+    The pair is appended to the entry manifest so `quarantine_restore.py` can
+    put the file back without the operator remembering which `--world` (or
+    which log) produced the entry.
+    """
     dest_root = entry / rel
+    dest = dest_root / src.name
     try:
         dest_root.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest_root / src.name))
-        return True
+        shutil.move(str(src), str(dest))
     except OSError as ex:
         warn(f"quarantine: could not move {src} aside: {ex}")
         return False
+    try:
+        quarantine_restore.record(entry, src, dest)
+    except OSError as ex:
+        # The bytes are in quarantine and the entry listing still shows the
+        # file; only the recorded source path is lost, so this is a warning,
+        # not a reason to fail a run that already preserved the data.
+        warn(f"quarantine: could not record restore path for {src}: {ex}")
+    return True
 
 
 class FreshSaveError(RuntimeError):
@@ -2002,6 +2041,10 @@ def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> bool:
     except OSError as ex:
         warn(f"could not preserve previous {kind}: {ex}")
         return False
+    try:
+        quarantine_restore.record(entry, path, entry / path.name)
+    except OSError as ex:
+        warn(f"quarantine: could not record restore path for {path}: {ex}")
     return True
 
 
@@ -2641,9 +2684,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--logdir",
         type=Path,
-        default=Path(
-            os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest"))
-        ),
+        default=default_logdir(),
         help="report/server log dir (env LOGDIR)",
     )
     ap.add_argument(

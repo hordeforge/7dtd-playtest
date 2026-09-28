@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Offline gate: the fresh-save quarantine restore path.
+
+`--fresh-save` never hard-deletes: the zdtd world state, its chunk overlays
+and the previous client log move under `<logdir>/quarantine/`, and every
+move records `{src, dest}` in the entry's `restore.jsonl`. That manifest is
+the only way back for a world a mispointed `--world` swept aside, so this
+gate drives the real recorder and the shipped CLI: a file moved aside comes
+back byte for byte at its original path, and nothing is written without
+`--apply`.
+"""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+from unittest import mock
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+import playtest_run  # noqa: E402
+import quarantine_restore as qr  # noqa: E402
+
+
+def test_wiped_world_is_restorable_from_its_manifest() -> None:
+    """fresh_zdtd_world + restore: every moved file returns to its own path."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "logdir" / "quarantine"
+        world = root / "worlds" / "playtest_auto"
+        world.mkdir(parents=True)
+        payloads = {
+            "players.zsv": "players",
+            "containers.zct": "containers",
+            "blockmeta.zbm": "blockmeta",
+            "c_0_0.zch": "chunk",
+        }
+        for name, body in payloads.items():
+            (world / name).write_text(body, encoding="utf-8")
+        (world / "map.png").write_text("keep", encoding="utf-8")
+
+        playtest_run.fresh_zdtd_world(world, qroot)
+
+        entries = qr.entries(qroot)
+        assert len(entries) == 1, f"want one quarantine entry, got {entries}"
+        pairs = qr.read_manifest(entries[0])
+        assert {src for src, _ in pairs} == {world / name for name in payloads}, (
+            "every moved file must be recorded with its original path"
+        )
+        for _src, dest in pairs:
+            assert dest.is_file(), f"{dest} must hold the quarantined bytes"
+
+        rc = qr.main([
+            "restore", entries[0].name, "--quarantine", str(qroot), "--apply",
+        ])
+        assert rc == 0, f"restore should succeed, got {rc}"
+        for name, body in payloads.items():
+            restored = world / name
+            assert restored.is_file(), f"{name} must be back at its original path"
+            assert restored.read_text(encoding="utf-8") == body, (
+                f"{name} must come back byte for byte"
+            )
+        assert (world / "map.png").read_text(encoding="utf-8") == "keep"
+        print("PASS wiped world restored from its manifest")
+
+
+def test_manifest_record_is_durable_and_parseable() -> None:
+    """One JSON object per line, fsynced, and a torn line costs only itself."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        entry = Path(td) / "entry"
+        entry.mkdir()
+        a, b = Path(td) / "a.log", Path(td) / "b.log"
+        qr.record(entry, a, entry / "a.log")
+        qr.record(entry, b, entry / "b.log")
+        with open(qr.manifest_path(entry), "a", encoding="utf-8") as fh:
+            fh.write('{"src": 1}\nnot json\n')  # a half-written tail
+
+        pairs = qr.read_manifest(entry)
+        assert [src for src, _ in pairs] == [a, b], f"got {pairs}"
+        assert qr.skipped_manifest_lines(entry) == 2
+        first = json.loads(qr.manifest_path(entry).read_text(encoding="utf-8").splitlines()[0])
+        assert set(first) == {"src", "dest"}
+        print("PASS manifest lines are durable JSON, unreadable ones skipped")
+
+
+def test_restore_is_dry_run_by_default_and_refuses_to_clobber() -> None:
+    """No bytes without --apply; an occupied original path is kept."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        qroot = root / "quarantine"
+        qroot.mkdir()
+        entry = qroot / "20260101T000000Z-client-log"
+        entry.mkdir()
+        original = root / "client.log"
+        kept = entry / "client.log"
+        kept.write_text("previous run", encoding="utf-8")
+        qr.record(entry, original, kept)
+
+        base = ["restore", entry.name, "--quarantine", str(qroot)]
+        assert qr.main(base) == 0, "dry run must succeed"
+        assert not original.exists(), "a dry run must not write anything"
+
+        original.write_text("this run", encoding="utf-8")
+        assert qr.main([*base, "--apply"]) == 1, "an occupied path is a blocked restore"
+        assert original.read_text(encoding="utf-8") == "this run", (
+            "the current run's log must not be clobbered without --force"
+        )
+        assert qr.main([*base, "--apply", "--force", "--move"]) == 0
+        assert original.read_text(encoding="utf-8") == "previous run"
+        assert not kept.exists(), "--move reclaims the quarantined copy"
+        print("PASS restore is dry-run by default and never clobbers silently")
+
+
+def test_cli_fails_closed_on_a_missing_quarantine_or_entry() -> None:
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        root = Path(td)
+        missing = root / "absent"
+        assert qr.main(["list", "--quarantine", str(missing)]) == 2
+        qroot = root / "q"
+        (qroot / "20260101T000000Z-x").mkdir(parents=True)
+        assert qr.main(["restore", "nope", "--quarantine", str(qroot)]) == 2
+        # A traversal segment never resolves to an entry.
+        assert qr.main(["restore", "../etc", "--quarantine", str(qroot)]) == 2
+        assert qr.main(["restore", "20260101T000000Z-x", "--quarantine", str(qroot)]) == 2, (
+            "an entry with no manifest has nothing to restore"
+        )
+        assert qr.main(["show", "20260101T000000Z-x", "--quarantine", str(qroot)]) == 1
+        print("PASS restore CLI fails closed on a missing root, entry or manifest")
+
+
+def test_prune_names_the_last_copy_it_deletes() -> None:
+    """An entry past the keep window is the only copy of a swept-aside world.
+
+    The prune is bounded on purpose; what is not acceptable is deleting that
+    copy silently, so the paths it held are named on stderr before it goes.
+    """
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        qroot = Path(td) / "q"
+        old = qroot / "20200101T000000Z-zdtd-world--gone"
+        old.mkdir(parents=True)
+        (old / "state").mkdir()
+        (old / "state" / "players.zsv").write_text("players", encoding="utf-8")
+        qr.record(old, Path("/worlds/gone/players.zsv"), old / "state" / "players.zsv")
+        for i in range(1, 3):
+            (qroot / f"20200101T00000{i}Z-client-log").mkdir()
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            playtest_run.prune_quarantine(qroot, keep=2)
+        assert not old.exists(), "the entry is past the keep window and must go"
+        assert "/worlds/gone/players.zsv" in stderr.getvalue(), (
+            f"prune must name what it deleted, got: {stderr.getvalue()!r}"
+        )
+        print("PASS prune names the last copy it deletes")
+
+
+def test_entry_lookup_accepts_a_timestamp_prefix() -> None:
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        qroot = Path(td) / "q"
+        for name in ("20260101T000000Z-a", "20260101T000000Z-b"):
+            (qroot / name).mkdir(parents=True)
+        found = qr.resolve_entry(qroot, "20260101T000000Z")
+        assert found is not None and found.name == "20260101T000000Z-b", (
+            "a prefix must resolve to the newest matching entry"
+        )
+        exact = qr.resolve_entry(qroot, "20260101T000000Z-a")
+        assert exact is not None and exact.name == "20260101T000000Z-a"
+        assert qr.resolve_entry(qroot, "") is None
+        print("PASS entry lookup takes an exact name or a timestamp prefix")
+
+
+def test_default_root_follows_the_orchestrator_logdir() -> None:
+    """The CLI's default root is the same logdir a run writes to."""
+    with tempfile.TemporaryDirectory(prefix="playtest-quarantine-") as td:
+        with mock.patch.dict(os.environ, {"LOGDIR": td}):
+            assert qr.default_quarantine_root() == Path(td) / "quarantine"
+        assert qr.main(["list", "--quarantine", str(Path(td) / "nope")]) == 2
+        print("PASS default quarantine root follows LOGDIR")
+
+
+def main() -> int:
+    failures = 0
+    for name, fn in (
+        (
+            "wiped_world_is_restorable_from_its_manifest",
+            test_wiped_world_is_restorable_from_its_manifest,
+        ),
+        (
+            "manifest_record_is_durable_and_parseable",
+            test_manifest_record_is_durable_and_parseable,
+        ),
+        (
+            "restore_is_dry_run_by_default_and_refuses_to_clobber",
+            test_restore_is_dry_run_by_default_and_refuses_to_clobber,
+        ),
+        (
+            "cli_fails_closed_on_a_missing_quarantine_or_entry",
+            test_cli_fails_closed_on_a_missing_quarantine_or_entry,
+        ),
+        (
+            "prune_names_the_last_copy_it_deletes",
+            test_prune_names_the_last_copy_it_deletes,
+        ),
+        (
+            "entry_lookup_accepts_a_timestamp_prefix",
+            test_entry_lookup_accepts_a_timestamp_prefix,
+        ),
+        (
+            "default_root_follows_the_orchestrator_logdir",
+            test_default_root_follows_the_orchestrator_logdir,
+        ),
+    ):
+        try:
+            fn()
+        except AssertionError as ex:
+            failures += 1
+            print(f"FAIL {name}: {ex}", file=sys.stderr)
+    if failures:
+        print(f"RESULT FAIL ({failures})", file=sys.stderr)
+        return 1
+    print("RESULT PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

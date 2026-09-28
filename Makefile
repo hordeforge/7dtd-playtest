@@ -165,6 +165,7 @@ GATES := \
 	test_no_unbound_locals.py \
 	test_report_surface.py \
 	test_playtest_run_units.py \
+	test_quarantine_restore.py \
 	test_playtest_targets.py \
 	test_suite_loader.py \
 	test_suite_refs.py \
