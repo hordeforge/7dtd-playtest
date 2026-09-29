@@ -1,6 +1,6 @@
-# 7dtd-playtest
+# 🚩 Vanguard (Playtest Runner)
 
-Part of [HordeForge](https://github.com/hordeforge).
+> **Part of [HordeForge](https://github.com/hordeforge)**: High-Performance Systems Engineering for 7 Days to Die.
 
 ![CI](https://github.com/hordeforge/7dtd-playtest/actions/workflows/ci.yml/badge.svg)
 ![coverage](https://raw.githubusercontent.com/hordeforge/7dtd-playtest/badges/coverage.svg)
@@ -176,7 +176,7 @@ Full scenario list: **[SCENARIOS.md](SCENARIOS.md)** (demo / benchmark / full ca
 
 `playtest-compare` diffs per case into `playtest-compare.{md,json}` and also
 reports a wall-time axis (server session seconds, from the orchestrator
-reports) - a cost observation, never a per-case finding (zdtd being faster is
+reports): a cost observation, never a per-case finding (zdtd being faster is
 a known divergence, not a mismatch).
 
 Gameplay surface as verified by the v0.8.0 live run (stock motor / stock
@@ -543,7 +543,7 @@ below the visible road in the regression scene. Two naive
 approaches were tried and abandoned: driving the entity's motor
 (`SetMoveForward`) made it sprint its full `MoveSpeed` away from the camera
 (~80 m, a ~67 m Y range), and stepping it along its own facing at a fixed
-world offset let it walk out of the player's view entirely — in both cases
+world offset let it walk out of the player's view entirely; in both cases
 the case "passed" (position moved, renderer present) while the frames showed
 only terrain, because nothing ever framed the creature. The assert line
 reports the entity's **Y range** (`y[min..max]`) across the walk and checks a
@@ -650,7 +650,7 @@ PLAYTEST_CONCERN_SUITES=mod_bundle,mod_block_model,mod_editorless \
 ```
 
 The declared list must be **exactly** those tokens. Look (`*_look`) and
-block (`*_block_*`) are never one concern, even if declared — run them as
+block (`*_block_*`) are never one concern, even if declared; run them as
 separate invocations:
 
 ```bash
@@ -1219,7 +1219,7 @@ packaging, path, gate-list, SBOM and coverage-badge surfaces; `GATES` in the
 Makefile is the full list, and `scripts/test_gate_list.py` fails when a gate
 file is missing from it or an entry stops existing)
 plus a wider `make dst DST_SEEDS=200` sweep on every push. Locally, `make check`
-runs exactly what CI runs, in one step. No game install needed - these are pure Python. The mod
+runs exactly what CI runs, in one step. No game install needed: these are pure Python. The mod
 build itself is not CI-able (references game DLLs), so the offline gates are
 the push-time guard for catalog/doc drift.
 
