@@ -108,7 +108,7 @@ doctor:
 				"  install: e.g. sudo apt install shellcheck" ;; \
 			yamllint) printf '%s\n' \
 				"missing: yamllint  (lints .github/**/*.yml; CI always runs it)" \
-				"  install: e.g. pipx install yamllint" \
+				"  install: e.g. uv tool install yamllint" \
 				"  or run the gate without it locally: make lint SKIP_YAML=1" ;; \
 			esac; \
 		}; \
@@ -242,7 +242,7 @@ lint: require-uv
 	elif command -v yamllint >/dev/null 2>&1; then :; \
 	else \
 		echo "make lint: 'yamllint' is not on PATH; it lints .github/**/*.yml."; \
-		echo "  install it with your package manager, e.g.: pipx install yamllint"; \
+		echo "  install it with uv or your package manager, e.g.: uv tool install yamllint"; \
 		echo "  or, on a host that cannot install it, run: make lint SKIP_YAML=1"; \
 		echo "  (CI always runs it, so a skipped gate still blocks the merge)"; \
 		exit 2; \
