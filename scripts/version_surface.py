@@ -86,9 +86,13 @@ def _tag_object_types(root: Path) -> dict[str, str] | None:
     commit. None when git cannot be run here (tarball download, a synthetic
     tree in the units), where the caller falls back to reading the refs.
     """
+    git_dir = _git_dir(root)
+    if git_dir is None:
+        return None
     try:
         done = subprocess.run(
-            ["git", "for-each-ref", "--format=%(refname:short) %(objecttype)", "refs/tags"],
+            ["git", "--git-dir", str(git_dir.resolve()), "for-each-ref",
+             "--format=%(refname:short) %(objecttype)", "refs/tags"],
             cwd=root,
             capture_output=True,
             encoding="utf-8",

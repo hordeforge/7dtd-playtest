@@ -461,6 +461,11 @@ Migration, by symbol:
 
 ### Fixed
 
+- Restore the mod build after the entity probe extraction: remove concatenated
+  file headers from the C# source and expose its two helpers to sibling cases.
+- Read tag objects only from the checkout's own Git directory, so synthetic
+  validation trees inside a checkout cannot inherit its tags from a parent.
+
 - **The two newest releases render as dead text in the changelog, and
   "what changed since" started two releases ago.** `## [0.12.0]` and
   `## [0.13.0]` had no `[x.y.z]:` link definition, so GitHub rendered the
