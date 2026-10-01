@@ -250,8 +250,8 @@ def _server_map(obj: dict[str, Any], *, path: str) -> tuple[tuple[str, str], ...
         if key.strip().lower() in _ORCHESTRATOR_TELNET_KEYS_LOWER:
             raise SuiteLoadError(
                 f"{path}: server property {key!r} is the orchestrator's, not a suite's "
-                "to declare; it sets TelnetEnabled, TelnetRemoteAllowedIPs and the "
-                "per-run TelnetPassword itself after copying this block"
+                "to declare; it enables the stock empty-password loopback listener "
+                "itself after copying this block"
             )
         if isinstance(value, bool):
             # Stock ParseBool accepts only true/false, never Python's True/False.

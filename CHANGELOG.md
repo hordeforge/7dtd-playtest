@@ -318,6 +318,12 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- Managed stock runs use the game's empty-password loopback telnet mode.
+  `PLAYTEST_TELNET_PASSWORD` and `--telnet-password` now apply only to attach
+  runs; managed stock reports `telnet_password=loopback`. Remove the unsupported
+  `TelnetRemoteAllowedIPs` property that prevented the installed stock server
+  from starting. Reachability remains restricted to the local machine.
+
 - **`make package` writes the archive beside the build output, not inside
   it.** With no `PACKAGE=`, `scripts/mod_package.py` named the archive in the
   dist directory it was cutting from

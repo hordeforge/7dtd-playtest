@@ -1733,7 +1733,7 @@ def test_config_summary_redacts_telnet_password() -> None:
     )
     line = playtest_run.config_summary(args)
     assert "hunter2-secret" not in line, f"password leaked into config line: {line}"
-    assert "telnet_password=set" in line, line
+    assert "telnet_password=loopback" in line, line
     assert "suite=smoke" in line and "port=26900" in line and "server=stock" in line, line
     assert "fresh_save=True" in line, line
     assert "provision=managed" in line and "readonly=False" in line, line
@@ -1746,7 +1746,7 @@ def test_config_summary_redacts_telnet_password() -> None:
     line = playtest_run.config_summary(attach)
     assert "telnet_password=unset" in line, line
     generated = argparse.Namespace(**{**vars(args), "telnet_password": ""})
-    assert "telnet_password=set" in playtest_run.config_summary(generated)
+    assert "telnet_password=loopback" in playtest_run.config_summary(generated)
 
     zdtd = argparse.Namespace(**{**vars(args), "server": "zdtd"})
     assert "world_name" not in playtest_run.config_summary(zdtd), (
@@ -2612,11 +2612,10 @@ def test_progress_crumb_only_quotes_harness_lines() -> None:
 
 
 def test_resolve_telnet_password_paths() -> None:
-    """Attach mode requires an operator credential; owned servers receive a
-    unique ephemeral secret that is never logged."""
+    """Attach uses its operator credential; managed stock binds loopback."""
     resolve = playtest_run.resolve_telnet_password
 
-    assert resolve("operator-pw", no_server=False) == "operator-pw"
+    assert resolve("operator-pw", no_server=False) == ""
     assert resolve("operator-pw", no_server=True) == "operator-pw"
 
     try:
@@ -2626,13 +2625,8 @@ def test_resolve_telnet_password_paths() -> None:
     else:
         raise AssertionError("attach mode accepted a missing telnet credential")
 
-    generated = [resolve("", no_server=False) for _ in range(2)]
-    assert len(set(generated)) == 2, "generated secrets must differ per call"
-    for pw in generated:
-        # Command-safe alphabet (token_urlsafe): survives the generated XML
-        # attribute and the telnet wire unescaped.
-        assert re.fullmatch(r"[A-Za-z0-9_-]{10,40}", pw), f"bad shape: {pw!r}"
-    print("PASS telnet_password_resolution operator/attach/generated split")
+    assert resolve("", no_server=False) == ""
+    print("PASS telnet_password_resolution attach credential / managed loopback")
 
 
 def test_client_install_is_discovered_from_steam_libraries() -> None:
@@ -3130,10 +3124,8 @@ def test_start_server_does_not_flip_no_server() -> None:
 
 def test_telnet_admin_pinned_to_loopback() -> None:
     src = PLAYTEST_RUN.read_text(encoding="utf-8")
-    assert 'config["TelnetRemoteAllowedIPs"] = "127.0.0.1"' in src, (
-        "the generated server config must pin the telnet admin plane to loopback; "
-        "TelnetAdmin only ever connects from 127.0.0.1, so any other source is refused"
-    )
+    assert 'config["TelnetPassword"] = ""' in src
+    assert 'config["TelnetRemoteAllowedIPs"]' not in src
     # Orchestrator-owned, so a suite must not be able to widen it. No suite
     # declares any of the three; the loader refuses them in any capitalisation
     # (test_suite_loader.py covers that half).
@@ -3147,7 +3139,7 @@ def test_telnet_admin_pinned_to_loopback() -> None:
     # suite block plus defaults is not the server a re-run reproduces when the
     # admin plane is missing from the record.
     snapshot = src.find("args._applied_server_config = {")
-    for key in ("TelnetEnabled", "TelnetRemoteAllowedIPs", "TelnetPassword"):
+    for key in ("TelnetEnabled", "TelnetPassword"):
         at = src.find(f'config["{key}"]')
         assert 0 <= at < snapshot, (
             f"{key} is forced after the applied-config snapshot, so the run "
