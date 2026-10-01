@@ -471,6 +471,7 @@ Migration, by symbol:
   file headers from the C# source and expose its two helpers to sibling cases.
 - Read tag objects only from the checkout's own Git directory, so synthetic
   validation trees inside a checkout cannot inherit its tags from a parent.
+- Fetch the release tags in CI so the version-surface gate checks real history.
 
 - **The two newest releases render as dead text in the changelog, and
   "what changed since" started two releases ago.** `## [0.12.0]` and
