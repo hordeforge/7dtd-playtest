@@ -446,7 +446,7 @@ def check_log_gate() -> None:
         )
         # Recreated under a new inode, same story.
         recreated = "\n".join((
-            f"rm -f {shlex.quote(str(log))}",
+            f"mv {shlex.quote(str(log))} {shlex.quote(str(log.with_suffix('.previous')))}",
             f"printf 'scene staged after_recreate\\r\\n' > {shlex.quote(str(log))}",
         ))
         assert "after_recreate" in read_log_since(fragment, log, recreated), (

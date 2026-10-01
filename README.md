@@ -251,7 +251,7 @@ in the log without rerunning with `--help`.
 | `PLAYTEST_TRACE_ENTITY` | empty | Per-second spawned-entity pose / renderer / grounding / collision probes (`--trace-entity`). Boolean, see below |
 | `PLAYTEST_SESSION_ID` | *(generated)* | Exclusivity-lock holder id (`--session`) |
 | `PLAYTEST_CONCERN_SUITES` | empty | The exact multi-id `--suite` list that is one declared concern |
-| `PLAYTEST_TELNET_PASSWORD` | *(generated)* | Local telnet password (see [Host orchestrator secrets](#host-orchestrator-secrets); prefer the env var over `--telnet-password`, which is visible in process listings). Unset means an ephemeral per-run secret for servers the orchestrator starts; `--no-server` attach to a stock dedicated requires an explicit value (a zdtd attach has no telnet plane and needs none) |
+| `PLAYTEST_TELNET_PASSWORD` | *(empty for managed)* | Used for stock `--no-server` attach, which requires an explicit credential (prefer the env var over the CLI). Managed stock servers use the game's native empty-password loopback listener and ignore this value; zdtd attach needs none. See [Host orchestrator secrets](#host-orchestrator-secrets). |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
 | `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the `scripts/capture_*.sh` helpers watch, and what `--print-client-log` prints before it exits. A run parses this path when it is set; unset it to have the run resolve the log from the client instance's own install. Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
 
@@ -1238,19 +1238,14 @@ moving files.
 
 ### Host orchestrator secrets
 
-The stock dedicated telnet password is local-only. When the orchestrator
-starts the dedicated itself, an unset `PLAYTEST_TELNET_PASSWORD` (and
-`--telnet-password`) generates an ephemeral per-run secret: it is written
-into the generated server config (chmod 0600) and used by the orchestrator's
-telnet client, so the two can never diverge and a network-reachable telnet
-listener never opens with a published default. `--no-server` runs attach to a
-stock dedicated whose config this process did not write, so they require
-`PLAYTEST_TELNET_PASSWORD` (or `--telnet-password`); a zdtd attach has no
-telnet plane and requires neither. The supplied value is
-used only by the orchestrator's telnet client.
-It is not a production secret: the admin plane is reachable only from loopback
-in playtest runs. The generated config sets `TelnetRemoteAllowedIPs=127.0.0.1`
-alongside `TelnetEnabled`, so the telnet listener refuses any non-local source
-even if it is network-reachable. The built-in suites also declare
-`ServerVisibility=0`, so the game port itself stays LAN-visible on Steam+LAN
-platforms; the orchestrator renders only the three telnet keys.
+Managed stock runs set `TelnetEnabled=true` and an empty `TelnetPassword`.
+The stock `TelnetConsole` binds `IPAddress.Loopback` in that mode; a nonempty
+password instead binds `IPAddress.Any`. `TelnetRemoteAllowedIPs` is not a
+supported stock config property. The orchestrator and suite loader own this
+choice, so a suite or inherited password cannot expose the admin listener.
+
+Stock `--no-server` attach runs require `PLAYTEST_TELNET_PASSWORD` (or
+`--telnet-password`) for the server the operator owns. Managed stock runs ignore
+that value. A zdtd attach has no telnet plane and requires neither. Passwords
+are never logged. Built-in suites also declare `ServerVisibility=0` for the
+game port; that setting is separate from the telnet listener's binding.

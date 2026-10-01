@@ -318,6 +318,12 @@ Release model (inferred practice, now pinned by `make test`):
 
 ### Changed
 
+- Managed stock runs use the game's empty-password loopback telnet mode.
+  `PLAYTEST_TELNET_PASSWORD` and `--telnet-password` now apply only to attach
+  runs; managed stock reports `telnet_password=loopback`. Remove the unsupported
+  `TelnetRemoteAllowedIPs` property that prevented the installed stock server
+  from starting. Reachability remains restricted to the local machine.
+
 - **`make package` writes the archive beside the build output, not inside
   it.** With no `PACKAGE=`, `scripts/mod_package.py` named the archive in the
   dist directory it was cutting from
@@ -460,6 +466,14 @@ Migration, by symbol:
   than the raw string. Gated by `scripts/test_chat_probe_surface.py`.
 
 ### Fixed
+
+- Restore the mod build after the entity probe extraction: remove concatenated
+  file headers from the C# source and expose its two helpers to sibling cases.
+- Read tag objects only from the checkout's own Git directory, so synthetic
+  validation trees inside a checkout cannot inherit its tags from a parent.
+- Fetch the release tags in CI so the version-surface gate checks real history.
+- Preserve the previous capture log in the recreation regression fixture so
+  filesystems that reuse unlinked inodes still exercise a genuinely new file.
 
 - **The two newest releases render as dead text in the changelog, and
   "what changed since" started two releases ago.** `## [0.12.0]` and

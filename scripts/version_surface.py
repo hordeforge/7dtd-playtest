@@ -1,4 +1,5 @@
 """Shared version-surface checks used by the offline gate and its units."""
+
 from __future__ import annotations
 
 import re
@@ -19,9 +20,7 @@ BREAKING_MARKER = "**Breaking.**"
 # (CI keeps running the old uv against a lock it did not write) and fatal in
 # the other (a contributor's newer uv is refused), so the pair is checked.
 UV_REQUIRED_VERSION_RE = re.compile(r'required-version\s*=\s*">=([0-9]+\.[0-9]+\.[0-9]+)')
-UV_VERSION_ENV_RE = re.compile(
-    r'^\s*UV_VERSION:\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', re.MULTILINE
-)
+UV_VERSION_ENV_RE = re.compile(r'^\s*UV_VERSION:\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', re.MULTILINE)
 SETUP_UV_USE_RE = re.compile(r"uses:\s*astral-sh/setup-uv@")
 UV_VERSION_REF = "${{ env.UV_VERSION }}"
 # How many lines after a `uses: astral-sh/setup-uv@` line still belong to that
@@ -86,9 +85,19 @@ def _tag_object_types(root: Path) -> dict[str, str] | None:
     commit. None when git cannot be run here (tarball download, a synthetic
     tree in the units), where the caller falls back to reading the refs.
     """
+    git_dir = _git_dir(root)
+    if git_dir is None:
+        return None
     try:
         done = subprocess.run(
-            ["git", "for-each-ref", "--format=%(refname:short) %(objecttype)", "refs/tags"],
+            [
+                "git",
+                "--git-dir",
+                str(git_dir.resolve()),
+                "for-each-ref",
+                "--format=%(refname:short) %(objecttype)",
+                "refs/tags",
+            ],
             cwd=root,
             capture_output=True,
             encoding="utf-8",
@@ -172,9 +181,7 @@ def discover_tag_versions(root: Path) -> list[str]:
 
 def discover_lightweight_tag_versions(root: Path) -> list[str]:
     """X.Y.Z versions whose local ``vX.Y.Z`` tag is a lightweight ref."""
-    return _ordered_versions(
-        {name for name, light in _tag_refs(root).items() if light}
-    )
+    return _ordered_versions({name for name, light in _tag_refs(root).items() if light})
 
 
 def uncovered_tag_versions(tag_versions: list[str], headings: list[str]) -> list[str]:
@@ -236,8 +243,7 @@ def undocumented_lightweight_tags(changelog: str, lightweight: list[str]) -> lis
 def _release_spans(changelog: str) -> list[tuple[int, int, str]]:
     """(body start, body end, release name) for each ``## [name]`` entry."""
     starts = [
-        (match.start(), match.end(), match.group(1))
-        for match in SECTION_RE.finditer(changelog)
+        (match.start(), match.end(), match.group(1)) for match in SECTION_RE.finditer(changelog)
     ]
     spans: list[tuple[int, int, str]] = []
     for index, (_start, end, name) in enumerate(starts):
@@ -339,9 +345,7 @@ def uv_pin_problems(workflow: str, floor: str) -> list[str]:
     if declared is None:
         problems.append("sets uv up but declares no workflow-level UV_VERSION")
     elif declared.group(1) != floor:
-        problems.append(
-            f"pins UV_VERSION {declared.group(1)}, pyproject requires >= {floor}"
-        )
+        problems.append(f"pins UV_VERSION {declared.group(1)}, pyproject requires >= {floor}")
 
     lines = workflow.splitlines()
     for index, line in enumerate(lines):

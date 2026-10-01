@@ -111,7 +111,7 @@ stop_recorder() {
 # busy. A SIGTERM to a shell blocked on a foreground child is not delivered
 # until that child finishes, which is why the suite runs backgrounded and is
 # torn down from here.
-# shellcheck disable=SC2329  # the trap below is its only caller
+# shellcheck disable=SC2317,SC2329  # the trap below is its only caller
 stop_all() {
 	stop_recorder
 	capture_stop_run
