@@ -472,6 +472,8 @@ Migration, by symbol:
 - Read tag objects only from the checkout's own Git directory, so synthetic
   validation trees inside a checkout cannot inherit its tags from a parent.
 - Fetch the release tags in CI so the version-surface gate checks real history.
+- Preserve the previous capture log in the recreation regression fixture so
+  filesystems that reuse unlinked inodes still exercise a genuinely new file.
 
 - **The two newest releases render as dead text in the changelog, and
   "what changed since" started two releases ago.** `## [0.12.0]` and
