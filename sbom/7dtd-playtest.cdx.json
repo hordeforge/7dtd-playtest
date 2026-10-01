@@ -68,10 +68,10 @@
           "value": "true"
         }
       ],
-      "purl": "pkg:pypi/coverage@7.16.0",
+      "purl": "pkg:pypi/coverage@7.16.1",
       "scope": "excluded",
       "type": "library",
-      "version": "7.16.0"
+      "version": "7.16.1"
     },
     {
       "licenses": [
@@ -308,10 +308,10 @@
           "value": "true"
         }
       ],
-      "purl": "pkg:pypi/ruff@0.16.6",
+      "purl": "pkg:pypi/ruff@0.16.9",
       "scope": "excluded",
       "type": "library",
-      "version": "0.16.6"
+      "version": "0.16.9"
     },
     {
       "licenses": [
@@ -401,7 +401,7 @@
       ]
     }
   },
-  "serialNumber": "urn:uuid:77a252ae-2b79-593a-876c-97615539479c",
+  "serialNumber": "urn:uuid:d8ee5465-fb3b-5918-ad52-a62dd7a230bd",
   "specVersion": "1.6",
   "version": 1
 }
