@@ -99,16 +99,8 @@ Release model (inferred practice, now pinned by `make test`):
   measured report is substituted, and the gate is registered in the Makefile
   `GATES` list, so it runs under `make test` and `make check`.
 
-- **`make package` builds the release archive.** The release workflow told a
-  maintainer to run a target the Makefile never had, so the mod zip had no
-  command to produce it. The target builds the mod, then writes
-  `dist/7dtd-playtest-<version>.zip` (version read from `ModInfo.xml`) with the
-  `Mods/7dtd-playtest/` layout the game extracts from, using stdlib
-  `python -m zipfile` so packaging needs no host `zip` on top of uv, and
-  leaving the build's pdb out of the archive. The
-  gate-list gate now also fails when a workflow names a make target the
-  Makefile does not define, so the same drift cannot come back. `make sbom`
-  also gained the `require-uv` preflight every other uv target has.
+- Workflow make targets are checked against the Makefile. `make sbom` uses
+  the same `require-uv` preflight as the other Python targets.
 
 - **Injectable clock for the orchestrator** (`playtest_run.use_clock()`).
   Every time read and wait in `playtest_run.py` now goes through
