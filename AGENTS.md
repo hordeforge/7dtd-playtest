@@ -468,7 +468,7 @@ the run order that both `make test` and `make coverage` expand):
    repeats an impact heading, and CHANGELOG.md must carry an [Unreleased]
    section plus the current release entry, a `[<version>]:` link definition
    for every released entry, an `[Unreleased]` compare link starting at the
-   newest tag, and a mention of every lightweight tag (the release model
+   newest tag or newer manifest version being prepared, and a mention of every lightweight tag (the release model
    promises annotated `vX.Y.Z` refs). Tags are read from the git common
    dir, so a linked worktree checks coverage instead of reporting it
    inapplicable; whether a tag is lightweight is read from the ref's own

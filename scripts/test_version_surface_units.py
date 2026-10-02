@@ -33,7 +33,6 @@ from version_surface import (  # noqa: E402
     undocumented_lightweight_tags,
     unlinked_release_headings,
     unnamed_replacement_rows,
-    unreleased_compare_base,
     uv_pin_problems,
 )
 
@@ -424,6 +423,33 @@ def main() -> int:
         assert "newest tag is v9.9.9" in proc.stderr, proc.stderr
         print("OK the gate fails an [Unreleased] range that starts behind the newest tag")
 
+        prepared = base / "prepared-release"
+        make_root(prepared, version="10.0.0", headings=["10.0.0", "9.9.9", "0.8.0"])
+        path = prepared / "CHANGELOG.md"
+        changelog = path.read_text(encoding="utf-8")
+        path.write_text(
+            changelog.replace(
+                f"[Unreleased]: {COMPARE_URL % NEWEST_TAG}",
+                f"[Unreleased]: {COMPARE_URL % '10.0.0'}",
+            ),
+            encoding="utf-8",
+        )
+        proc = run_gate(prepared)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        print("OK a documented version bump passes before its tag exists")
+        for invalid in (NEWEST_TAG, "11.0.0"):
+            path.write_text(
+                changelog.replace(
+                    f"[Unreleased]: {COMPARE_URL % NEWEST_TAG}",
+                    f"[Unreleased]: {COMPARE_URL % invalid}",
+                ),
+                encoding="utf-8",
+            )
+            proc = run_gate(prepared)
+            assert proc.returncode != 0, proc.stdout + proc.stderr
+            assert "CHANGELOG.md [Unreleased] compares from" in proc.stderr, proc.stderr
+        print("OK a prepared release rejects stale and unrelated future ranges")
+
         unsaid = base / "unsaid-lightweight"
         make_root(
             unsaid,
@@ -446,10 +472,8 @@ def main() -> int:
     assert unlinked_release_headings(real) == [], unlinked_release_headings(real)
     tags = discover_tag_versions(_ROOT)
     assert tags, "this repository ships releases; no tag visible means none was fetched"
-    assert unreleased_compare_base(real) == tags[-1], (
-        f"[Unreleased] compares from {unreleased_compare_base(real)!r}, "
-        f"newest tag is v{tags[-1]}"
-    )
+    proc = run_gate(_ROOT)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
     light = discover_lightweight_tag_versions(_ROOT)
     assert light, "the changelog names lightweight tags; none are visible here"
     assert undocumented_lightweight_tags(real, light) == []

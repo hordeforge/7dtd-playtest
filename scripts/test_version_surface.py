@@ -5,7 +5,7 @@ The released version is declared in three places (ModInfo.xml, ModIdentity.cs
 Version, dist manifest) and described by CHANGELOG.md. This gate fails when
 they drift, when a visible vX.Y.Z git tag has no changelog entry, when a
 release entry has no link definition, when the [Unreleased] compare link
-starts behind the newest tag, or when a lightweight tag is not named in the
+starts behind the newest tag or prepared version, or when a lightweight tag is not named in the
 notes, so a bump cannot ship half-applied, unlinked, or without
 consumer-facing notes.
 """
@@ -136,13 +136,16 @@ def main() -> int:
     base = unreleased_compare_base(changelog)
     if tag_versions:
         newest = tag_versions[-1]
-        assert base == newest, (
+        expected = max(
+            [manifest, newest], key=lambda version: tuple(map(int, version.split(".")))
+        )
+        assert base == expected, (
             "CHANGELOG.md [Unreleased] compares from "
             + (f"v{base}" if base else "nothing")
-            + f" but the newest tag is v{newest}; the 'what changed since the "
-            "last release' range must start at the last release"
+            + f" but the newest tag is v{newest} and the manifest is {manifest}; "
+            + f"the range must start at v{expected}"
         )
-        print(f"OK [Unreleased] compares from the newest tag v{newest}")
+        print(f"OK [Unreleased] compares from the newest documented version v{expected}")
 
     lightweight = discover_lightweight_tag_versions(ROOT)
     if lightweight:
