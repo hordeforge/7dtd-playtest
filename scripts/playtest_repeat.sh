@@ -109,7 +109,7 @@ sweep_stale_lap_marks
 # leave nothing behind. A SIGKILLed run still leaves one; the sweep above is
 # what bounds those.
 LAP_MARK=""
-# shellcheck disable=SC2329  # the trap below is its only caller
+# shellcheck disable=SC2317,SC2329  # the trap below is its only caller
 release_lap_mark() {
   if [[ -n "$LAP_MARK" ]]; then
     rm -f "$LAP_MARK"

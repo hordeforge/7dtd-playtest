@@ -294,7 +294,7 @@ recognized automatically. `--no-fixtures` remains the overriding opt-out.
 | `PLAYTEST_SESSION_ID` | Lock holder session id (or `--session`; auto-generated if empty) |
 | `PLAYTEST_LOCK_STALE_SEC` | Heartbeat age after which a lock is stale (default 120) |
 | `PLAYTEST_LOCK_HEARTBEAT_SEC` | How often the orchestrator refreshes heartbeat (default 30) |
-| `PLAYTEST_TELNET_PASSWORD` | Stock dedicated telnet password (unset: ephemeral per-run secret rendered into the instance config; an attach run requires an explicit value) |
+| `PLAYTEST_TELNET_PASSWORD` | Stock attach credential; managed stock uses the game's empty-password loopback mode and ignores this value |
 | `PLAYTEST_CLIENT_LOG` | Client log the run and `scripts/capture_*.sh` watch. Unset resolves through `COMPAT`, then the discovered client install; `--print-client-log` prints it and exits, so no helper carries a hardcoded Steam root |
 
 `residual` expands to `mp,soak` only. `make playtest-residual` is a **different**
@@ -468,7 +468,7 @@ the run order that both `make test` and `make coverage` expand):
    repeats an impact heading, and CHANGELOG.md must carry an [Unreleased]
    section plus the current release entry, a `[<version>]:` link definition
    for every released entry, an `[Unreleased]` compare link starting at the
-   newest tag, and a mention of every lightweight tag (the release model
+   newest tag or newer manifest version being prepared, and a mention of every lightweight tag (the release model
    promises annotated `vX.Y.Z` refs). Tags are read from the git common
    dir, so a linked worktree checks coverage instead of reporting it
    inapplicable; whether a tag is lightweight is read from the ref's own

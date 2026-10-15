@@ -13,7 +13,8 @@ Release model (inferred practice, now pinned by `make test`):
   disagree, if the shipped manifest went stale, if the manifest version or
   any visible `vX.Y.Z` tag has no entry below, if a released entry has no
   link definition, if the `[Unreleased]` compare link starts behind the
-  newest tag, or if a lightweight tag is not named here.
+  newest tag or newer manifest version being prepared, or if a lightweight
+  tag is not named here.
 - The host orchestrator package (`pyproject.toml`) is an unpublished,
   independently versioned helper; consumers interact with it through the
   stable log contract and exit codes documented in the README, not through
@@ -41,111 +42,7 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
-### Security
-
-- **The shipped dependency inventory is committed and gated.** `make sbom`
-  wrote its CycloneDX document under the gitignored `dist/`, so nothing a tag
-  carried described what that tag depended on, and the gate only ever checked
-  an inventory it had just built in memory. The inventory is now committed at
-  `sbom/7dtd-playtest.cdx.json`, and `scripts/test_dep_sbom.py` fails the push
-  when it is not byte-identical to a fresh build from `uv.lock` and
-  `Source/PlayTestMod/packages.lock.json`, naming the added, removed or
-  re-versioned components. A dependency can no longer land, or an inventory
-  age past the lockfile it describes, without the offline gates noticing. The
-  build is deterministic (sorted keys, a content-hash serial number, no
-  timestamp), so the committed file is reproducible rather than a snapshot.
-
-- **A suite can no longer declare the telnet admin plane.** A `server` block
-  naming `TelnetEnabled`, `TelnetRemoteAllowedIPs` or `TelnetPassword` in any
-  capitalisation now fails closed with a `SuiteLoadError`. The orchestrator
-  sets all three after copying the suite's block in, so a declaration was
-  either silently overridden or, with a different capitalisation, a second
-  property line the orchestrator's exact-case filter did not replace, leaving
-  which value the game honours to the server's config reader. A suite-declared
-  password was also echoed verbatim into `report-*.json`. The shipped suites
-  declared only the redundant `TelnetEnabled`, now dropped.
-  `schema/suite.schema.json` states the three names so an external suite
-  author is refused by their editor too.
-- **Run artifacts are published 0600.** `write_text_atomic` created its temp
-  file with the umask's mode and followed anything already sitting at the temp
-  name, so the report, junit XML, run-ended marker and apm dump landed
-  world-readable (they carry the operator's home directory, the world name and
-  the server's internal dump), and a file or symlink planted at the temp name
-  would be written through and then renamed into place as this run's report.
-  The temp file is now opened `O_EXCL` at 0600.
-- **A player's display name no longer reaches the run transcript.** Every
-  admin reply names the entities it talks about (`'Alice' (id=171, ...)` for
-  stock, `(entity 107) Alice` for zdtd), and the name is whatever a remote LAN
-  peer chose, so each logged slice of a `listplayers`, `listents`, `kill` or
-  `teleportplayer` reply carried a person's name into a log CI uploads. The
-  caller-facing behaviour is unchanged: a redacted line keeps its entity id,
-  which is all the parsing and the counts read, and only the name and the tail
-  past the id are dropped. Committed fixtures used the repository owner's own
-  account name; they now use synthetic ones.
-- **Two more paths carried a peer's name or text into the run transcript.**
-  A telnet reply was redacted for the entity ids the caller had acted on, so
-  a second line in the same reply (another player in a kill batch, in a
-  `teleportplayer` or in a `bot player` confirmation) kept its name, and a
-  `cvar get -p <id>` whose value never arrived logged its reply tail
-  unredacted. Redaction is now decided by the reply itself: an entity line
-  keeps its id and loses its name unless the shared AI table says the line is
-  a prefab, which also teaches `player_entity_ids` the zdtd `(entity N)`
-  spelling. The progress crumb matched the harness tag as a substring, so a
-  remote LAN player who typed one containing `[7dtd-playtest]` or
-  `[7dtd-fastconnect]` into chat had their text echoed as a `progress:` line;
-  crumbs now quote a line the way the log parser decides a contract line,
-  through the shared `playtest_log.contract_tail`.
-
-- **Windows device names no longer reach a staged frame or clip path.**
-  `Helpers.AssetName` (the client, a Windows process under Proton) filters a
-  staged frame or clip id to a safe character set, but a name that filters to
-  nothing collapsed onto its parent directory, and a reserved device name
-  (`AUX`, `nul`, `COM1` ... `LPT9`, with any casing) is the device rather than
-  a file, so `CreateDirectory` failed and the case photographed nothing. Both
-  now get a name the client filesystem accepts, and the rules now live in
-  the one name the clip marker, the staged scene and the frames directory
-  already share, so a collector reading a directory out of `clip complete`
-  reads the directory the frames were written to.
-  `scripts/test_windows_path_surface.py` pins the rules offline (the mod
-  cannot be compiled without the game assemblies).
-
-- **Host CLI help and exit codes, aligned across the scripts.**
-  Every other CLI in `scripts/` already printed its exit codes from
-  `--help`; these did not, and one of them used the usage code for something
-  that is not a usage error. `dep_sbom.py` now documents its exit codes and
-  its stdout/stderr split (CycloneDX JSON on stdout, the component count on
-  stderr) and exits 1 rather than 2 when a committed lockfile or
-  `ModInfo.xml` is missing, since nothing about the invocation was wrong;
-  `dst_run.py` and `coverage_badge.py` document theirs, and
-  `playtest_lock.py --help` now says what `live` reports and what its
-  nonzero exit means, which the one-line usage previously left unsaid for
-  the probe the capture scripts gate on. `capture_frames.sh`,
-  `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
-  already used. `quarantine_restore.py` documents its exit codes too, and
-  `restore <entry>` on an entry carrying no `restore.jsonl` now exits 1 like
-  `show` on the same entry instead of 2, because nothing about the command
-  line was wrong. `playtest_run.py --help` describes the six
-  `--loadgen-observe-*` / `--loadgen-expect-*` flags, which carried no help
-  text at all. `dep_sbom.py` names the reason on stderr and exits 1 for a
-  lockfile it cannot parse (the `ValueError` behind its own exit-code
-  promise used to reach the operator as a traceback), and creates the
-  output's parent directory, so the `dep_sbom.py dist/app.cdx.json` example
-  in its epilog works in a tree that has no `dist/` yet.
-- **The capture teardown grace is resolved and validated once, before the run
-  starts.** `RUN_STOP_TIMEOUT_SEC` reached `$(( SECONDS + RUN_STOP_TIMEOUT_SEC ))`
-  inside the `capture_stop_run` EXIT trap with no check, and each of the three
-  capture scripts carried its own `:-30` default. A non-numeric value (`30s`, a
-  stale shell default) aborts bash on the arithmetic error, so the trap never
-  signalled the run it exists to stop and the suite kept the exclusivity lock
-  and the live client with it. `capture_common.sh` now owns the default and a
-  `capture_init_run_timeout` that refuses a non-positive or non-integer value by
-  name, exit 2, before anything is started.
-- **`PLAYTEST_LAP_MARK_STALE_SEC` is checked like `--laps`.** The value is
-  arithmetic, not text: a non-numeric one aborted the abandoned-lap-mark sweep
-  on a bash arithmetic error with nothing said (the script runs without
-  `set -e`), and a value under a minute read as "sweep off" rather than the
-  near-instant sweep it asked for. Both now exit 2 naming the variable, and the
-  variable is listed in the script's own help along with the other env knobs.
+## [0.14.0] - 2026-10-02
 
 ### Added
 
@@ -202,16 +99,8 @@ Release model (inferred practice, now pinned by `make test`):
   measured report is substituted, and the gate is registered in the Makefile
   `GATES` list, so it runs under `make test` and `make check`.
 
-- **`make package` builds the release archive.** The release workflow told a
-  maintainer to run a target the Makefile never had, so the mod zip had no
-  command to produce it. The target builds the mod, then writes
-  `dist/7dtd-playtest-<version>.zip` (version read from `ModInfo.xml`) with the
-  `Mods/7dtd-playtest/` layout the game extracts from, using stdlib
-  `python -m zipfile` so packaging needs no host `zip` on top of uv, and
-  leaving the build's pdb out of the archive. The
-  gate-list gate now also fails when a workflow names a make target the
-  Makefile does not define, so the same drift cannot come back. `make sbom`
-  also gained the `require-uv` preflight every other uv target has.
+- Workflow make targets are checked against the Makefile. `make sbom` uses
+  the same `require-uv` preflight as the other Python targets.
 
 - **Injectable clock for the orchestrator** (`playtest_run.use_clock()`).
   Every time read and wait in `playtest_run.py` now goes through
@@ -317,6 +206,12 @@ Release model (inferred practice, now pinned by `make test`):
   tool it reports a missing `uv` for cannot be reached through `uv`).
 
 ### Changed
+
+- Managed stock runs use the game's empty-password loopback telnet mode.
+  `PLAYTEST_TELNET_PASSWORD` and `--telnet-password` now apply only to attach
+  runs; managed stock reports `telnet_password=loopback`. Remove the unsupported
+  `TelnetRemoteAllowedIPs` property that prevented the installed stock server
+  from starting. Reachability remains restricted to the local machine.
 
 - **`make package` writes the archive beside the build output, not inside
   it.** With no `PACKAGE=`, `scripts/mod_package.py` named the archive in the
@@ -460,6 +355,16 @@ Migration, by symbol:
   than the raw string. Gated by `scripts/test_chat_probe_surface.py`.
 
 ### Fixed
+
+- Validate a documented version bump before its release tag exists, while
+  rejecting stale and unrelated future `[Unreleased]` compare ranges.
+- Restore the mod build after the entity probe extraction: remove concatenated
+  file headers from the C# source and expose its two helpers to sibling cases.
+- Read tag objects only from the checkout's own Git directory, so synthetic
+  validation trees inside a checkout cannot inherit its tags from a parent.
+- Fetch the release tags in CI so the version-surface gate checks real history.
+- Preserve the previous capture log in the recreation regression fixture so
+  filesystems that reuse unlinked inodes still exercise a genuinely new file.
 
 - **The two newest releases render as dead text in the changelog, and
   "what changed since" started two releases ago.** `## [0.12.0]` and
@@ -841,6 +746,113 @@ Migration, by symbol:
   the rerun an operator performs after an interrupted restore read as a lost
   world; a pair whose original is in place and holds the same bytes, or whose
   copy `--move` already deleted, is now reported as already restored.
+
+### Security
+
+- **The shipped dependency inventory is committed and gated.** `make sbom`
+  wrote its CycloneDX document under the gitignored `dist/`, so nothing a tag
+  carried described what that tag depended on, and the gate only ever checked
+  an inventory it had just built in memory. The inventory is now committed at
+  `sbom/7dtd-playtest.cdx.json`, and `scripts/test_dep_sbom.py` fails the push
+  when it is not byte-identical to a fresh build from `uv.lock` and
+  `Source/PlayTestMod/packages.lock.json`, naming the added, removed or
+  re-versioned components. A dependency can no longer land, or an inventory
+  age past the lockfile it describes, without the offline gates noticing. The
+  build is deterministic (sorted keys, a content-hash serial number, no
+  timestamp), so the committed file is reproducible rather than a snapshot.
+
+- **A suite can no longer declare the telnet admin plane.** A `server` block
+  naming `TelnetEnabled`, `TelnetRemoteAllowedIPs` or `TelnetPassword` in any
+  capitalisation now fails closed with a `SuiteLoadError`. The orchestrator
+  sets all three after copying the suite's block in, so a declaration was
+  either silently overridden or, with a different capitalisation, a second
+  property line the orchestrator's exact-case filter did not replace, leaving
+  which value the game honours to the server's config reader. A suite-declared
+  password was also echoed verbatim into `report-*.json`. The shipped suites
+  declared only the redundant `TelnetEnabled`, now dropped.
+  `schema/suite.schema.json` states the three names so an external suite
+  author is refused by their editor too.
+- **Run artifacts are published 0600.** `write_text_atomic` created its temp
+  file with the umask's mode and followed anything already sitting at the temp
+  name, so the report, junit XML, run-ended marker and apm dump landed
+  world-readable (they carry the operator's home directory, the world name and
+  the server's internal dump), and a file or symlink planted at the temp name
+  would be written through and then renamed into place as this run's report.
+  The temp file is now opened `O_EXCL` at 0600.
+- **A player's display name no longer reaches the run transcript.** Every
+  admin reply names the entities it talks about (`'Alice' (id=171, ...)` for
+  stock, `(entity 107) Alice` for zdtd), and the name is whatever a remote LAN
+  peer chose, so each logged slice of a `listplayers`, `listents`, `kill` or
+  `teleportplayer` reply carried a person's name into a log CI uploads. The
+  caller-facing behaviour is unchanged: a redacted line keeps its entity id,
+  which is all the parsing and the counts read, and only the name and the tail
+  past the id are dropped. Committed fixtures used the repository owner's own
+  account name; they now use synthetic ones.
+- **Two more paths carried a peer's name or text into the run transcript.**
+  A telnet reply was redacted for the entity ids the caller had acted on, so
+  a second line in the same reply (another player in a kill batch, in a
+  `teleportplayer` or in a `bot player` confirmation) kept its name, and a
+  `cvar get -p <id>` whose value never arrived logged its reply tail
+  unredacted. Redaction is now decided by the reply itself: an entity line
+  keeps its id and loses its name unless the shared AI table says the line is
+  a prefab, which also teaches `player_entity_ids` the zdtd `(entity N)`
+  spelling. The progress crumb matched the harness tag as a substring, so a
+  remote LAN player who typed one containing `[7dtd-playtest]` or
+  `[7dtd-fastconnect]` into chat had their text echoed as a `progress:` line;
+  crumbs now quote a line the way the log parser decides a contract line,
+  through the shared `playtest_log.contract_tail`.
+
+- **Windows device names no longer reach a staged frame or clip path.**
+  `Helpers.AssetName` (the client, a Windows process under Proton) filters a
+  staged frame or clip id to a safe character set, but a name that filters to
+  nothing collapsed onto its parent directory, and a reserved device name
+  (`AUX`, `nul`, `COM1` ... `LPT9`, with any casing) is the device rather than
+  a file, so `CreateDirectory` failed and the case photographed nothing. Both
+  now get a name the client filesystem accepts, and the rules now live in
+  the one name the clip marker, the staged scene and the frames directory
+  already share, so a collector reading a directory out of `clip complete`
+  reads the directory the frames were written to.
+  `scripts/test_windows_path_surface.py` pins the rules offline (the mod
+  cannot be compiled without the game assemblies).
+
+- **Host CLI help and exit codes, aligned across the scripts.**
+  Every other CLI in `scripts/` already printed its exit codes from
+  `--help`; these did not, and one of them used the usage code for something
+  that is not a usage error. `dep_sbom.py` now documents its exit codes and
+  its stdout/stderr split (CycloneDX JSON on stdout, the component count on
+  stderr) and exits 1 rather than 2 when a committed lockfile or
+  `ModInfo.xml` is missing, since nothing about the invocation was wrong;
+  `dst_run.py` and `coverage_badge.py` document theirs, and
+  `playtest_lock.py --help` now says what `live` reports and what its
+  nonzero exit means, which the one-line usage previously left unsaid for
+  the probe the capture scripts gate on. `capture_frames.sh`,
+  `capture_video.sh` and `capture_audio.sh` document the 0/1/2 scheme they
+  already used. `quarantine_restore.py` documents its exit codes too, and
+  `restore <entry>` on an entry carrying no `restore.jsonl` now exits 1 like
+  `show` on the same entry instead of 2, because nothing about the command
+  line was wrong. `playtest_run.py --help` describes the six
+  `--loadgen-observe-*` / `--loadgen-expect-*` flags, which carried no help
+  text at all. `dep_sbom.py` names the reason on stderr and exits 1 for a
+  lockfile it cannot parse (the `ValueError` behind its own exit-code
+  promise used to reach the operator as a traceback), and creates the
+  output's parent directory, so the `dep_sbom.py dist/app.cdx.json` example
+  in its epilog works in a tree that has no `dist/` yet.
+- **The capture teardown grace is resolved and validated once, before the run
+  starts.** `RUN_STOP_TIMEOUT_SEC` reached `$(( SECONDS + RUN_STOP_TIMEOUT_SEC ))`
+  inside the `capture_stop_run` EXIT trap with no check, and each of the three
+  capture scripts carried its own `:-30` default. A non-numeric value (`30s`, a
+  stale shell default) aborts bash on the arithmetic error, so the trap never
+  signalled the run it exists to stop and the suite kept the exclusivity lock
+  and the live client with it. `capture_common.sh` now owns the default and a
+  `capture_init_run_timeout` that refuses a non-positive or non-integer value by
+  name, exit 2, before anything is started.
+- **`PLAYTEST_LAP_MARK_STALE_SEC` is checked like `--laps`.** The value is
+  arithmetic, not text: a non-numeric one aborted the abandoned-lap-mark sweep
+  on a bash arithmetic error with nothing said (the script runs without
+  `set -e`), and a value under a minute read as "sweep off" rather than the
+  near-instant sweep it asked for. Both now exit 2 naming the variable, and the
+  variable is listed in the script's own help along with the other env knobs.
+
 ## [0.13.0] - 2026-09-21
 
 
@@ -1576,7 +1588,8 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.14.0
 [0.13.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.13.0
 [0.12.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.12.0
 [0.11.0]: https://github.com/hordeforge/7dtd-playtest/compare/v0.10.0...v0.11.0

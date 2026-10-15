@@ -1,4 +1,3 @@
-==> head.txt <==
 using System;
 using UnityEngine;
 
@@ -15,8 +14,7 @@ namespace ZdtdPlaytest
     internal static class EntityProbe
     {
 
-==> body.cs <==
-    static bool ReportWalkEntityRenderProbe(string id, EntityAlive alive, float elapsed)
+    internal static bool ReportWalkEntityRenderProbe(string id, EntityAlive alive, float elapsed)
     {
         if (alive == null)
         {
@@ -191,7 +189,7 @@ namespace ZdtdPlaytest
     /// only the full-voxel fallback. Subtracting the capsule bottom from
     /// that surface puts the capsule, and therefore the authored feet, on
     /// it.</para></summary>
-    static float GroundYFor(World world, EntityAlive alive, float x, float z)
+    internal static float GroundYFor(World world, EntityAlive alive, float x, float z)
     {
         // GetHeightAt is the terrain generator's uncarved heightmap. It
         // measured world Y 60.05 in a live column whose top voxel face was

@@ -60,9 +60,7 @@ DEFAULT_GAME_SRV = (
 )
 DEFAULT_USERDATA = Path.home() / ".cache" / "7dtd-playtest-dedicated"
 STEAM_APPID = "251570"
-DEFAULT_COMPAT = (
-    Path.home() / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}"
-)
+DEFAULT_COMPAT = Path.home() / f".local/share/Steam/steamapps/compatdata/{STEAM_APPID}"
 
 
 CLIENT_EXECUTABLE = "7DaysToDie.exe"
@@ -266,7 +264,6 @@ def client_compat_for_game(game: Path, env: Mapping[str, str] | None = None) -> 
     return DEFAULT_COMPAT
 
 
-
 # Server-authoritative persist pad: every rejoin/persist flow teleports players
 # here before saveworld so the saved position is known and walkable. Tuple for
 # teleport_players_to, string form for raw spawnentityat commands.
@@ -309,6 +306,7 @@ GAME_PROC_PATTERNS = [
     r"proton.*7DaysToDie",
 ]
 
+
 def mod_version() -> str:
     """Version declared by ModInfo.xml (single source of truth), "unknown" if absent."""
     try:
@@ -318,6 +316,7 @@ def mod_version() -> str:
     m = re.search(r'<Version value="([^"]+)"', text)
     return m.group(1) if m else "unknown"
 
+
 def positive_seconds(text: str) -> float:
     """argparse type: a finite number of seconds > 0 (--timeout, env reader)."""
     try:
@@ -325,9 +324,7 @@ def positive_seconds(text: str) -> float:
     except ValueError:
         raise argparse.ArgumentTypeError(f"not a number of seconds: {text!r}") from None
     if not math.isfinite(val) or val <= 0:
-        raise argparse.ArgumentTypeError(
-            f"must be a finite number of seconds > 0, got {text!r}"
-        )
+        raise argparse.ArgumentTypeError(f"must be a finite number of seconds > 0, got {text!r}")
     return val
 
 
@@ -357,10 +354,7 @@ def env_flag_from(names: tuple[str, ...], default: bool) -> bool:
             return True
         if value in FALSE_TOKENS:
             return False
-        err(
-            f"invalid {name}={raw!r}: expected one of "
-            + ", ".join(TRUE_TOKENS + FALSE_TOKENS)
-        )
+        err(f"invalid {name}={raw!r}: expected one of " + ", ".join(TRUE_TOKENS + FALSE_TOKENS))
         raise SystemExit(2) from None
     return default
 
@@ -405,9 +399,7 @@ def tcp_port(text: str) -> int:
     except ValueError:
         raise argparse.ArgumentTypeError(f"not a port number: {text!r}") from None
     if not TCP_PORT_MIN <= val <= TCP_PORT_MAX:
-        raise argparse.ArgumentTypeError(
-            f"port out of range {TCP_PORT_MIN}..{TCP_PORT_MAX}: {val}"
-        )
+        raise argparse.ArgumentTypeError(f"port out of range {TCP_PORT_MIN}..{TCP_PORT_MAX}: {val}")
     return val
 
 
@@ -435,9 +427,7 @@ def require_litenet_room(server_port: int) -> None:
 def require_telnet_port(telnet_port: int) -> None:
     """A telnet/admin port in TCP range, checked with the game port."""
     if not TCP_PORT_MIN <= telnet_port <= TCP_PORT_MAX:
-        raise ValueError(
-            f"admin port {telnet_port} must be in {TCP_PORT_MIN}..{TCP_PORT_MAX}"
-        )
+        raise ValueError(f"admin port {telnet_port} must be in {TCP_PORT_MIN}..{TCP_PORT_MAX}")
 
 
 def slowest_cases(json_events: list[dict]) -> list[tuple[str, float]]:
@@ -478,7 +468,13 @@ def config_summary(args: argparse.Namespace) -> str:
     # Credential state without the value: operator-supplied or generated
     # per-run both count as set. Stock attach mode is rejected before this
     # function when no explicit credential was supplied.
-    pw_state = "set" if (args.telnet_password or not args.no_server) else "unset"
+    pw_state = (
+        "loopback"
+        if args.server == "stock" and not args.no_server
+        else "set"
+        if args.telnet_password
+        else "unset"
+    )
     parts = [
         f"provision={getattr(args, 'provision', '') or 'managed'}",
         f"server={args.server}",
@@ -613,7 +609,7 @@ def redact_player_names(text: str, player_ids: Collection[str] | None = None) ->
     for line in split_log_lines(text):
         m = _ENTITY_ID_RE.search(line)
         if m and (player_ids is None or m.group(1) in player_ids):
-            line = f"{REDACTED_NAME} {line[m.start():m.end()]}"
+            line = f"{REDACTED_NAME} {line[m.start() : m.end()]}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -1249,7 +1245,9 @@ def loadgen_latest_state(events: list[dict]) -> tuple[int | None, dict[tuple[str
 
 
 def loadgen_expectation_failures(
-    events: list[dict], cvars: list[str], buffs: list[str],
+    events: list[dict],
+    cvars: list[str],
+    buffs: list[str],
     positive_cvars: list[str] | None = None,
     equal_cvars: list[str] | None = None,
 ) -> list[str]:
@@ -1321,10 +1319,7 @@ def loadgen_expectation_failures_from_latest(
         right_value = _observed_cvar(latest, right)
         left_num = _finite_number(left_value)
         right_num = _finite_number(right_value)
-        if (
-            left_num is None or right_num is None
-            or abs(left_num - right_num) > CVAR_ABS_TOLERANCE
-        ):
+        if left_num is None or right_num is None or abs(left_num - right_num) > CVAR_ABS_TOLERANCE:
             failures.append(
                 f"CVars {left} and {right} expected equal, observed "
                 f"{left_value!r} and {right_value!r}"
@@ -1348,7 +1343,10 @@ def parse_cvar_value(reply: str, name: str) -> float | None:
 
 
 def server_cvar_oracle_failures(
-    tn: TelnetAdmin, entity_id: int, names: list[str], latest: dict[tuple[str, str], dict],
+    tn: TelnetAdmin,
+    entity_id: int,
+    names: list[str],
+    latest: dict[tuple[str, str], dict],
     tolerance: float = CVAR_ABS_TOLERANCE,
 ) -> list[str]:
     """Compare server-authority CVar values with the joined bot's decoded state."""
@@ -1357,14 +1355,9 @@ def server_cvar_oracle_failures(
         peer_raw = _observed_cvar(latest, name)
         server_value = tn.get_cvar(name, entity_id)
         peer_value = _finite_number(peer_raw)
-        if (
-            peer_value is None
-            or server_value is None
-            or abs(peer_value - server_value) > tolerance
-        ):
+        if peer_value is None or server_value is None or abs(peer_value - server_value) > tolerance:
             failures.append(
-                f"server CVar {name} expected peer value {peer_value!r}, "
-                f"observed {server_value!r}"
+                f"server CVar {name} expected peer value {peer_value!r}, observed {server_value!r}"
             )
     return failures
 
@@ -1434,9 +1427,7 @@ def write_zdtd_apm_dump(
         body = f"run_id={run_id}\n" + body
     if not _write_dump(body):
         return False
-    log(
-        f"apm dump → {dump_path} bytes={dump_path.stat().st_size} run_id={run_id or '-'}"
-    )
+    log(f"apm dump → {dump_path} bytes={dump_path.stat().st_size} run_id={run_id or '-'}")
     return True
 
 
@@ -1588,9 +1579,7 @@ def collect_visual_reviews(directory: Path | None) -> dict[str, str]:
 # U+FFFE/U+FFFF. They cannot be escaped (no numeric reference exists for
 # them), so a single NUL surviving from a binary log line would make the
 # whole generated document unparseable; they are dropped before escaping.
-_XML_ILLEGAL_RE = re.compile(
-    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]"
-)
+_XML_ILLEGAL_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]")
 
 
 def xml_attr(value: str) -> str:
@@ -1818,9 +1807,7 @@ class TelnetAdmin:
             if "id=" not in out:
                 # Every line here is a player line, so every name is one too.
                 log(f"telnet listplayers reply unparsed: {redact_player_names(out)[-160:]!r}")
-        ids = [
-            int(x) for x in re.findall(r"(?:id|entity)\s*=\s*(\d+)", out, flags=re.IGNORECASE)
-        ]
+        ids = [int(x) for x in re.findall(r"(?:id|entity)\s*=\s*(\d+)", out, flags=re.IGNORECASE)]
         # zdtd console style: "(entity 107)"
         ids += [int(x) for x in re.findall(r"\(entity\s+(\d+)\)", out, flags=re.IGNORECASE)]
         ids = [i for i in ids if i > 0]
@@ -1951,11 +1938,7 @@ def _block_termination_signals() -> None:
     keeps such a delivery pending instead, and the process exits right after
     teardown, so the pending signal is simply discarded.
     """
-    sigs = {
-        getattr(signal, name)
-        for name in _TERMINATION_SIGNAL_NAMES
-        if hasattr(signal, name)
-    }
+    sigs = {getattr(signal, name) for name in _TERMINATION_SIGNAL_NAMES if hasattr(signal, name)}
     if not sigs:
         return
     with contextlib.suppress(AttributeError, OSError, ValueError):
@@ -1982,6 +1965,7 @@ def install_signal_handlers() -> None:
     SystemExit from inside the cleanup itself and strand a live runtime under
     a published claim.
     """
+
     def _exit_fast(signum: int, _frame: object) -> None:
         # Ignore repeats while we unwind so a second hit during cleanup
         # cannot raise inside the finally block and skip stop_proc/release.
@@ -2015,9 +1999,7 @@ def default_logdir() -> Path:
     `scripts/quarantine_restore.py` reads this so an operator restoring a
     swept-aside world does not have to know where the run put its evidence.
     """
-    return Path(
-        os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest"))
-    )
+    return Path(os.environ.get("LOGDIR", str(Path.home() / ".cache" / "7dtd-playtest")))
 
 
 # Per-run evidence (report-<epoch>.json / junit-<epoch>.xml) lands in the
@@ -2183,8 +2165,7 @@ def _quarantine_move(src: Path, entry: Path, rel: str) -> bool:
     try:
         quarantine_restore.record(entry, src, dest)
     except OSError as ex:
-        warn(f"quarantine: cannot record a restore path for {src} ({ex}); "
-             "leaving it in place")
+        warn(f"quarantine: cannot record a restore path for {src} ({ex}); leaving it in place")
         return False
     try:
         dest_root.mkdir(parents=True, exist_ok=True)
@@ -2254,10 +2235,7 @@ def fresh_zdtd_world(world: Path, quarantine: Path) -> None:
             f"fresh-save: could not quarantine persisted zdtd state: {names}; "
             "refusing to run against stale state"
         )
-    log(
-        f"fresh-save zdtd world cleaned under {world} "
-        f"(state={state}, chunks={chunks})"
-    )
+    log(f"fresh-save zdtd world cleaned under {world} (state={state}, chunks={chunks})")
 
 
 def snapshot_previous_log(path: Path | None, qroot: Path, kind: str) -> bool:
@@ -2339,9 +2317,7 @@ def suite_flag_given(argv: list[str] | None) -> bool:
     `--suite demo` stays an explicit choice.
     """
     tokens = list(sys.argv[1:] if argv is None else argv)
-    return any(
-        token == "--suite" or token.startswith("--suite=") for token in tokens
-    )
+    return any(token == "--suite" or token.startswith("--suite=") for token in tokens)
 
 
 def mixed_visual_suites(suite: str) -> bool:
@@ -2508,9 +2484,7 @@ LOADGEN_ROLE_PEER = "peer"
 LOADGEN_ROLE_BOTS = "bots"
 
 
-def loadgen_already_serving(
-    role: str | None, required: str, proc: LiveProcess | None
-) -> bool:
+def loadgen_already_serving(role: str | None, required: str, proc: LiveProcess | None) -> bool:
     """True when the running loadgen is the roster ``required`` asks for.
 
     A process started for the other role is a different roster, so it does
@@ -2657,8 +2631,7 @@ def latest_playtest_crumb(chunk: str) -> str:
     crumbs = [
         ln
         for ln in split_log_lines(chunk)
-        if contract_tail(ln) is not None
-        or contract_tail(ln, CONNECT_MARKER) is not None
+        if contract_tail(ln) is not None or contract_tail(ln, CONNECT_MARKER) is not None
     ]
     return scrub(crumbs[-1][-160:]) if crumbs else ""
 
@@ -2667,18 +2640,15 @@ def resolve_telnet_password(operator_value: str | None, *, no_server: bool) -> s
     """Single credential source for the generated server config and every
     TelnetAdmin session:
 
-      operator-provided   -> used verbatim (config + client agree);
       --no-server attach  -> explicit operator-provided credential required;
-      own stock server    -> ephemeral per-run secret written into the 0600
-                             generated config and never logged.
+      own stock server    -> empty password, which makes the stock listener
+                             bind IPAddress.Loopback rather than IPAddress.Any.
     """
+    if not no_server:
+        return ""
     if operator_value:
         return operator_value
-    if no_server:
-        raise ValueError(
-            "--no-server requires --telnet-password or PLAYTEST_TELNET_PASSWORD"
-        )
-    return secrets.token_urlsafe(15)
+    raise ValueError("--no-server requires --telnet-password or PLAYTEST_TELNET_PASSWORD")
 
 
 def _live_probe_for(
@@ -2906,9 +2876,7 @@ def build_parser(provision_default: str) -> argparse.ArgumentParser:
         default=None,
         help="ServerPort / connect-to-IP port (stock default 26900, zdtd 27025)",
     )
-    ap.add_argument(
-        "--admin-port", type=tcp_port, default=8081, help="telnet/admin port"
-    )
+    ap.add_argument("--admin-port", type=tcp_port, default=8081, help="telnet/admin port")
     ap.add_argument(
         "--zdtd",
         type=Path,
@@ -2965,9 +2933,7 @@ def build_parser(provision_default: str) -> argparse.ArgumentParser:
     ap.add_argument(
         "--kill-wine", action="store_true", help="also kill wineserver (disrupts Steam)"
     )
-    ap.add_argument(
-        "--no-server", action="store_true", help="use already-running server"
-    )
+    ap.add_argument("--no-server", action="store_true", help="use already-running server")
     ap.add_argument(
         "--client-log",
         type=Path,
@@ -3030,9 +2996,8 @@ def build_parser(provision_default: str) -> argparse.ArgumentParser:
         default=os.environ.get("PLAYTEST_TELNET_PASSWORD", ""),
         help=(
             "stock dedicated telnet password (env PLAYTEST_TELNET_PASSWORD); "
-            "when unset the orchestrator generates an ephemeral per-run "
-            "secret for servers it starts itself; --no-server requires an "
-            "explicit credential"
+            "used for --no-server attach, which requires an explicit credential; "
+            "managed stock servers use the game's empty-password loopback mode"
         ),
     )
     ap.add_argument(
@@ -3242,11 +3207,7 @@ def main(argv: list[str] | None = None) -> int:
             playtest_targets.check_sandbox_available(target_plan)
         except playtest_targets.TargetError as ex:
             ap.error(str(ex))
-    if (
-        suite_doc is not None
-        and suite_doc.provision == "managed"
-        and target_plan.is_attach
-    ):
+    if suite_doc is not None and suite_doc.provision == "managed" and target_plan.is_attach:
         warn(
             f"suite {suite_doc.id} declares a managed run (its own world and "
             "mods); attaching instead, so its server block and mods list are "
@@ -3307,9 +3268,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.loadgen_expect_cvar_equal
         or args.loadgen_expect_buff
         or args.loadgen_server_cvar_oracle
-    ) and not (
-        args.loadgen_observe_cvar or args.loadgen_observe_buff
-    ):
+    ) and not (args.loadgen_observe_cvar or args.loadgen_observe_buff):
         ap.error("loadgen expectations require matching observe options")
     peer_client_name = args.peer_client_name.strip()
     peer_client_suite = args.peer_client_suite.strip()
@@ -3322,9 +3281,7 @@ def main(argv: list[str] | None = None) -> int:
     has_rejoin_setup_suite = bool(args.rejoin_setup_suite.strip())
     has_rejoin_setup_barrier = bool(args.rejoin_setup_barrier.strip())
     if has_rejoin_setup_suite != has_rejoin_setup_barrier:
-        ap.error(
-            "--rejoin-setup-suite and --rejoin-setup-barrier must be provided together"
-        )
+        ap.error("--rejoin-setup-suite and --rejoin-setup-barrier must be provided together")
     if args.suite.strip() == "persist" and has_rejoin_setup_suite:
         ap.error("persist already has a built-in rejoin setup; omit provider rejoin options")
     provider_rejoin = has_rejoin_setup_suite
@@ -3333,9 +3290,7 @@ def main(argv: list[str] | None = None) -> int:
     rejoin_flow = args.suite.strip() == "persist" or provider_rejoin
     if rejoin_flow and peer_client_name:
         ap.error("stock peer clients are not supported with a rejoin flow")
-    rejoin_setup_suite = (
-        args.rejoin_setup_suite.strip() if provider_rejoin else "persist_setup"
-    )
+    rejoin_setup_suite = args.rejoin_setup_suite.strip() if provider_rejoin else "persist_setup"
     rejoin_setup_barrier = (
         args.rejoin_setup_barrier.strip() if provider_rejoin else "persist_setup_done"
     )
@@ -3365,9 +3320,8 @@ def main(argv: list[str] | None = None) -> int:
     server_log = args.logdir / "server-orch.log"
     client_launch_log = args.logdir / "client-launch.log"
     peer_client_launch_log = args.logdir / "peer-client-launch.log"
-    peer_client_log = (
-        args.peer_client_log
-        or (client_log_for_compat(args.peer_client_compat) if peer_client_name else None)
+    peer_client_log = args.peer_client_log or (
+        client_log_for_compat(args.peer_client_compat) if peer_client_name else None
     )
 
     if args.server == "zdtd" and not args.no_server and not args.zdtd.is_file():
@@ -3399,9 +3353,7 @@ def main(argv: list[str] | None = None) -> int:
     client_mods: list[Path] = []
     if target_plan.is_sandbox:
         client_mods = (
-            suite_loader.resolve_mods(
-                suite_doc, workspace=WORKSPACE, repo=ROOT, side="client"
-            )
+            suite_loader.resolve_mods(suite_doc, workspace=WORKSPACE, repo=ROOT, side="client")
             if suite_doc is not None
             else []
         )
@@ -3452,11 +3404,7 @@ def main(argv: list[str] | None = None) -> int:
     # from a fixed library instead means a caller on any other layout parses a
     # file the launcher never writes, and reads an empty run as a failed one.
     if args.client_log is None:
-        compat = (
-            args.client_compat
-            if target_plan.is_sandbox
-            else client_compat_for_game(game_dir)
-        )
+        compat = args.client_compat if target_plan.is_sandbox else client_compat_for_game(game_dir)
         args.client_log = client_log_for_compat(compat)
     log(f"client install {game_dir}")
     log(f"client log {args.client_log}")
@@ -3510,6 +3458,7 @@ def main(argv: list[str] | None = None) -> int:
         # Exclusive live-client lock BEFORE clean_processes / launch so a second
         # orchestrator cannot wipe another agent's client. See AGENTS.md.
         try:
+
             def _mark_held() -> None:
                 nonlocal lock_held
                 lock_held = True
@@ -3536,10 +3485,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except playtest_lock.PlaytestLockError as ex:
             holder = ex.held_by or "unknown"
-            err(
-                f"refusing start: {ex} "
-                f"(held_by={holder} reason={ex.reason} file={lock_path})"
-            )
+            err(f"refusing start: {ex} (held_by={holder} reason={ex.reason} file={lock_path})")
             err(
                 "see AGENTS.md (Playtest / live-client exclusivity); "
                 "set PLAYTEST_LOCK_FILE / PLAYTEST_SESSION_ID to coordinate"
@@ -3550,10 +3496,7 @@ def main(argv: list[str] | None = None) -> int:
             # holder: name it like a refusal instead of a traceback.
             err(f"refusing start: lock storage unavailable at {lock_path}: {ex}")
             return 2
-        log(
-            f"playtest lock acquired session={lock_session} file={lock_path} "
-            f"(exclusive client)"
-        )
+        log(f"playtest lock acquired session={lock_session} file={lock_path} (exclusive client)")
 
         # This run now owns the machine, so the previous run's end marker is
         # stale: from here on its presence means this run ended.
@@ -3565,16 +3508,11 @@ def main(argv: list[str] | None = None) -> int:
         # must not have touched it.
         if target_plan.is_sandbox:
             try:
-                playtest_targets.ensure_sandbox_client(
-                    target_plan, wipe=True, mods=client_mods
-                )
+                playtest_targets.ensure_sandbox_client(target_plan, wipe=True, mods=client_mods)
             except playtest_targets.TargetError as ex:
                 err(f"sandbox client bring-up failed: {ex}")
                 return 2
-            log(
-                f"sandbox client ready: instance={target_plan.sandbox_client} "
-                f"game={game_dir}"
-            )
+            log(f"sandbox client ready: instance={target_plan.sandbox_client} game={game_dir}")
         lock_heartbeat = playtest_lock.HeartbeatThread(
             lock_session,
             path=lock_path,
@@ -3618,11 +3556,7 @@ def main(argv: list[str] | None = None) -> int:
         # managed run has no ports yet: the instance's block is allocated by
         # `sb create-server`, and `sb up` refuses an instance already running.
         if not args.no_server and not args._target_plan.is_sandbox:
-            busy = [
-                p
-                for p in (args.port, args.admin_port)
-                if playtest_lock.tcp_port_in_use(p)
-            ]
+            busy = [p for p in (args.port, args.admin_port) if playtest_lock.tcp_port_in_use(p)]
             if busy:
                 err(
                     f"refusing start: TCP port(s) still in use after clean: {busy} "
@@ -3641,12 +3575,12 @@ def main(argv: list[str] | None = None) -> int:
             # args.world always carries a Path default; only zdtd reads it.
             fresh_zdtd_world(args.world, qroot)
 
-        preserved_client = snapshot_previous_log(
-            args.client_log, qroot, "client-log"
+        preserved_client = snapshot_previous_log(args.client_log, qroot, "client-log")
+        preserved_peer = (
+            snapshot_previous_log(peer_client_log, qroot, "peer-client-log")
+            if peer_client_log is not None
+            else True
         )
-        preserved_peer = snapshot_previous_log(
-            peer_client_log, qroot, "peer-client-log"
-        ) if peer_client_log is not None else True
         if preserved_client:
             client_truncated = truncate_file(args.client_log, "client log")
         else:
@@ -3654,8 +3588,10 @@ def main(argv: list[str] | None = None) -> int:
             # place; the tail starts past them so stale events cannot be
             # re-parsed as this run's.
             client_truncated = False
-            warn("previous client log kept untruncated; run events are read "
-                 "from the end of the existing bytes")
+            warn(
+                "previous client log kept untruncated; run events are read "
+                "from the end of the existing bytes"
+            )
         peer_truncated = True
         if peer_client_log is not None:
             peer_client_log.parent.mkdir(parents=True, exist_ok=True)
@@ -3688,9 +3624,7 @@ def main(argv: list[str] | None = None) -> int:
         # into the instance config for a managed run. Assigned once, before use.
         telnet_host = "127.0.0.1"
         telnet_port = args.admin_port
-        telnet_password = resolve_telnet_password(
-            args.telnet_password, no_server=args.no_server
-        )
+        telnet_password = resolve_telnet_password(args.telnet_password, no_server=args.no_server)
 
         def service_barrier(
             name: str,
@@ -3765,16 +3699,11 @@ def main(argv: list[str] | None = None) -> int:
                 # none, so they never silently override a suite's own choice.
                 config.setdefault("GameWorld", args.world_name)
                 config.setdefault("GameName", args.game_name)
-                # The orchestrator's own telnet surface is not the suite's to
-                # declare: it must match what TelnetAdmin authenticates with.
-                # TelnetRemoteAllowedIPs pins the admin plane to loopback, the
-                # only host TelnetAdmin ever connects from (telnet_host is
-                # 127.0.0.1), so a LAN peer that reaches the port is refused
-                # even with the password. Set here, after the suite's own
-                # server block is copied in, so a suite cannot widen it.
+                # Stock TelnetConsole binds Loopback only with an empty password.
+                # TelnetRemoteAllowedIPs is not a stock config property. The
+                # suite loader refuses admin keys, so a suite cannot widen this.
                 config["TelnetEnabled"] = "true"
-                config["TelnetRemoteAllowedIPs"] = "127.0.0.1"
-                config["TelnetPassword"] = telnet_password
+                config["TelnetPassword"] = ""
                 # What the world actually was, recorded for the report: `sb`
                 # rebuilds the instance config from the base template plus
                 # exactly these declarations, so this list reproduces the run.
@@ -3971,9 +3900,7 @@ def main(argv: list[str] | None = None) -> int:
                 peer_game = peer_client_game(args.peer_client_compat)
                 if peer_game is not None:
                     peer_env["GAME"] = str(peer_game)
-                    peer_env["SB_SCREEN_ARGS"] = client_extra_env.get(
-                        "SB_SCREEN_ARGS", ""
-                    )
+                    peer_env["SB_SCREEN_ARGS"] = client_extra_env.get("SB_SCREEN_ARGS", "")
                 else:
                     warn(
                         f"peer compat {args.peer_client_compat} has no sibling "
@@ -4020,9 +3947,7 @@ def main(argv: list[str] | None = None) -> int:
             # (--timeout bounds the whole run): each rejoin phase is bounded
             # by its own per-phase cap AND what remains of the run deadline.
             remaining_sec = max(0.0, deadline - monotonic_now())
-            setup_deadline = monotonic_now() + min(
-                min(args.timeout, 300), remaining_sec
-            )
+            setup_deadline = monotonic_now() + min(min(args.timeout, 300), remaining_sec)
             last_setup_progress = float("-inf")
             rejoin_setup_seen = 0
 
@@ -4063,10 +3988,7 @@ def main(argv: list[str] | None = None) -> int:
                                     # before disconnect is the pad position.
                                     n = tn.teleport_players_to(*PERSIST_PAD_XYZ)
                                 if n == 0:
-                                    warn(
-                                        f"{rejoin_setup_barrier}: no player ids; "
-                                        "retry next poll"
-                                    )
+                                    warn(f"{rejoin_setup_barrier}: no player ids; retry next poll")
                                 else:
                                     pause(1.5)
                                     for cmd in ("saveworld", "sa"):
@@ -4168,10 +4090,7 @@ def main(argv: list[str] | None = None) -> int:
             if not tn.connect():
                 # Silent would look like a clean save when nothing was saved;
                 # say why the setup state may not be durable before teardown.
-                warn(
-                    f"{rejoin_label}: post-setup saveworld/kickall skipped "
-                    "(telnet connect fail)"
-                )
+                warn(f"{rejoin_label}: post-setup saveworld/kickall skipped (telnet connect fail)")
             else:
                 try:
                     # Persist needs the pad as the last player state; providers retain
@@ -4250,9 +4169,7 @@ def main(argv: list[str] | None = None) -> int:
             reap_finished_helpers()
             note_backend_exit()
             chunk = pump_log_tail(client_tail, client_scan)
-            peer_chunk = (
-                pump_log_tail(peer_tail, peer_scan) if peer_tail is not None else ""
-            )
+            peer_chunk = pump_log_tail(peer_tail, peer_scan) if peer_tail is not None else ""
             if chunk:
                 # Progress crumbs for long joins
                 now = monotonic_now()
@@ -4281,9 +4198,7 @@ def main(argv: list[str] | None = None) -> int:
                         cleaned_ai = True
 
                 if ready_seen and not rejoin_teleport_done:
-                    moved, connected = teleport_all_players_via_telnet(
-                        args.rejoin_teleport
-                    )
+                    moved, connected = teleport_all_players_via_telnet(args.rejoin_teleport)
                     if moved > 0:
                         rejoin_teleport_done = True
                         x, y, z = args.rejoin_teleport
@@ -4342,14 +4257,11 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     if (
                         barrier_counts["settime_bloodmoon"] >= SETTIME_BLOODMOON_MAX_FIRES
-                        and barrier_seen["settime_bloodmoon"]
-                        > barrier_counts["settime_bloodmoon"]
+                        and barrier_seen["settime_bloodmoon"] > barrier_counts["settime_bloodmoon"]
                     ):
                         # Cap reached: extras could never fire, so swallow them
                         # here. A connect failure must keep retrying instead.
-                        barrier_counts["settime_bloodmoon"] = barrier_seen[
-                            "settime_bloodmoon"
-                        ]
+                        barrier_counts["settime_bloodmoon"] = barrier_seen["settime_bloodmoon"]
 
                     service_barrier(
                         "settime_day",
@@ -4373,10 +4285,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
 
                 # Multi-peer / chat / APM barriers (stock or zdtd).
-                while (
-                    barrier_counts["spawn_loadgen_peer"]
-                    < barrier_seen["spawn_loadgen_peer"]
-                ):
+                while barrier_counts["spawn_loadgen_peer"] < barrier_seen["spawn_loadgen_peer"]:
                     if loadgen_already_serving(loadgen_role, LOADGEN_ROLE_PEER, loadgen_proc):
                         # Already running for this barrier; consume this edge
                         # without restart. A roster started for the other
@@ -4440,10 +4349,7 @@ def main(argv: list[str] | None = None) -> int:
                                     "mid-exchange; retrying next poll"
                                 )
 
-                while (
-                    barrier_counts["spawn_loadgen_bots"]
-                    < barrier_seen["spawn_loadgen_bots"]
-                ):
+                while barrier_counts["spawn_loadgen_bots"] < barrier_seen["spawn_loadgen_bots"]:
                     if loadgen_already_serving(loadgen_role, LOADGEN_ROLE_BOTS, loadgen_proc):
                         # The roster this barrier asks for is up. Restarting it
                         # would disconnect the three bots the case is already
@@ -4524,9 +4430,8 @@ def main(argv: list[str] | None = None) -> int:
                     key = f"spawn_vehicle:{cls}"
                     vehicle_seen[key] = vehicle_seen.get(key, 0) + 1
                 for key in vehicle_seen:
-                    def spawn_class_vehicle(
-                        tn: TelnetAdmin, key: str = key
-                    ) -> None:
+
+                    def spawn_class_vehicle(tn: TelnetAdmin, key: str = key) -> None:
                         cls = key.split(":", 1)[-1]
                         n = tn.spawn_near_players(cls)
                         if n == 0:
@@ -4586,9 +4491,7 @@ def main(argv: list[str] | None = None) -> int:
                 and not peer_teleport_done
                 and args.peer_client_teleport is not None
             ):
-                moved, connected = teleport_all_players_via_telnet(
-                    args.peer_client_teleport
-                )
+                moved, connected = teleport_all_players_via_telnet(args.peer_client_teleport)
                 if moved >= 2:
                     peer_teleport_done = True
                     x, y, z = args.peer_client_teleport
@@ -4794,10 +4697,7 @@ def main(argv: list[str] | None = None) -> int:
             if slowest:
                 # Case names come from JSON event fields parsed out of the
                 # client log; same control-char boundary as the rows above.
-                log(
-                    "slowest: "
-                    + scrub(", ".join(f"{c}={ms:.0f}ms" for c, ms in slowest[:5]))
-                )
+                log("slowest: " + scrub(", ".join(f"{c}={ms:.0f}ms" for c, ms in slowest[:5])))
             if nre or peer_nre:
                 warn(
                     f"primary={len(nre)} peer={len(peer_nre)} "
@@ -4855,15 +4755,11 @@ def main(argv: list[str] | None = None) -> int:
                         finally:
                             tn.close()
                     else:
-                        observer_failures.append(
-                            "server CVar oracle telnet connect failed"
-                        )
+                        observer_failures.append("server CVar oracle telnet connect failed")
                 if args.loadgen_teleport is not None and loadgen_teleported_entity is None:
                     observer_failures.append("joined loadgen entity was never teleported")
                 if loadgen_proc is None:
-                    observer_failures.append(
-                        "loadgen observer process was never started"
-                    )
+                    observer_failures.append("loadgen observer process was never started")
                 else:
                     # Name the status and the log: a crash, a bad argument and a
                     # clean early exit are the same string without them.
