@@ -7,8 +7,9 @@ Release model (inferred practice, now pinned by `make test`):
 
 - One version per artifact. The client mod version lives in `ModInfo.xml`
   and `ModIdentity.Version`; git tags are annotated `vX.Y.Z` refs pointing
-  at the released commit. Two tags are not: `v0.7.2` (see its entry below)
-  and `v0.13.0`, both cut lightweight, so they carry no tagger and no date.
+  at the commit that version shipped from. Two tags are not: `v0.7.2` (see
+  its entry below) and `v0.13.0`, both cut lightweight, so they carry no
+  tagger and no date.
   `scripts/test_version_surface.py` fails the offline gates if these
   disagree, if the shipped manifest went stale, if the manifest version or
   any visible `vX.Y.Z` tag has no entry below, if a released entry has no
@@ -41,6 +42,12 @@ Release model (inferred practice, now pinned by `make test`):
   replacement and a later release that removes it.
 
 ## [Unreleased]
+
+## [0.15.0] - 2026-10-25
+
+The tags v0.12.0, v0.13.0 and v0.14.0 exist and have no GitHub release;
+v0.15.0 supersedes them. What each of those tags shipped is recorded in its
+own section below and is not repeated here.
 
 ### Changed
 
@@ -1601,7 +1608,8 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.15.0
 [0.14.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.14.0
 [0.13.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.13.0
 [0.12.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.12.0
