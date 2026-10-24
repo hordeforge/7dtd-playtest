@@ -99,9 +99,12 @@ jobs:
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           export GIT_CONFIG_VALUE_0="$auth"
           url="https://github.com/${GITHUB_REPOSITORY}.git"
-          if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
-            git clone --depth 1 --branch badges "$url" badge-repo
-          else
+          # Clone when the branch exists; the probe could not tell "absent"
+          # from "the probe failed", and its failure answer (a fresh root
+          # commit) is rejected by the branch that is there. A failed clone is
+          # the one signal that means the branch is genuinely missing.
+          if ! git clone --depth 1 --branch badges "$url" badge-repo 2>/dev/null; then
+            rm -rf badge-repo
             git init -q -b badges badge-repo
           fi
           cp "$RUNNER_TEMP/coverage.svg" badge-repo/
