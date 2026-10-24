@@ -139,9 +139,9 @@ namespace ZdtdPlaytest
                 try
                 {
                     var bag = player.bag;
-                    if (bag?.GetSlots() != null && leftToRemove > 0)
+                    if (BagSlotSnapshot(bag) != null && leftToRemove > 0)
                     {
-                        var slots = bag.GetSlots();
+                        var slots = BagSlotSnapshot(bag);
                         for (int i = 0; i < slots.Length && leftToRemove > 0; i++)
                         {
                             if (slots[i] == null || slots[i].IsEmpty()) continue;
@@ -156,7 +156,7 @@ namespace ZdtdPlaytest
                     // Also toolbelt if needed.
                     if (leftToRemove > 0 && player.inventory != null)
                     {
-                        int sc = player.inventory.GetSlotCount();
+                        int sc = player.inventory.SlotCount;
                         for (int i = 0; i < sc && leftToRemove > 0; i++)
                         {
                             var s = player.inventory.GetItem(i);

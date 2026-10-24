@@ -297,7 +297,7 @@ namespace ZdtdPlaytest
                     {
                         try
                         {
-                            p.equipment.SetSlotItem((int)EquipmentSlots.ClothingChest, iv, true);
+                            p.equipment.SetSlotItem((int)EquipmentSlots.ClothingChest, iv);
                         }
                         catch (Exception ex)
                         {
@@ -314,10 +314,10 @@ namespace ZdtdPlaytest
                 if (p?.equipment == null) return false;
                 try
                 {
-                    var items = p.equipment.GetItems();
-                    if (items == null) return false;
-                    foreach (var it in items)
+                    int slotCount = p.equipment.GetSlotCount();
+                    for (int slot = 0; slot < slotCount; slot++)
                     {
+                        var it = p.equipment.GetSlotItem(slot);
                         if (it == null || it.IsEmpty() || it.ItemClass == null) continue;
                         if (it.ItemClass.HasAnyTags(FastTags<TagGroup.Global>.Parse("parachute")))
                             return true;
@@ -763,8 +763,9 @@ namespace ZdtdPlaytest
                     int slots = -1;
                     if (bag != null)
                     {
-                        // ItemStack[] GetSlots() is the stock surface.
-                        var arr = bag.GetSlots();
+                        // The bag's stock slot array is the ItemStackGrid
+                        // behind Bag.ItemGrid since V3.3.0.
+                        var arr = Helpers.BagSlotSnapshot(bag);
                         slots = arr != null ? arr.Length : -1;
                     }
                     ctx.IntA = slots;
@@ -2511,7 +2512,7 @@ namespace ZdtdPlaytest
                             // Consume 5 wood stacks if present.
                             int need = 5;
                             var bag = ctx.Player.bag;
-                            var slots = bag?.GetSlots();
+                            var slots = Helpers.BagSlotSnapshot(bag);
                             if (slots != null)
                             {
                                 for (int i = 0; i < slots.Length && need > 0; i++)
@@ -2891,7 +2892,7 @@ namespace ZdtdPlaytest
                         {
                             var qst = QuestClass.CreateQuest(id);
                             if (qst == null) continue;
-                            qj.AddQuest(qst, true);
+                            qj.AddQuest(qst, Quest.QuestSource.QuestSystem, true);
                             used = id;
                             break;
                         }
@@ -2924,7 +2925,7 @@ namespace ZdtdPlaytest
                         try
                         {
                             var nq = QuestClass.CreateQuest("quest_whiteRiverCitizen1");
-                            if (nq != null) { qj.AddQuest(nq, true); qst = nq; }
+                            if (nq != null) { qj.AddQuest(nq, Quest.QuestSource.QuestSystem, true); qst = nq; }
                         }
                         catch { /* */ }
                     }
@@ -4247,7 +4248,7 @@ namespace ZdtdPlaytest
                     var qst = QuestClass.CreateQuest("quest_whiteRiverCitizen1");
                     if (qst != null)
                     {
-                        qj.AddQuest(qst, true);
+                        qj.AddQuest(qst, Quest.QuestSource.QuestSystem, true);
                         ctx.PlaceBlockType = 1;
                     }
                     ctx.IntA = qj?.quests != null ? qj.quests.Count : 0;

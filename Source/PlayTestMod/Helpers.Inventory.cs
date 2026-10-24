@@ -23,7 +23,10 @@ namespace ZdtdPlaytest
             {
                 var pkg = NetPackageManager.GetPackage<NetPackagePlayerInventory>();
                 if (pkg == null) { detail = "null PlayerInventory pkg"; return false; }
-                // Setup(player, toolbelt, bag, equipment, drag): push toolbelt+bag.
+                // Setup(player, changedToolbelt, changedBag, changedEquipment,
+                // changedDragAndDropItem). V3.3.0 sends the first three as
+                // optional serialized blobs (inventory, bag, equipment), so
+                // the two true flags push toolbelt and bag and nothing else.
                 pkg.Setup(player, true, true, false, false);
                 var cm = SingletonMonoBehaviour<ConnectionManager>.Instance;
                 if (cm == null) { detail = "no ConnectionManager"; return false; }
@@ -39,6 +42,17 @@ namespace ZdtdPlaytest
         }
 
 
+        /// <summary>
+        /// Snapshot of the bag's slots. V3.3.0 moved the storage into an
+        /// ItemStackGrid, so the stock ItemStack[] accessor is gone; the
+        /// clone keeps the read/mutate/SetSlots shape the cases use.
+        /// </summary>
+        public static ItemStack[] BagSlotSnapshot(Bag bag)
+        {
+            return bag?.ItemGrid?.CloneItems();
+        }
+
+
         /// <summary>Count bag slots that hold a real item (type != 0).</summary>
         public static int CountOccupiedBagSlots(EntityPlayerLocal p, out int totalSlots)
         {
@@ -47,7 +61,7 @@ namespace ZdtdPlaytest
             {
                 var bag = p.bag;
                 if (bag == null) return 0;
-                var slots = bag.GetSlots();
+                var slots = BagSlotSnapshot(bag);
                 if (slots == null) return 0;
                 totalSlots = slots.Length;
                 int n = 0;
@@ -90,14 +104,14 @@ namespace ZdtdPlaytest
             {
                 if (p.bag != null)
                 {
-                    var slots = p.bag.GetSlots();
+                    var slots = BagSlotSnapshot(p.bag);
                     if (slots != null)
                         for (int i = 0; i < slots.Length; i++)
                             if (slots[i].itemValue.type == itemType) n += slots[i].count;
                 }
                 if (p.inventory != null)
                 {
-                    int sc = p.inventory.GetSlotCount();
+                    int sc = p.inventory.SlotCount;
                     for (int i = 0; i < sc; i++)
                     {
                         var s = p.inventory.GetItem(i);
@@ -139,7 +153,7 @@ namespace ZdtdPlaytest
             try
             {
                 var bag = p.bag;
-                var slots = bag?.GetSlots();
+                var slots = BagSlotSnapshot(bag);
                 if (slots == null) return 0;
                 int total = slots.Length;
                 int occ = 0;
@@ -182,7 +196,7 @@ namespace ZdtdPlaytest
             if (p?.inventory == null || itemType <= 0) return -1;
             try
             {
-                int sc = p.inventory.GetSlotCount();
+                int sc = p.inventory.SlotCount;
                 for (int i = 0; i < sc; i++)
                 {
                     var s = p.inventory.GetItem(i);
@@ -193,7 +207,7 @@ namespace ZdtdPlaytest
                 // Move full bag stack into toolbelt so InstantAction DecHoldingItem can consume.
                 if (p.bag != null)
                 {
-                    var slots = p.bag.GetSlots();
+                    var slots = BagSlotSnapshot(p.bag);
                     if (slots != null)
                     {
                         for (int i = 0; i < slots.Length; i++)
@@ -246,7 +260,7 @@ namespace ZdtdPlaytest
                 int total = 0;
                 if (p.bag != null)
                 {
-                    var slots = p.bag.GetSlots();
+                    var slots = BagSlotSnapshot(p.bag);
                     if (slots != null)
                     {
                         for (int i = 0; i < slots.Length; i++)
@@ -260,7 +274,7 @@ namespace ZdtdPlaytest
                         try { p.bag.SetSlots(slots); } catch { /* */ }
                     }
                 }
-                int sc = p.inventory.GetSlotCount();
+                int sc = p.inventory.SlotCount;
                 for (int i = 0; i < sc; i++)
                 {
                     var s = p.inventory.GetItem(i);
@@ -317,7 +331,7 @@ namespace ZdtdPlaytest
             {
                 if (p.inventory != null)
                 {
-                    int sc = p.inventory.GetSlotCount();
+                    int sc = p.inventory.SlotCount;
                     for (int i = 0; i < sc; i++)
                     {
                         var s = p.inventory.GetItem(i);
@@ -338,7 +352,7 @@ namespace ZdtdPlaytest
             {
                 if (p.bag != null)
                 {
-                    var slots = p.bag.GetSlots();
+                    var slots = BagSlotSnapshot(p.bag);
                     if (slots != null)
                     {
                         for (int i = 0; i < slots.Length; i++)

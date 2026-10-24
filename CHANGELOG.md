@@ -42,6 +42,19 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Changed
+
+- The client mod builds against V3.3.0 b18. The game moved bag storage into
+  `ItemStackGrid` and removed the stock `Bag.GetSlots` accessor, renamed
+  `Inventory.GetSlotCount()` to the `SlotCount` property, dropped the
+  `isLocal` argument from `Equipment.SetSlotItem` and removed
+  `Equipment.GetItems`, and gave `QuestJournal.AddQuest` a `QuestSource`
+  argument. `Helpers.BagSlotSnapshot` reads the bag through the grid, the
+  equipment probes walk `GetSlotCount`/`GetSlotItem`, and quest seeding names
+  `Quest.QuestSource.QuestSystem`. `NetPackagePlayerInventory.Setup` keeps
+  the same arguments; only its body changed to the blob form, so the push
+  call site is unchanged.
+
 ## [0.14.0] - 2026-10-02
 
 ### Added
