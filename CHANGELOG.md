@@ -43,8 +43,24 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-05
+
 ### Changed
 
+- The client mod builds against 7 Days to Die V3.4.0 (b10); V3.3.0 (b18) is
+  the prior pin. The inventory surfaces the mod reads are unchanged in the
+  new assembly: `Bag.ItemGrid` still exposes the `ItemStackGrid`,
+  `ItemStackGrid.CloneItems` and `Inventory.SlotCount` still exist,
+  `Equipment.GetSlotCount`/`GetSlotItem` keep their signatures, and
+  `NetPackagePlayerInventory.Setup(EntityPlayerLocal, bool, bool, bool, bool)`
+  is byte-identical, so the C# source needed only the build pin.
+- Live V3.4.0 b10 run of the in-game capture path: a stock V3.4.0 client
+  joined a stock V3.4.0 dedicated server, the `turntable` provider suite
+  staged a `zombieBoe` and captured it through the on-demand recorder. The
+  client logged `clip complete turntable_boe frames=18` and
+  `PASS turntable/turntable_boe`; the orchestrator reported
+  `SUMMARY pass=1 fail=0` and `exit=0`. Details in
+  `docs/INGAME_VIDEO_CAPTURE.md`.
 - Live b18 run of the in-game capture path: a stock V3.3.0 b18 client joined
   a stock b18 dedicated server, a temporary external provider staged a
   `zombieBoe` turntable and a walking creature, and `capture_video.sh` muxed
@@ -52,8 +68,7 @@ Release model (inferred practice, now pinned by `make test`):
   disk (index gaps, so the mux is its 3-frame contiguous prefix); the walk
   case landed all 22 frames, muxed 5.5 s, and FAILed its collision probe
   (`PhysicsCapsule=<none>`, `collisionReady=False`). The machine half of the
-  in-game capture acceptance is now checked; the human-watch box stays open.
-  Details and hashes in `docs/INGAME_VIDEO_CAPTURE.md`.
+  in-game capture acceptance is checked; the human-watch box stays open.
 
 ## [0.15.0] - 2026-10-25
 
@@ -1620,7 +1635,8 @@ attack, real C2S; no tele-fakes):
 - Demo suite against stock dedicated: 83 pass / 0 fail on a fresh save;
   residual suites separately fail=0.
 
-[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/hordeforge/7dtd-playtest/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/hordeforge/7dtd-playtest/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.15.0
 [0.14.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.14.0
 [0.13.0]: https://github.com/hordeforge/7dtd-playtest/releases/tag/v0.13.0

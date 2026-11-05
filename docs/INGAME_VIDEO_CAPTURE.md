@@ -9,9 +9,9 @@ and the on-demand recorder `ClipRecorder` / `Helpers.BeginClip` / `EndClip`
 (recording decoupled from staging, ticked on the same gmUpdate hook) all
 shipped. The structural tests in `scripts/test_scenario_provider_surface.py`
 pin the public surface and the log contract; `make test` covers the rest
-offline. A live b18 run on 2026-11-05 captured and muxed real clips from a
-real client (see "Live run" below): the machine half of the acceptance is
-checked, the human-watch box is not. The cross-repo
+offline. Live runs on a b18 client and on a V3.4.0 b10 client on
+2026-11-05 captured real clips from a real client (see "Live run" below):
+the machine half of the acceptance is checked, the human-watch box is not. The cross-repo
 consumer of the capability, `7dtd-asset-pipeline`'s
 [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
 is implemented and generates `StagedClip` cases for assets declared with a
@@ -23,6 +23,42 @@ consecutive holds cannot overlay. Do not comma-list a motion look with
 (what a clip is reviewed for) and
 [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md) (what a clip is
 used for once reviewed).
+
+## Live run (2026-11-05): V3.4.0 b10 client, capture and mux
+
+Re-ran the capture path after the mod was retargeted to V3.4.0 (b10), on a
+V3.4.0 client copy joined to a V3.4.0 dedicated-server copy.
+
+Environment: server built from the V3.4.0 install (buildid `26310339`,
+`Assembly-CSharp.dll` sha256
+`00a962dbbb5ef1bb454368322221f9eb4148dc2d548ed2b77244f9bda5ecc167`),
+Navezgane, port 26990, telnet 8089, EAC off,
+`ServerDisabledNetworkProtocols=SteamNetworking`, `ServerAllowCrossplay=false`,
+`BuildCreate=true`. The dedicated install's `platform.cfg` carried
+`crossplatform=None` and `serverplatforms=Steam,XBL,PSN,LAN,Local,`, which the
+Steam-free Local client needs to pass PlatformAuth. Client: a reflink copy of
+the auto-updated V3.4.0 client (client `Assembly-CSharp.dll` sha256
+`cb54022ccc862aa673e0ee55dafe67d842b364c8`), launched under Proton 11.0 with
+`CLIENT_PLATFORM=local`.
+
+Runner: `playtest_run.py --provision attach --no-server --server stock
+--port 26990 --admin-port 8089 --suite turntable --skip-clean --no-fixtures`.
+The `turntable` suite comes from a temporary external provider (not committed;
+source at `.scratch/provider/ClipDemoProvider.cs`), rebuilt against the 0.16.0
+playtest assembly because an `IScenarioProvider` is discovered by exact
+interface identity, so a provider built against an older version registers
+nothing.
+
+Results:
+
+- The client mod armed `suites=turntable`, queued one case, joined, and
+  emitted `clip complete turntable_boe frames=18 -> playtest-shots/clips/turntable_boe`
+  then `PASS turntable/turntable_boe`; the orchestrator reported
+  `SUMMARY pass=1 fail=0` and `exit=0` in 62 s.
+- 15 frame files reached disk for the 18 the completion line reports, the
+  same requested-count-versus-files gap the b18 run recorded. Report:
+  `.scratch/logs/turntable-v340/report-1793873053.json` (sha256
+  `67800873db788aa66d71db0beb75c7dd2bcc8e2f21262439b68e8b65a84a62ab`).
 
 ## Live run (2026-11-05): b18 client, capture and mux
 

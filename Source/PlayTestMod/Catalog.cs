@@ -764,7 +764,8 @@ namespace ZdtdPlaytest
                     if (bag != null)
                     {
                         // The bag's stock slot array is the ItemStackGrid
-                        // behind Bag.ItemGrid since V3.3.0.
+                        // behind Bag.ItemGrid since V3.3.0, and V3.4.0 (b10)
+                        // still exposes it there.
                         var arr = Helpers.BagSlotSnapshot(bag);
                         slots = arr != null ? arr.Length : -1;
                     }

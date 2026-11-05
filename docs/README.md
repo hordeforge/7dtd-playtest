@@ -3,8 +3,9 @@
 Design and decision records for `7dtd-playtest`. The three feature documents
 state their Status at the top: what is implemented, and which acceptance
 criteria still need a real client or a human watching the evidence. The
-in-game capture path ran live on a b18 client on 2026-11-05 and produced
-muxed clips; only the human-watch criterion remains open there.
+in-game capture path ran live on a b18 client and again on a V3.4.0 b10
+client on 2026-11-05, and produced clips; only the human-watch criterion
+remains open there.
 [THREAT_MODEL.md](THREAT_MODEL.md) instead records its last-reviewed commit
 and owner.
 

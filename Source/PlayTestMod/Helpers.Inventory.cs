@@ -24,9 +24,10 @@ namespace ZdtdPlaytest
                 var pkg = NetPackageManager.GetPackage<NetPackagePlayerInventory>();
                 if (pkg == null) { detail = "null PlayerInventory pkg"; return false; }
                 // Setup(player, changedToolbelt, changedBag, changedEquipment,
-                // changedDragAndDropItem). V3.3.0 sends the first three as
-                // optional serialized blobs (inventory, bag, equipment), so
-                // the two true flags push toolbelt and bag and nothing else.
+                // changedDragAndDropItem). V3.3.0 moved the first three to
+                // optional serialized blobs (inventory, bag, equipment) and
+                // V3.4.0 (b10) keeps that body and signature, so the two true
+                // flags push toolbelt and bag and nothing else.
                 pkg.Setup(player, true, true, false, false);
                 var cm = SingletonMonoBehaviour<ConnectionManager>.Instance;
                 if (cm == null) { detail = "no ConnectionManager"; return false; }
@@ -44,8 +45,9 @@ namespace ZdtdPlaytest
 
         /// <summary>
         /// Snapshot of the bag's slots. V3.3.0 moved the storage into an
-        /// ItemStackGrid, so the stock ItemStack[] accessor is gone; the
-        /// clone keeps the read/mutate/SetSlots shape the cases use.
+        /// ItemStackGrid, V3.4.0 (b10) still exposes it through Bag.ItemGrid,
+        /// so the stock ItemStack[] accessor is gone; the clone keeps the
+        /// read/mutate/SetSlots shape the cases use.
         /// </summary>
         public static ItemStack[] BagSlotSnapshot(Bag bag)
         {
