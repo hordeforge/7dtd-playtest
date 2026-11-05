@@ -9,8 +9,9 @@ and the on-demand recorder `ClipRecorder` / `Helpers.BeginClip` / `EndClip`
 (recording decoupled from staging, ticked on the same gmUpdate hook) all
 shipped. The structural tests in `scripts/test_scenario_provider_surface.py`
 pin the public surface and the log contract; `make test` covers the rest
-offline. The acceptance boxes below that need a real client stay unchecked:
-no live run has been photographed and muxed by a person yet. The cross-repo
+offline. A live b18 run on 2026-11-05 captured and muxed real clips from a
+real client (see "Live run" below): the machine half of the acceptance is
+checked, the human-watch box is not. The cross-repo
 consumer of the capability, `7dtd-asset-pipeline`'s
 [docs/prds/0002-video-based-asset-review.md](https://github.com/hordeforge/7dtd-asset-pipeline/blob/main/docs/prds/0002-video-based-asset-review.md),
 is implemented and generates `StagedClip` cases for assets declared with a
@@ -22,6 +23,71 @@ consecutive holds cannot overlay. Do not comma-list a motion look with
 (what a clip is reviewed for) and
 [ASSET_VIDEO_FEEDBACK_LOOP.md](ASSET_VIDEO_FEEDBACK_LOOP.md) (what a clip is
 used for once reviewed).
+
+## Live run (2026-11-05): b18 client, capture and mux
+
+Ran the capture path end to end on a stock V3.3.0 b18 client joined to a
+stock V3.3.0 b18 dedicated server on this machine.
+
+Environment: server built from the b18 install (buildid `25661908`,
+`Assembly-CSharp.dll` sha256
+`e16ff9d539b8fbf64904c0bc090d502286a62464742a9396f0455936ad0beb87`),
+Navezgane, port 26970, telnet 8087, EAC off,
+`ServerDisabledNetworkProtocols=SteamNetworking`, `ServerAllowCrossplay=false`.
+Client: the Safehouse base b18 copy at
+`7dtd-sandbox/base/game` (`V 3.3.0 (b18)` in its client log), launched under
+Proton 11.0 with `CLIENT_PLATFORM=local`. The Steam client install itself was
+auto-updated to `V 3.4.0 (b10)` before this run, so it cannot join a b18
+server; the copy is the b18 client.
+
+The suite came from a temporary external provider (not committed, source at
+`.scratch/provider/ClipDemoProvider.cs`, sha256
+`4ab1c64365b442e8af513422189689082d23dbaa4903ea046784b5b4a3da1b90`)
+with two cases: `CaseDef.WalkEntity("zombieBoe")` (on-demand recorder) and a
+`CaseDef.StagedClip` turntable that spawns a `zombieBoe`, frames it with
+`Helpers.FrameStagedObject`, and rotates it through the hold. The host arm was:
+
+```bash
+PATH="$PWD/.local/uv-0.12.13:$PATH" PLAYTEST_PROVISION=attach \
+CLIENT_PLATFORM=local GAME=/home/maci/Desktop/hordeforge/7dtd-sandbox/base/game \
+./scripts/capture_video.sh --suite turntable \
+  --runner .scratch/run_attach.sh --out .scratch/capture-turntable
+```
+
+The runner is `playtest_run.py --provision attach --no-server --server stock
+--port 26970 --admin-port 8087 --suite <id> --skip-clean --no-fixtures`.
+
+Results:
+
+- The client mod armed `suites=turntable`, queued 1 case, joined the server,
+  and the case emitted `scene staged turntable_boe`, then
+  `clip complete turntable_boe frames=20 -> playtest-shots/clips/turntable_boe`
+  and `PASS turntable/turntable_boe` (`SUMMARY pass=1 fail=0`, `DONE
+  exit_hint=0`).
+- Every frame in `playtest-shots/clips/turntable_boe/` is a 3840x2160 PNG
+  written by the client's own `ScreenCapture`; no screenshot tool ran. 13
+  frame files exist out of the 20 the completion line reported, with index
+  gaps (`frame-0000`, `0001`, `0002`, `0004`, `0005`, `0007`, `0008`, `0010`,
+  `0011`, `0013`, `0014`, `0016`, `0019`). Frame indices are the requested
+  count, and a slow PNG write can miss one; the reported count is not a file
+  count.
+- `capture_video.sh` warned `expected 20 frames, found 13; muxing what
+  exists`, then muxed `turntable_boe.mp4` (h264, 3840x2160, 3 frames, 0.75 s)
+  from the contiguous prefix and built a contact sheet. The mp4, contact
+  sheet, `client.log` and run log all sit in `.scratch/capture-turntable/`.
+- A second case, `CaseDef.WalkEntity("zombieBoe")` with `superSize=1`, landed
+  all 22 of its reported frames and muxed a 22-frame 5.5 s clip, but the case
+  itself FAILed: its render probe reports `PhysicsCapsule=<none>` and
+  `collisionReady=False` (11 solid colliders present, ground ready), so the
+  case's collision gate did not accept the spawn. The clip is still valid
+  material; the case result is not the clip's verdict.
+
+Observed gaps, recorded rather than smoothed: the frame write can fall behind
+the requested cadence, the completion line reports requested frames rather
+than files on disk, a late frame can photograph the first-person arm after
+the camera is restored, and `ffmpeg`'s `frame-%04d` sequence stops at the
+first index gap, so "mux what exists" is the contiguous prefix only. Evidence
+and hashes are in the acceptance notes below.
 
 ## Problem
 
@@ -285,8 +351,9 @@ client window, and every frame in a clip is already the client window at
 | `stage` never returns true | Same as `Staged` today: case fails, no frames were worth taking |
 | `onHold` throws | Logged, hold continues (frames already being taken are not discarded) |
 | render thread cannot keep up with `clipFps` | Fewer frames land in `holdSeconds`; `clip complete` reports the real count, never a padded one |
-| last frame file missing after the poll window | `capture_video.sh` exits non-zero naming the missing `frame-XXXX.png` and the directory holding the frames that did land, rather than muxing a gap as if it were continuous motion |
-| reported and actual frame counts disagree | Warn, then mux what exists; the RESULT block prints both counts |
+| last frame file missing after the poll window | `capture_video.sh` exits non-zero naming the missing `frame-XXXX.png` and the directory holding the frames that did land, rather than muxing a gap as if it were continuous motion. Seen live 2026-11-05 on a `superSize=2` walk run: `frames=6` reported, `frame-0005.png` never appeared |
+| a frame write lands after the camera is restored | The late frame can photograph the first-person arm; the completion count still includes it. Seen live 2026-11-05 in the turntable contact sheet |
+| reported and actual frame counts disagree | Warn, then mux what exists; the RESULT block prints both counts. Observed live 2026-11-05: 13 of 20 files, with index gaps, so the `frame-%04d` mux is the contiguous prefix (3 frames); the warning names the real file count |
 | two staged clips reuse the same `id` in one run | `StagedClip` clears that clip's frame directory before each take, so the later take replaces the earlier evidence rather than mixing stale frames into it; name clip ids for what they show, same as any other case id |
 
 ## Implementation
@@ -307,8 +374,10 @@ client window, and every frame in a clip is already the client window at
 
 ## Acceptance criteria
 
-- [ ] A `StagedClip` case produces N frames written entirely by
-  `ScreenCapture.CaptureScreenshot`; no external screenshot tool runs.
+- [x] A `StagedClip` case produces N frames written entirely by
+  `ScreenCapture.CaptureScreenshot`; no external screenshot tool runs. Live
+  2026-11-05: `PASS turntable/turntable_boe` reported 20 frames, 13 PNG files
+  of 3840x2160 landed (index gaps), each written by the client process.
 - [x] `capture_video.sh` waits on the `clip complete` marker in a log written
   after its own run started (same anti-stale guard as `capture_frames.sh`).
   The marker parse is pinned by `scripts/test_capture_video_surface.py`,
@@ -317,18 +386,47 @@ client window, and every frame in a clip is already the client window at
 - [x] `capture_video.sh` refuses to start over a live client, same guard, same
   reason (`playtest_lock.py live`, refusing on both "something is up" and
   "the probe could not tell"). A dedicated or zdtd server does not block it.
-- [ ] The muxed clip survives in `.local/capture/` alongside the run's
+- [x] The muxed clip survives in `.local/capture/` alongside the run's
   `client.log` and run log, self-contained the same way a
-  `capture_frames.sh` run already is. The source frames deliberately stay in
-  the client's `playtest-shots/clips/<id>/` (a copy would double a
-  40-120 MB clip for evidence the mp4 already carries); the RESULT block
-  names that directory. That folder is the clip's only copy: one local disk,
-  gitignored, no off-host copy, and a re-run is a different frame, so move it
-  somewhere else before signing off on it (README "State, backups, and
-  recovery").
+  `capture_frames.sh` run already is. Live 2026-11-05 used `--out
+  .scratch/capture-turntable/` (the same layout): `turntable_boe.mp4`, its
+  contact sheet, `client.log` and the run log are all there. Caveat: the mp4
+  is 3 contiguous frames (0.75 s) because the source frames had index gaps
+  and `ffmpeg`'s `frame-%04d` sequence stops at the first gap. The source
+  frames deliberately stay in the client's `playtest-shots/clips/<id>/`; the
+  RESULT block names that directory. That folder is the clip's only copy: one
+  local disk, gitignored, no off-host copy, and a re-run is a different
+  frame, so move it somewhere else before signing off on it (README "State,
+  backups, and recovery").
 - [x] README's stable log contract table lists `clip complete`.
 - [ ] A person watches a real turntable clip of a real staged subject and
-  confirms it shows what the case claims it stages.
+  confirms it shows what the case claims it stages. The machine half ran: a
+  real `zombieBoe` was staged and rotated, the case passed, and a clip plus
+  contact sheet exist. The contact sheet shows the subject small and off
+  centre in several frames, and one late frame photographs the first-person
+  arm, so the clip is not yet fit to sign off; a person still has to watch it.
+
+### Live evidence (2026-11-05)
+
+Under git-ignored `.scratch/`:
+
+| File | sha256 |
+|---|---|
+| `.scratch/capture-turntable/turntable_boe.mp4` | `9543c3dda2f8a39b026f485fb08fea270000c59ad7e7014a83b0aaaec6e118a5` |
+| `.scratch/capture-turntable/turntable_boe-contact-sheet.png` | `ec54323e4b8e714032c9957affc9db032121dfef3d1263173842ce729539d398` |
+| `.scratch/capture-turntable/run.log` | `12ac7c0722768ce24291de91fd72a60cb3dff868a96e416ec3b099413f322b1a` |
+| `.scratch/capture-turntable/client.log` | `e87f74788fdc9714b012d80cac81ce337be67ad1b773654edf8b9a490fd9f33e` |
+| `.scratch/capture/walk_creature.mp4` | `1189a0219799219945382bb8d4513a8811467e52187ab57dfa66b7c656f149f5` |
+| `.scratch/capture/walk_creature-contact-sheet.png` | `3d42fbb6162bcf9d8dc4dc1b115d5c0f62dfa308e5d482db15a5a9e3348c9a5a` |
+| `.scratch/capture/run.log` | `7b25cb0ad6d439abecccc7123454b77b20933a34d9a1c41b0ce9433e2b2d1002` |
+| `.scratch/capture/client.log` | `8bbcf5e6279a523a219eb1d73a28db0d8e731ca5c1c0c1e9d84ce19ac8be68fe` |
+| `.scratch/provider/ClipDemoProvider.cs` | `4ab1c64365b442e8af513422189689082d23dbaa4903ea046784b5b4a3da1b90` |
+| `.scratch/provider/ClipDemoProvider.dll` | `7b77103056db536c8245dc8353f7cd6fe937fed9ca95d2e3838edf1823e3460f` |
+
+The walk run reported `clip complete walk_creature frames=22` with all 22
+files present, and the case FAILed on `collisionReady=False`; the turntable
+run PASSed with 13 of 20 files present. Both muxes exist, and neither is a
+human verdict.
 
 ## Open questions
 

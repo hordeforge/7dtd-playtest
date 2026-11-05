@@ -43,6 +43,18 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Changed
+
+- Live b18 run of the in-game capture path: a stock V3.3.0 b18 client joined
+  a stock b18 dedicated server, a temporary external provider staged a
+  `zombieBoe` turntable and a walking creature, and `capture_video.sh` muxed
+  both. The turntable `StagedClip` PASSed with 13 of 20 reported frames on
+  disk (index gaps, so the mux is its 3-frame contiguous prefix); the walk
+  case landed all 22 frames, muxed 5.5 s, and FAILed its collision probe
+  (`PhysicsCapsule=<none>`, `collisionReady=False`). The machine half of the
+  in-game capture acceptance is now checked; the human-watch box stays open.
+  Details and hashes in `docs/INGAME_VIDEO_CAPTURE.md`.
+
 ## [0.15.0] - 2026-10-25
 
 The tags v0.12.0, v0.13.0 and v0.14.0 exist and have no GitHub release;
