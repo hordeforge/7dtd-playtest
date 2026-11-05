@@ -70,6 +70,16 @@ Release model (inferred practice, now pinned by `make test`):
   (`PhysicsCapsule=<none>`, `collisionReady=False`). The machine half of the
   in-game capture acceptance is checked; the human-watch box stays open.
 
+### Fixed
+
+- A tag build re-fetched its own tag by commit, so the local ref read as
+  lightweight and `scripts/test_version_surface.py` failed this release's tag
+  run on the tag being released. checkout compares the peeled commit with the
+  sha `refs/tags/<tag>` resolves to, and an annotated tag resolves to its tag
+  object, so the two always differ and checkout fetches the commit into the tag
+  ref. `ci.yml` now fetches the tag being built by name after checkout, before
+  any gate reads the refs.
+
 ## [0.15.0] - 2026-10-25
 
 The tags v0.12.0, v0.13.0 and v0.14.0 exist and have no GitHub release;

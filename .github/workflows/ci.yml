@@ -35,6 +35,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
+      # checkout's testRef compares the peeled commit with the sha its own
+      # refs/tags/<tag> resolves to, and an annotated tag resolves to its tag
+      # object, so the two differ and checkout re-fetches the tag by commit:
+      # refs/tags/<tag> then names a commit, which test_version_surface.py
+      # reads as a lightweight tag and fails on a tag build's own tag. Fetch
+      # the tag being built by name, which restores its tag object, before any
+      # gate reads the refs.
+      - name: Restore the tag object
+        if: github.ref_type == 'tag'
+        run: git fetch --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           # A floating uv lets the resolver move under the gates without any
@@ -74,6 +84,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
+      # checkout's testRef compares the peeled commit with the sha its own
+      # refs/tags/<tag> resolves to, and an annotated tag resolves to its tag
+      # object, so the two differ and checkout re-fetches the tag by commit:
+      # refs/tags/<tag> then names a commit, which test_version_surface.py
+      # reads as a lightweight tag and fails on a tag build's own tag. Fetch
+      # the tag being built by name, which restores its tag object, before any
+      # gate reads the refs.
+      - name: Restore the tag object
+        if: github.ref_type == 'tag'
+        run: git fetch --force origin "+refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           # A floating uv lets the resolver move under the gates without any
