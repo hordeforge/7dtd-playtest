@@ -3238,6 +3238,26 @@ def test_client_launch_args_preserve_window_contract() -> None:
 
 
 
+def test_fresh_client_uses_created_window_contract() -> None:
+    source = ast.parse(Path(playtest_run.__file__).read_text())
+    main_node = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    candidates = [
+        n for n in ast.walk(main_node) if isinstance(n, ast.Try)
+        and any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                and c.func.attr == "ensure_sandbox_client" for s in n.body for c in ast.walk(s))
+    ]
+    setup = min(candidates, key=lambda n: len(list(ast.walk(n))))
+    scope = {"playtest_targets": playtest_targets, "target_plan": object(), "client_mods": [],
+             "client_instance_env": {"SB_SCREEN_ARGS": "-screen-width 1280 -screen-height 720"}}
+    declared = "-screen-fullscreen 0 -screen-width 2560 -screen-height 1440"
+    with mock.patch.object(playtest_targets, "ensure_sandbox_client",
+                           return_value={"SB_SCREEN_ARGS": declared}) as create:
+        exec(compile(ast.Module(body=setup.body, type_ignores=[]), "<client-setup>", "exec"), scope)
+    environment = scope["client_instance_env"]
+    assert isinstance(environment, dict) and environment["SB_SCREEN_ARGS"] == declared
+    create.assert_called_once_with(scope["target_plan"], wipe=True, mods=[])
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -3415,6 +3435,7 @@ def main() -> int:
             "lock_lost_abort_wiring",
             test_lock_lost_abort_wired_into_poll_loops,
         ),
+        ("fresh_client_window_contract", test_fresh_client_uses_created_window_contract),
         ("client_launch_args", test_client_launch_args_preserve_window_contract),
         ("client_mute_env_contract", test_client_mute_env_contract),
         ("client_mute_timeout", test_client_mute_timeout_is_validated),
