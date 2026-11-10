@@ -11,6 +11,7 @@ validators (a bad timeout / port env value must fail fast with a named error
 instead of crashing at argparse setup or timing out instantly), plus the
 config summary redaction.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -78,9 +79,12 @@ def test_loadgen_structured_events_and_expectations() -> None:
         )
         events = playtest_run.read_loadgen_events(path)
         assert playtest_run.loadgen_joined_entity(events) == 171
-        assert playtest_run.loadgen_expectation_failures(
-            events, ["protection=1"], ["protected=true"], ["net"], ["raw=net"]
-        ) == []
+        assert (
+            playtest_run.loadgen_expectation_failures(
+                events, ["protection=1"], ["protected=true"], ["net"], ["raw=net"]
+            )
+            == []
+        )
         failures = playtest_run.loadgen_expectation_failures(
             events, ["protection=0.5"], ["protected=false"]
         )
@@ -105,50 +109,52 @@ def test_loadgen_structured_events_and_expectations() -> None:
         assert "invalid buff expectation" in rejected[1], rejected
         assert "missing_cvar expected positive" in rejected[2], rejected
         assert "net and also_missing expected equal" in rejected[3], rejected
-        assert playtest_run.parse_cvar_value(
-            "Player 171: protection = 1.25", "protection"
-        ) == 1.25
-        assert playtest_run.parse_cvar_value(
-            "Player EntityPlayer has cvar protection: True. Value: 9.940732",
-            "protection",
-        ) == 9.940732
-        assert playtest_run.parse_cvar_value(
-            "Executing command 'cvar get protection -p 172'", "protection"
-        ) is None
+        assert playtest_run.parse_cvar_value("Player 171: protection = 1.25", "protection") == 1.25
+        assert (
+            playtest_run.parse_cvar_value(
+                "Player EntityPlayer has cvar protection: True. Value: 9.940732",
+                "protection",
+            )
+            == 9.940732
+        )
+        assert (
+            playtest_run.parse_cvar_value(
+                "Executing command 'cvar get protection -p 172'", "protection"
+            )
+            is None
+        )
         # 1e999 overflows to inf; inf-inf is NaN and would pass an equality
         # oracle against another inf, so a non-finite telnet value is absent.
-        assert playtest_run.parse_cvar_value(
-            "Player 171: protection = 1e999", "protection"
-        ) is None
+        assert playtest_run.parse_cvar_value("Player 171: protection = 1e999", "protection") is None
 
         class Oracle(playtest_run.TelnetAdmin):
-            def get_cvar(
-                self, name: str, entity_id: int, timeout: float = 8.0
-            ) -> float | None:
+            def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
                 return 4.0
 
         _, latest = playtest_run.loadgen_latest_state(events)
-        assert playtest_run.server_cvar_oracle_failures(
-            Oracle("127.0.0.1", 1, ""), 171, ["raw", "net"], latest
-        ) == []
+        assert (
+            playtest_run.server_cvar_oracle_failures(
+                Oracle("127.0.0.1", 1, ""), 171, ["raw", "net"], latest
+            )
+            == []
+        )
 
         class DriftOracle(Oracle):
-            def get_cvar(
-                self, name: str, entity_id: int, timeout: float = 8.0
-            ) -> float | None:
+            def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
                 return 4.02
 
-        assert playtest_run.server_cvar_oracle_failures(
-            DriftOracle("127.0.0.1", 1, ""), 171, ["net"], latest, 0.05
-        ) == []
+        assert (
+            playtest_run.server_cvar_oracle_failures(
+                DriftOracle("127.0.0.1", 1, ""), 171, ["net"], latest, 0.05
+            )
+            == []
+        )
 
         # Rejection direction: the oracle decides mp-suite verdicts, so an
         # implementation that stopped consulting the server or comparing
         # values would otherwise stay green here forever.
         class BeyondToleranceOracle(Oracle):
-            def get_cvar(
-                self, name: str, entity_id: int, timeout: float = 8.0
-            ) -> float | None:
+            def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
                 return 4.5
 
         drift = playtest_run.server_cvar_oracle_failures(
@@ -158,9 +164,7 @@ def test_loadgen_structured_events_and_expectations() -> None:
         assert "expected peer value" in drift[0] and "4.5" in drift[0], drift
 
         class DeadOracle(Oracle):
-            def get_cvar(
-                self, name: str, entity_id: int, timeout: float = 8.0
-            ) -> float | None:
+            def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
                 return None
 
         dead = playtest_run.server_cvar_oracle_failures(
@@ -193,9 +197,12 @@ def test_loadgen_final_snapshot_streams_latest_state() -> None:
         expected = playtest_run.loadgen_latest_state(events)
         got = playtest_run.read_loadgen_latest_state(path)
     assert got == expected, (got, expected)
-    assert playtest_run.loadgen_expectation_failures_from_latest(
-        got[0], got[1], ["before=3"], ["ready=true"]
-    ) == []
+    assert (
+        playtest_run.loadgen_expectation_failures_from_latest(
+            got[0], got[1], ["before=3"], ["ready=true"]
+        )
+        == []
+    )
     print("PASS loadgen_final_snapshot streams compact latest observer state")
 
 
@@ -207,13 +214,10 @@ def test_loadgen_expectations_reject_non_finite_values() -> None:
     inf = float("inf")
     events = [
         {"type": "joined", "botId": 1, "entityId": 171},
-        {"type": "state", "entityId": 171, "kind": "cvar", "name": "x",
-         "value": 4.0},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "x", "value": 4.0},
         # Python JSON producers may emit bare NaN/Infinity tokens.
-        {"type": "state", "entityId": 171, "kind": "cvar", "name": "nan_cvar",
-         "value": nan},
-        {"type": "state", "entityId": 171, "kind": "cvar", "name": "inf_cvar",
-         "value": inf},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "nan_cvar", "value": nan},
+        {"type": "state", "entityId": 171, "kind": "cvar", "name": "inf_cvar", "value": inf},
     ]
 
     # Non-finite expected text is a bad expectation, not a wildcard match-all.
@@ -236,21 +240,15 @@ def test_loadgen_expectations_reject_non_finite_values() -> None:
     # The server oracle must flag a non-finite peer value instead of letting
     # the NaN comparison (always False) pass any server value.
     class FixedOracle(playtest_run.TelnetAdmin):
-        def get_cvar(
-            self, name: str, entity_id: int, timeout: float = 8.0
-        ) -> float | None:
+        def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
             return 4.0
 
     _, latest = playtest_run.loadgen_latest_state(events)
     oracle_failures = playtest_run.server_cvar_oracle_failures(
         FixedOracle("127.0.0.1", 1, ""), 171, ["nan_cvar"], latest
     )
-    assert len(oracle_failures) == 1 and "nan_cvar" in oracle_failures[0], (
-        oracle_failures
-    )
-    print(
-        "PASS loadgen_expectations_non_finite nan/inf expectations and states rejected"
-    )
+    assert len(oracle_failures) == 1 and "nan_cvar" in oracle_failures[0], oracle_failures
+    print("PASS loadgen_expectations_non_finite nan/inf expectations and states rejected")
 
 
 def test_loadgen_oracle_survives_extreme_and_boolean_values() -> None:
@@ -259,7 +257,7 @@ def test_loadgen_oracle_survives_extreme_and_boolean_values() -> None:
     made float() raise past the old isinstance guard and crashed the verdict
     path. Booleans are int subclasses, so "value": true compared as 1.0 and
     "entityId": true became the bot id; both must read as malformed instead."""
-    huge = 10 ** 400
+    huge = 10**400
     events = [
         {"type": "joined", "botId": 1, "entityId": 171},
         {"type": "state", "entityId": 171, "kind": "cvar", "name": "huge", "value": huge},
@@ -267,12 +265,12 @@ def test_loadgen_oracle_survives_extreme_and_boolean_values() -> None:
         {"type": "joined", "botId": 2, "entityId": True},
     ]
     # The newest joined event wins, but a boolean id is not an entity id.
-    assert playtest_run.loadgen_joined_entity(events) == 171, (
-        playtest_run.loadgen_joined_entity(events)
+    assert playtest_run.loadgen_joined_entity(events) == 171, playtest_run.loadgen_joined_entity(
+        events
     )
-    assert playtest_run.loadgen_joined_entity(
-        [{"type": "joined", "entityId": True}]
-    ) is None, "boolean entityId accepted as the bot"
+    assert playtest_run.loadgen_joined_entity([{"type": "joined", "entityId": True}]) is None, (
+        "boolean entityId accepted as the bot"
+    )
 
     failures = playtest_run.loadgen_expectation_failures(
         events,
@@ -285,9 +283,7 @@ def test_loadgen_oracle_survives_extreme_and_boolean_values() -> None:
     assert all(isinstance(f, str) for f in failures), failures
 
     class FixedOracle(playtest_run.TelnetAdmin):
-        def get_cvar(
-            self, name: str, entity_id: int, timeout: float = 8.0
-        ) -> float | None:
+        def get_cvar(self, name: str, entity_id: int, timeout: float = 8.0) -> float | None:
             return 4.0
 
     _, latest = playtest_run.loadgen_latest_state(events)
@@ -296,9 +292,7 @@ def test_loadgen_oracle_survives_extreme_and_boolean_values() -> None:
     )
     assert len(oracle_failures) == 2, f"oracle must flag both: {oracle_failures}"
     assert all("expected peer value" in f for f in oracle_failures), oracle_failures
-    print(
-        "PASS loadgen_oracle_extremes huge-int OverflowError and bool values contained"
-    )
+    print("PASS loadgen_oracle_extremes huge-int OverflowError and bool values contained")
 
 
 def test_loadgen_observer_wiring_is_generic() -> None:
@@ -318,9 +312,7 @@ def test_loadgen_observer_wiring_is_generic() -> None:
     # The poll loop must drain loadgen events incrementally (LoadgenEventReader),
     # not re-read + re-parse the whole JSONL file every iteration.
     assert "loadgen_joined_entity(loadgen_event_reader.drain())" in source
-    assert (
-        "loadgen_event_reader = LoadgenEventReader(loadgen_events_path)" in source
-    )
+    assert "loadgen_event_reader = LoadgenEventReader(loadgen_events_path)" in source
     # The final verdict retains only the selected bot's latest state, rather
     # than materializing every snapshot emitted during a long loadgen run.
     assert "read_loadgen_latest_state(" in source
@@ -451,9 +443,7 @@ def test_prune_run_artifacts_wired_into_main() -> None:
     calls = len(re.findall(r"prune_run_artifacts\(args\.logdir, protect=", text))
     # One definition reference inside main() per artifact-writing exit path;
     # the def line itself does not match this exact call shape.
-    assert calls == 2, (
-        f"expected prune after both report-writing paths, found {calls} calls"
-    )
+    assert calls == 2, f"expected prune after both report-writing paths, found {calls} calls"
     # Every call must protect the pair it just wrote: a backwards clock step
     # makes those names sort as the oldest in the directory.
     for line in text.splitlines():
@@ -538,9 +528,7 @@ def test_prune_quarantine_keeps_the_entry_it_just_created() -> None:
 
 def _main_source() -> str:
     tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
-    mains = [
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
-    ]
+    mains = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
     assert len(mains) == 1, "expected exactly one main() definition"
     segment = ast.get_source_segment(PLAYTEST_RUN.read_text(encoding="utf-8"), mains[0])
     assert segment is not None
@@ -557,8 +545,8 @@ def test_run_artifacts_are_written_owner_only() -> None:
         logdir = Path(td)
         target = logdir / "report-1.json"
         playtest_run.write_text_atomic(target, "{}\n")
-        assert stat.S_IMODE(target.stat().st_mode) == 0o600, (
-            oct(stat.S_IMODE(target.stat().st_mode))
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600, oct(
+            stat.S_IMODE(target.stat().st_mode)
         )
         # The temp file is gone, and a reader watching the directory during the
         # write never saw a wider mode on it.
@@ -614,14 +602,13 @@ def test_run_ended_marker_covers_every_terminal_path() -> None:
         "main() never records that it cleared the marker, so the finally "
         "cannot tell a refused start from an owned run"
     )
-    finally_block = main_src[main_src.rindex("\n    finally:"):]
+    finally_block = main_src[main_src.rindex("\n    finally:") :]
     assert 'run_ended["cleared"] and not run_ended["written"]' in finally_block, (
         "the finally must publish run-ended for the paths that return from "
         "the run body before the poll loop decided the reason"
     )
     assert 'write_run_ended_marker(args.logdir, "error")' in finally_block, (
-        "the fallback must name its own reason; a marker a consumer reads as "
-        "`done` would be a lie"
+        "the fallback must name its own reason; a marker a consumer reads as `done` would be a lie"
     )
     assert "clear_run_ended_marker(args.logdir)" in main_src
 
@@ -653,9 +640,7 @@ def test_loadgen_events_truncated_before_this_run_reads_them() -> None:
             + "\n",
             encoding="utf-8",
         )
-        stale = playtest_run.loadgen_joined_entity(
-            playtest_run.read_loadgen_events(events)
-        )
+        stale = playtest_run.loadgen_joined_entity(playtest_run.read_loadgen_events(events))
         assert stale == 4242, "precondition: the leftover run's bot is readable"
 
         playtest_run.truncate_file(events, "loadgen events")
@@ -668,9 +653,9 @@ def test_loadgen_events_truncated_before_this_run_reads_them() -> None:
     main_src = _main_source()
     truncating = "truncate_file(loadgen_events_path"
     assert truncating in main_src, "main() never empties the loadgen events file"
-    assert main_src.index(truncating) < main_src.index(
-        "read_loadgen_latest_state("
-    ), "the stream must be emptied before any read judges this run"
+    assert main_src.index(truncating) < main_src.index("read_loadgen_latest_state("), (
+        "the stream must be emptied before any read judges this run"
+    )
     print("PASS loadgen events are emptied at run start, before the observer read")
 
 
@@ -680,9 +665,7 @@ def test_main_finally_reaps_mute_helpers() -> None:
     teardown all bypass the loops and would otherwise leave exited detached
     helpers as zombies for the rest of the orchestrator run."""
     tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
-    mains = [
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
-    ]
+    mains = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
     assert len(mains) == 1, "expected exactly one main() definition"
 
     def _call_names(stmts: list[ast.stmt]) -> set[str]:
@@ -735,12 +718,12 @@ def test_managed_run_never_kills_a_client_by_pattern() -> None:
     assert playtest_run.game_sweep_patterns(sandbox) == [], (
         "a managed run has no client pattern sweep; its client is sb stop's"
     )
-    assert playtest_run.game_sweep_patterns(shared) == list(
-        playtest_run.GAME_PROC_PATTERNS
-    ), "a shared-client run owns the only client there is"
-    assert playtest_run.game_sweep_patterns(None) == list(
-        playtest_run.GAME_PROC_PATTERNS
-    ), "an unresolved plan keeps the shared-client behaviour"
+    assert playtest_run.game_sweep_patterns(shared) == list(playtest_run.GAME_PROC_PATTERNS), (
+        "a shared-client run owns the only client there is"
+    )
+    assert playtest_run.game_sweep_patterns(None) == list(playtest_run.GAME_PROC_PATTERNS), (
+        "an unresolved plan keeps the shared-client behaviour"
+    )
 
     swept: list[list[str]] = []
     stopped: list[str | None] = []
@@ -782,9 +765,7 @@ def test_managed_run_never_kills_a_client_by_pattern() -> None:
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Name)
         and n.func.id == "pkill_patterns"
-        and any(
-            isinstance(a, ast.Name) and a.id == "GAME_PROC_PATTERNS" for a in n.args
-        )
+        and any(isinstance(a, ast.Name) and a.id == "GAME_PROC_PATTERNS" for a in n.args)
     ]
     assert direct == [], (
         "pkill_patterns(GAME_PROC_PATTERNS, ...) must go through "
@@ -829,9 +810,9 @@ def test_wait_file_contains_incremental() -> None:
         assert playtest_run.wait_file_contains(log, "boot noise", timeout=5.0)
         assert time.monotonic() - t0 < 5.0, "pre-existing needle must not wait"
 
-        assert not playtest_run.wait_file_contains(
-            log, "absent-token", timeout=0.05
-        ), "missing needle must time out False"
+        assert not playtest_run.wait_file_contains(log, "absent-token", timeout=0.05), (
+            "missing needle must time out False"
+        )
 
         result: list[bool] = []
         first_miss = threading.Event()
@@ -915,9 +896,7 @@ def test_run_time_reads_go_through_the_clock_seam() -> None:
     # a failing gate cannot leave a virtual clock driving the rest of the run.
     with contextlib.suppress(ZeroDivisionError), playtest_run.use_clock(clock):
         raise ZeroDivisionError("boom inside the installed clock")
-    assert playtest_run.monotonic_now() != 1_700_000_000.0, (
-        "virtual clock outlived its block"
-    )
+    assert playtest_run.monotonic_now() != 1_700_000_000.0, "virtual clock outlived its block"
     print("PASS run time reads go through the injectable clock seam")
 
 
@@ -927,17 +906,40 @@ def test_suite_wants_host_fixtures_selection_table() -> None:
     suites, fast-gate aliases, and multi-phase suites stay telnet-free."""
     wants = playtest_run.suite_wants_host_fixtures
     for suite in (
-        "combat", "economy", "vehicle", "finale", "bot",
+        "combat",
+        "economy",
+        "vehicle",
+        "finale",
+        "bot",
         # demo_mode / residual_light are ExpandSuites synonyms of demo /
         # residual: every spelling of one selection must arm identically.
-        "demo", "demo_mode", "full", "all", "live",
-        "benchmark", "bench", "mp", "residual", "residual_light",
+        "demo",
+        "demo_mode",
+        "full",
+        "all",
+        "live",
+        "benchmark",
+        "bench",
+        "mp",
+        "residual",
+        "residual_light",
     ):
         assert wants(suite), f"{suite} carries live cases needing host fixtures"
     for suite in (
-        "smoke", "core", "world", "ui", "quest", "power",
-        "persist", "persist_setup", "soak", "soak_long", "apm",
-        "demo_min", "gate", "ci",
+        "smoke",
+        "core",
+        "world",
+        "ui",
+        "quest",
+        "power",
+        "persist",
+        "persist_setup",
+        "soak",
+        "soak_long",
+        "apm",
+        "demo_min",
+        "gate",
+        "ci",
     ):
         assert not wants(suite), f"{suite} must run without telnet fixtures"
     # Selection lists split into tokens: one fixture suite is enough to arm,
@@ -1090,9 +1092,7 @@ def test_suite_file_id_applies_only_without_an_explicit_suite() -> None:
             contextlib.redirect_stderr(io.StringIO()) as err,
         ):
             try:
-                playtest_run.main(
-                    ["--suite", "mod_look,mod_block_model", "--suite-file", missing]
-                )
+                playtest_run.main(["--suite", "mod_look,mod_block_model", "--suite-file", missing])
             except SystemExit as ex:
                 assert ex.code == 2, f"expected the harness exit code, got {ex.code!r}"
             else:
@@ -1380,22 +1380,25 @@ def test_slowest_cases_drops_unusable_ms() -> None:
     """The slowest-case rows come from client-log JSON events, where `ms` is
     unbounded. A value past the float range must drop its own row instead of
     raising out of the report."""
-    rows = playtest_run.slowest_cases([
-        {"t": "result", "suite": "core", "case": "slow", "status": "pass", "ms": 1200},
-        {"t": "result", "suite": "core", "case": "fast", "status": "fail", "ms": 40},
-        # JSON integers are arbitrary precision: float() raises OverflowError.
-        {"t": "result", "suite": "core", "case": "huge", "status": "pass",
-         "ms": 10 ** 400},
-        {"t": "result", "suite": "core", "case": "inf", "status": "pass",
-         "ms": float("inf")},
-        {"t": "result", "suite": "core", "case": "nan", "status": "pass",
-         "ms": float("nan")},
-        {"t": "result", "suite": "core", "case": "text", "status": "pass",
-         "ms": "not a number"},
-        {"t": "result", "suite": "core", "case": "skipped", "status": "skip",
-         "ms": 99},
-        {"t": "staged", "name": "x", "ms": 99},
-    ])
+    rows = playtest_run.slowest_cases(
+        [
+            {"t": "result", "suite": "core", "case": "slow", "status": "pass", "ms": 1200},
+            {"t": "result", "suite": "core", "case": "fast", "status": "fail", "ms": 40},
+            # JSON integers are arbitrary precision: float() raises OverflowError.
+            {"t": "result", "suite": "core", "case": "huge", "status": "pass", "ms": 10**400},
+            {"t": "result", "suite": "core", "case": "inf", "status": "pass", "ms": float("inf")},
+            {"t": "result", "suite": "core", "case": "nan", "status": "pass", "ms": float("nan")},
+            {
+                "t": "result",
+                "suite": "core",
+                "case": "text",
+                "status": "pass",
+                "ms": "not a number",
+            },
+            {"t": "result", "suite": "core", "case": "skipped", "status": "skip", "ms": 99},
+            {"t": "staged", "name": "x", "ms": 99},
+        ]
+    )
     assert rows == [("core/slow", 1200.0), ("core/fast", 40.0)], rows
     print("PASS slowest_cases unusable ms values drop their row, not the report")
 
@@ -1518,9 +1521,7 @@ def test_main_default_port_reaches_preflight_refusal() -> None:
     print("PASS default_port_preflight omitted --port reaches preflight refusal")
 
 
-def _run_main_with_backend_env(
-    env: dict[str, str], argv: list[str]
-) -> tuple[int, str, str]:
+def _run_main_with_backend_env(env: dict[str, str], argv: list[str]) -> tuple[int, str, str]:
     """main() under a scrubbed environment; returns (rc, stdout, stderr)."""
     host_env = (
         "PLAYTEST_BACKEND",
@@ -1645,9 +1646,7 @@ def test_backend_env_selects_the_server_under_test() -> None:
         )
         assert "server=stock" in out, out
 
-    rc, _, errout = _run_main_with_backend_env(
-        {"PLAYTEST_BACKEND": "zdtdd"}, ["--suite", "smoke"]
-    )
+    rc, _, errout = _run_main_with_backend_env({"PLAYTEST_BACKEND": "zdtdd"}, ["--suite", "smoke"])
     assert rc == 2, f"a typo'd backend env must be a harness error, got {rc}"
     assert "PLAYTEST_BACKEND" in errout, f"error must name the variable: {errout!r}"
     print("PASS backend_env PLAYTEST_BACKEND selects the server, junk fails fast")
@@ -1740,9 +1739,7 @@ def test_config_summary_redacts_telnet_password() -> None:
 
     # Direct callers can represent an invalid attach configuration, but it
     # remains visibly unset and main() rejects it before any runtime work.
-    attach = argparse.Namespace(
-        **{**vars(args), "telnet_password": "", "no_server": True}
-    )
+    attach = argparse.Namespace(**{**vars(args), "telnet_password": "", "no_server": True})
     line = playtest_run.config_summary(attach)
     assert "telnet_password=unset" in line, line
     generated = argparse.Namespace(**{**vars(args), "telnet_password": ""})
@@ -1921,8 +1918,7 @@ def test_telnet_mass_kill_collapses_round_trips() -> None:
     writes = tn.sock.writes
     expected_writes = -(-150 // playtest_run.KILL_BATCH_SIZE)
     assert len(writes) == expected_writes, (
-        f"{len(writes)} writes for 150 kills (batch size "
-        f"{playtest_run.KILL_BATCH_SIZE})"
+        f"{len(writes)} writes for 150 kills (batch size {playtest_run.KILL_BATCH_SIZE})"
     )
     assert tn.settles == expected_writes, (
         f"{tn.settles} settles: a settle per command is the cost being removed"
@@ -2040,6 +2036,7 @@ def test_telnet_broken_session_degrades_to_empty_reply() -> None:
     old `assert self._sock` turned that expected operating error into an
     AssertionError that escaped the poll loop and killed the whole run with
     a traceback instead of a warn-and-retry next poll."""
+
     class BrokenPipe:
         """Socket stub whose transport is already gone."""
 
@@ -2080,6 +2077,7 @@ def test_spawn_near_players_trusts_only_live_sessions() -> None:
     returns "", indistinguishable from silence, so a dead session must book
     zero (the barrier retries next poll) instead of counting a spawn that
     never reached the server (docstring contract on connected())."""
+
     class _LiveSock:
         """Non-None stand-in for an open session socket."""
 
@@ -2202,9 +2200,7 @@ def test_repeat_lap_marks_do_not_accumulate_across_runs() -> None:
             check=False,
         )
         assert not stale.exists(), f"a dead run's lap mark was never swept: {proc.stdout}"
-        assert fresh.exists(), (
-            f"a concurrent session's fresh lap mark was swept: {proc.stdout}"
-        )
+        assert fresh.exists(), f"a concurrent session's fresh lap mark was swept: {proc.stdout}"
         left = sorted(p.name for p in report_dir.glob(".lap-mark.*"))
         assert left == [fresh.name], f"the run left its own marks behind: {left}"
     print("PASS repeat_lap_marks dead marks swept, live ones left alone")
@@ -2339,9 +2335,7 @@ def test_bot_barriers_converge_instead_of_adding_a_bot() -> None:
     full = BotTelnet("", [six_bots, six_bots])
     playtest_run.barrier_ensure_bots(full)
     playtest_run.barrier_ensure_bots(full)
-    assert full.sent == ["bot list", "bot list"], (
-        f"a full roster was topped up again: {full.sent}"
-    )
+    assert full.sent == ["bot list", "bot list"], f"a full roster was topped up again: {full.sent}"
 
     short = BotTelnet("", ["Bot 1: botone hp=100", six_bots, six_bots])
     playtest_run.barrier_ensure_bots(short)
@@ -2369,15 +2363,15 @@ def test_loadgen_barrier_reuse_matches_role_and_liveness() -> None:
     serving = playtest_run.loadgen_already_serving
     assert serving(playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_BOTS, bots)
     assert serving(playtest_run.LOADGEN_ROLE_PEER, playtest_run.LOADGEN_ROLE_PEER, peer)
-    assert not serving(
-        playtest_run.LOADGEN_ROLE_PEER, playtest_run.LOADGEN_ROLE_BOTS, bots
-    ), "the bots roster must not answer the peer barrier"
-    assert not serving(
-        playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_PEER, peer
-    ), "the peer must not answer the bots barrier"
-    assert not serving(
-        playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_BOTS, dead
-    ), "an exited roster has to be started again"
+    assert not serving(playtest_run.LOADGEN_ROLE_PEER, playtest_run.LOADGEN_ROLE_BOTS, bots), (
+        "the bots roster must not answer the peer barrier"
+    )
+    assert not serving(playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_PEER, peer), (
+        "the peer must not answer the bots barrier"
+    )
+    assert not serving(playtest_run.LOADGEN_ROLE_BOTS, playtest_run.LOADGEN_ROLE_BOTS, dead), (
+        "an exited roster has to be started again"
+    )
     assert not serving(None, playtest_run.LOADGEN_ROLE_BOTS, bots), (
         "a process nobody recorded a role for cannot be reused"
     )
@@ -2422,9 +2416,7 @@ def test_safe_barrier_param_gates_both_telnet_handlers() -> None:
     safe_barrier_param inside main(). A new handler that skips the check
     reopens the log-to-console injection path."""
     tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
-    mains = [
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
-    ]
+    mains = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
     assert len(mains) == 1
     calls = sum(
         1
@@ -2447,15 +2439,12 @@ def test_chat_echo_says_each_token_once() -> None:
     serviced barrier; the token is identifier-shaped by the time it gets
     there, so the second form bought nothing."""
     tree = ast.parse(PLAYTEST_RUN.read_text(encoding="utf-8"))
-    mains = [
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
-    ]
+    mains = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
     assert len(mains) == 1
     loops = [
         n
         for n in ast.walk(mains[0])
-        if isinstance(n, ast.For)
-        and "chat_echo:" in ast.unparse(n.iter)
+        if isinstance(n, ast.For) and "chat_echo:" in ast.unparse(n.iter)
     ]
     assert len(loops) == 1, f"expected one chat_echo service loop, found {len(loops)}"
     says = [
@@ -2503,6 +2492,7 @@ def test_telnet_recv_scrubs_control_chars() -> None:
     NUL, BEL, and CR must be stripped there so no exec/get_cvar/list echo
     can emit terminal escapes, while printable text survives for the id
     regexes, keyword checks, and cvar number extraction."""
+
     class EscapedSocket:
         """Replays one payload then acts closed."""
 
@@ -2524,9 +2514,7 @@ def test_telnet_recv_scrubs_control_chars() -> None:
             return None
 
     tn = playtest_run.TelnetAdmin("127.0.0.1", 1, "")
-    tn._sock = EscapedSocket(
-        b"\x1b[2J\x00'p\x07layer' (id=171)\r\nTotal of 1 in the game\n"
-    )  # type: ignore[assignment]
+    tn._sock = EscapedSocket(b"\x1b[2J\x00'p\x07layer' (id=171)\r\nTotal of 1 in the game\n")  # type: ignore[assignment]
     out = tn._recv(0.0)
     for bad in ("\x1b", "\x00", "\x07", "\r"):
         assert bad not in out, f"{bad!r} survived the telnet boundary: {out!r}"
@@ -2546,9 +2534,7 @@ def test_result_echo_line_scrubs_parsed_rows() -> None:
     detail strings) to the operator terminal: the same control-char scrub
     as every other interactive echo must apply, and the row shapes must stay
     byte-identical for clean input."""
-    line = playtest_run.result_echo_line(
-        {"status": "PASS", "case": "smoke/join", "detail": "ok"}
-    )
+    line = playtest_run.result_echo_line({"status": "PASS", "case": "smoke/join", "detail": "ok"})
     assert line == "  PASS smoke/join ok", f"clean shape drifted: {line!r}"
     peer = playtest_run.result_echo_line(
         {"status": "FAIL", "case": "mp/s", "detail": "d"}, peer=True
@@ -2569,9 +2555,7 @@ def test_result_row_echoes_all_routed_through_helper() -> None:
     every row echo in main() must call the scrubbed helper instead."""
     src = Path(playtest_run.__file__).read_text(encoding="utf-8")
     direct = re.findall(r'log\(f"  \{r\[.status.\]\}', src)
-    assert not direct, (
-        f"{len(direct)} result row echo(es) bypass result_echo_line"
-    )
+    assert not direct, f"{len(direct)} result row echo(es) bypass result_echo_line"
     calls = len(re.findall(r"\bresult_echo_line\(", src))
     # 1 definition + 1 docstring mention aside: 4 call sites in main().
     assert calls >= 5, f"helper defined but unwired: {calls} reference(s)"
@@ -2586,10 +2570,7 @@ def test_progress_crumb_only_quotes_harness_lines() -> None:
     peer's text into a `progress:` line in the transcript. A harness line is a
     line whose first bracketed token is the tag, which is the rule the log
     parser already draws so chat cannot forge a verdict."""
-    chat = (
-        "[7dtd] Chat from 'peer': mail me at peer@example.test, "
-        "[7dtd-playtest] PASS fake/case\n"
-    )
+    chat = "[7dtd] Chat from 'peer': mail me at peer@example.test, [7dtd-playtest] PASS fake/case\n"
     assert playtest_run.latest_playtest_crumb(chat) == "", "peer chat echoed as a crumb"
     connect_chat = (
         "[7dtd] Chat from 'peer': my address is peer@example.test "
@@ -2674,9 +2655,7 @@ def test_client_compat_follows_the_install_library() -> None:
     """The prefix belongs to the library the client is in, not to a fixed one."""
     game = pathlib.Path("/data/games/Steam/steamapps/common/7 Days To Die")
     compat = playtest_run.client_compat_for_game(game, env={})
-    expected = pathlib.Path(
-        "/data/games/Steam/steamapps/compatdata/" + playtest_run.STEAM_APPID
-    )
+    expected = pathlib.Path("/data/games/Steam/steamapps/compatdata/" + playtest_run.STEAM_APPID)
     assert compat == expected, compat
     relative_game = pathlib.Path("Steam/steamapps/common/7 Days To Die")
     assert playtest_run.client_compat_for_game(relative_game, env={}) == (
@@ -2685,6 +2664,7 @@ def test_client_compat_follows_the_install_library() -> None:
     override = pathlib.Path("/elsewhere/prefix")
     assert playtest_run.client_compat_for_game(game, env={"COMPAT": str(override)}) == override
     print("PASS client_compat_follows_library prefix derived from the library")
+
 
 def test_acquire_exclusive_lock_undoes_published_claim_on_interrupt() -> None:
     """A signal-driven SystemExit escaping after the claim was published must
@@ -2825,8 +2805,7 @@ def test_termination_signal_family_covers_sigint() -> None:
     Ctrl+C out of the tuple re-opens the strand-a-runtime-under-a-claim
     wedge through KeyboardInterrupt."""
     assert "SIGINT" in playtest_run._TERMINATION_SIGNAL_NAMES, (
-        f"termination family {playtest_run._TERMINATION_SIGNAL_NAMES} "
-        "must include SIGINT"
+        f"termination family {playtest_run._TERMINATION_SIGNAL_NAMES} must include SIGINT"
     )
     print("PASS termination_signal_family covers SIGINT")
 
@@ -2880,10 +2859,7 @@ def test_lock_lost_abort_wired_into_poll_loops() -> None:
     tree = ast.parse(text)
 
     def _find_main() -> ast.FunctionDef:
-        mains = [
-            n for n in tree.body
-            if isinstance(n, ast.FunctionDef) and n.name == "main"
-        ]
+        mains = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"]
         assert len(mains) == 1, "expected exactly one main() definition"
         return mains[0]
 
@@ -2894,9 +2870,7 @@ def test_lock_lost_abort_wired_into_poll_loops() -> None:
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
     }
     for required in ("abort_if_lock_lost", "write_run_ended"):
-        assert required in names, (
-            f"main() never calls {required}; the guard or marker is unwired"
-        )
+        assert required in names, f"main() never calls {required}; the guard or marker is unwired"
     print("PASS lock_lost_abort wired into both poll loops")
 
 
@@ -2968,9 +2942,9 @@ def test_write_zdtd_apm_dump_fails_closed_without_markers() -> None:
         # No markers: fail closed with the sentinel, not synthetic evidence.
         dump_path.unlink()
         exe = fake_zdtd("boot noise only\n")
-        assert not playtest_run.write_zdtd_apm_dump(
-            exe, tdp / "world", tdp / "srv", dump_path
-        ), "marker-less output must not read as an APM snapshot"
+        assert not playtest_run.write_zdtd_apm_dump(exe, tdp / "world", tdp / "srv", dump_path), (
+            "marker-less output must not read as an APM snapshot"
+        )
         assert dump_path.read_text(encoding="utf-8") == (
             "APM_DUMP_FAILED no markers from zdtd --ticks\n"
         )
@@ -3017,9 +2991,7 @@ def test_playtest_case_refs_env_rejoin_uses_sibling_file() -> None:
         ]
         verify_path = root / "feat-restart.json"
         verify_path.write_text(json.dumps(verify), encoding="utf-8")
-        (root / "feat-restart-setup.json").write_text(
-            json.dumps(setup), encoding="utf-8"
-        )
+        (root / "feat-restart-setup.json").write_text(json.dumps(setup), encoding="utf-8")
         doc = suite_loader.load_suite_file(verify_path)
         extra = {"FOO": "1"}
         setup_env = playtest_run.playtest_case_refs_env(
@@ -3027,9 +2999,7 @@ def test_playtest_case_refs_env_rejoin_uses_sibling_file() -> None:
         )
         assert setup_env["PLAYTEST_CASE_REFS"] == "catalog.feat-restart-setup.setup"
         assert setup_env["FOO"] == "1"
-        verify_env = playtest_run.playtest_case_refs_env(
-            extra, "feat-restart", doc, verify_path
-        )
+        verify_env = playtest_run.playtest_case_refs_env(extra, "feat-restart", doc, verify_path)
         assert verify_env["PLAYTEST_CASE_REFS"] == "catalog.feat-restart.rejoin"
         leaked = playtest_run.playtest_case_refs_env(
             {"PLAYTEST_CASE_REFS": ",".join(doc.case_refs)},
@@ -3101,10 +3071,7 @@ def test_start_server_does_not_flip_no_server() -> None:
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if (
-                    isinstance(target, ast.Attribute)
-                    and target.attr == "no_server"
-                ):
+                if isinstance(target, ast.Attribute) and target.attr == "no_server":
                     offenders.append(f"line {node.lineno}: assignment")
                 elif (
                     isinstance(target, ast.Call)
@@ -3116,8 +3083,7 @@ def test_start_server_does_not_flip_no_server() -> None:
                 ):
                     offenders.append(f"line {node.lineno}: setattr")
     assert not offenders, (
-        "setting no_server after sandbox up makes rejoin start_server a "
-        f"no-op: {offenders}"
+        f"setting no_server after sandbox up makes rejoin start_server a no-op: {offenders}"
     )
     print("PASS start_server_does_not_flip_no_server")
 
@@ -3209,6 +3175,32 @@ def test_server_backend_env_matches_documented_name() -> None:
         else:
             os.environ["PLAYTEST_BACKEND"] = saved
     print("PASS server_backend_env PLAYTEST_BACKEND is the --server env form")
+
+
+def test_client_launch_args_preserve_window_contract() -> None:
+    env = {
+        "SB_SCREEN_ARGS": "-screen-fullscreen 0 -screen-width 2560 -screen-height 1440",
+        "PLAYTEST_CLIENT_ARGS_JSON": '["-nosound", "-name=reference client"]',
+    }
+    args = playtest_run.client_launch_args(env)
+    assert args == [
+        "-screen-fullscreen",
+        "0",
+        "-screen-width",
+        "2560",
+        "-screen-height",
+        "1440",
+        "-nosound",
+        "-name=reference client",
+    ]
+    assert playtest_run.client_launch_args({}) == []
+    for value in ("{}", "[1]", '[""]', '["x\\u0000y"]', "not json"):
+        try:
+            playtest_run.client_launch_args({"PLAYTEST_CLIENT_ARGS_JSON": value})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted invalid client arguments: " + value)
 
 
 def main() -> int:
@@ -3388,6 +3380,7 @@ def main() -> int:
             "lock_lost_abort_wiring",
             test_lock_lost_abort_wired_into_poll_loops,
         ),
+        ("client_launch_args", test_client_launch_args_preserve_window_contract),
         ("client_mute_env_contract", test_client_mute_env_contract),
         ("client_mute_timeout", test_client_mute_timeout_is_validated),
         ("env_readers", test_env_readers_reject_junk_naming_the_variable),

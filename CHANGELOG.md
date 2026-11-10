@@ -43,6 +43,10 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Added
+
+- `PLAYTEST_CLIENT_ARGS_JSON` forwards explicit client arguments after the Safehouse window contract. Virtual-display reference runs can pass `-nosound` without changing ordinary defaults. Invalid arrays fail before launch.
+
 ## [0.16.0] - 2026-11-05
 
 ### Changed

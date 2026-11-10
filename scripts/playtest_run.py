@@ -969,6 +969,16 @@ def playtest_case_refs_env(
     return out
 
 
+def client_launch_args(env: Mapping[str, str]) -> list[str]:
+    """Keep the Safehouse window contract and append explicit client arguments."""
+    extra = json.loads(env.get("PLAYTEST_CLIENT_ARGS_JSON", "[]"))
+    if not isinstance(extra, list) or any(
+        not isinstance(arg, str) or not arg or "\0" in arg for arg in extra
+    ):
+        raise ValueError("PLAYTEST_CLIENT_ARGS_JSON must be an array of nonempty argument strings")
+    return (env.get("SB_SCREEN_ARGS") or "").split() + extra
+
+
 def start_client(
     port: int,
     suite: str,
@@ -1008,7 +1018,7 @@ def start_client(
     # have to be visible at once, so the instance's window contract
     # (SB_SCREEN_ARGS from `sb env`, windowed 1280x720 by default) is passed
     # here rather than left to whatever the Proton prefix last saved.
-    launch_args = (env.get("SB_SCREEN_ARGS") or "").split()
+    launch_args = client_launch_args(env)
     proc = _popen_to_logfile(
         ["bash", str(launch), *launch_args],
         client_launch_log,

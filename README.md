@@ -254,6 +254,7 @@ in the log without rerunning with `--help`.
 | `PLAYTEST_TELNET_PASSWORD` | *(empty for managed)* | Used for stock `--no-server` attach, which requires an explicit credential (prefer the env var over the CLI). Managed stock servers use the game's native empty-password loopback listener and ignore this value; zdtd attach needs none. See [Host orchestrator secrets](#host-orchestrator-secrets). |
 | `PLAYTEST_PEER_CLIENT_NAME` / `_COMPAT` / `_SUITE` | empty | Defaults for the matching `--peer-client-*` flags (all three must stay paired as documented below) |
 | `PLAYTEST_CLIENT_LOG` | *(resolved)* | Client log the `scripts/capture_*.sh` helpers watch, and what `--print-client-log` prints before it exits. A run parses this path when it is set; unset it to have the run resolve the log from the client instance's own install. Unset resolves through `COMPAT`, then the client install found in the Steam libraries, so a library on another disk or a managed Safehouse instance resolves the same way a run does |
+| `PLAYTEST_CLIENT_ARGS_JSON` | `[]` | Additional client arguments as a JSON array of nonempty strings, appended to the Safehouse window arguments. For silent virtual-display captures use `["-nosound"]`. Arguments are passed directly without shell evaluation; existing defaults are unchanged. |
 
 Booleans (`PLAYTEST_READONLY`, `PLAYTEST_TRACE_ENTITY`, `CLIENT_MUTE`) take
 `1` / `true` / `yes` / `on` or `0` / `false` / `no` / `off`, case-insensitive
