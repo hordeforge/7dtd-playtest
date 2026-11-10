@@ -43,6 +43,10 @@ Release model (inferred practice, now pinned by `make test`):
 
 ## [Unreleased]
 
+### Fixed
+
+- Fresh managed clients read their window arguments after Safehouse creates the instance. Previously a first run cached the 1280x720 fallback before creation and ignored the declared HD resolution.
+
 ### Added
 
 - `PLAYTEST_CLIENT_ARGS_JSON` forwards explicit client arguments after the Safehouse window contract. Virtual-display reference runs can pass `-nosound` without changing ordinary defaults. Invalid arrays fail before launch.

@@ -3518,7 +3518,12 @@ def main(argv: list[str] | None = None) -> int:
         # must not have touched it.
         if target_plan.is_sandbox:
             try:
-                playtest_targets.ensure_sandbox_client(target_plan, wipe=True, mods=client_mods)
+                client_contract = playtest_targets.ensure_sandbox_client(
+                    target_plan, wipe=True, mods=client_mods
+                )
+                client_instance_env["SB_SCREEN_ARGS"] = client_contract.get(
+                    "SB_SCREEN_ARGS"
+                ) or playtest_targets.sandbox_screen_args(target_plan)
             except playtest_targets.TargetError as ex:
                 err(f"sandbox client bring-up failed: {ex}")
                 return 2
