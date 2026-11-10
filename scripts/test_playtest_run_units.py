@@ -3211,6 +3211,33 @@ def test_server_backend_env_matches_documented_name() -> None:
     print("PASS server_backend_env PLAYTEST_BACKEND is the --server env form")
 
 
+def test_client_launch_args_preserve_window_contract() -> None:
+    env = {
+        "SB_SCREEN_ARGS": "-screen-fullscreen 0 -screen-width 2560 -screen-height 1440",
+        "PLAYTEST_CLIENT_ARGS_JSON": '["-nosound", "-name=reference client"]',
+    }
+    args = playtest_run.client_launch_args(env)
+    assert args == [
+        "-screen-fullscreen",
+        "0",
+        "-screen-width",
+        "2560",
+        "-screen-height",
+        "1440",
+        "-nosound",
+        "-name=reference client",
+    ]
+    assert playtest_run.client_launch_args({}) == []
+    for value in ("{}", "[1]", '[""]', '["x\\u0000y"]', "not json"):
+        try:
+            playtest_run.client_launch_args({"PLAYTEST_CLIENT_ARGS_JSON": value})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("accepted invalid client arguments: " + value)
+
+
+
 def main() -> int:
     failures = 0
     for name, fn in (
@@ -3388,6 +3415,7 @@ def main() -> int:
             "lock_lost_abort_wiring",
             test_lock_lost_abort_wired_into_poll_loops,
         ),
+        ("client_launch_args", test_client_launch_args_preserve_window_contract),
         ("client_mute_env_contract", test_client_mute_env_contract),
         ("client_mute_timeout", test_client_mute_timeout_is_validated),
         ("env_readers", test_env_readers_reject_junk_naming_the_variable),
